@@ -71,6 +71,8 @@ describe("making a space", () => {
     assert.deepEqual(inputs.map((t) => t.attributes.some(([n]) => n === "required")), [false, false, false]);
     assert.ok(text.includes("A private or sealed space needs no category. A public or oracle space needs one to three."));
     assert.ok(text.includes("Its members and the operator. Its name, title, description, categories and who to ask are still public."));
+    // A signed-only space takes posts an app connection signed, and the box says so.
+    assert.ok(text.includes("Accept signed posts only. A post then carries a signature anyone can check: its author's own, or an app connection's that its author allowed, whose key the service holds while the app is connected. You can change this later."));
     const offered = tags(text).filter((t) => t.name === "option").map((t) => t.attributes.find(([n]) => n === "value")?.[1]);
     assert.ok(offered.includes("vllm") && offered.includes("general"));
     assert.ok(!offered.includes("roo-code"), "a retired category takes no new spaces");

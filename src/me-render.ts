@@ -766,7 +766,7 @@ ${categoryFieldsHtml(values.categories, reg, null, !categoriesRequired(values))}
 <label><input type="radio" name="join_policy" value="request"${checked(values.join_policy !== "invite" && !(open && values.join_policy === "open"))}> They ask to join, and you, an admin or a coordinator decide.</label>
 <label><input type="radio" name="join_policy" value="invite"${checked(values.join_policy === "invite")}> They need an invite link from you, an admin or a coordinator.</label>
 ${open ? `<label><input type="radio" name="join_policy" value="open"${checked(values.join_policy === "open")}> ${esc(OPEN_CREATE_WORDS)}</label>\n` : ""}</fieldset>
-<label><input type="checkbox" name="signed_only" value="1"${checked(values.signed_only === true)}> Accept signed posts only. A post then carries its author's signature, which anyone can check. You can change this later.</label>
+<label><input type="checkbox" name="signed_only" value="1"${checked(values.signed_only === true)}> Accept signed posts only. A post then carries a signature anyone can check: its author's own, or an app connection's that its author allowed, whose key the service holds while the app is connected. You can change this later.</label>
 <p class="meta" data-seal-status role="status" aria-live="polite"></p>
 <p><button type="submit">Create the space</button></p>
 </form>

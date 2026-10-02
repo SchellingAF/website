@@ -7,6 +7,7 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { statementBytes } from "../src/connection-key.js";
 import { CAPABILITIES, json, refusal } from "./lib/service.ts";
 import { SITE, env, site } from "./lib/site.ts";
 
@@ -15,6 +16,10 @@ const LOOPBACK = "1a1b1c1d-1e1f-4011-8213-141516171819";
 const EXPIRED = "2a2b2c2d-2e2f-4021-8223-242526272829";
 const DECIDED = "3a3b3c3d-3e3f-4031-8233-343536373839";
 const HOSTILE_RETURN = "4a4b4c4d-4e4f-4041-8243-444546474849";
+const ODD_LIFETIME = "6a6b6c6d-6e6f-4061-8263-646566676869";
+const SWAPPED = "7a7b7c7d-7e7f-4071-8273-747576777879";
+/** Whether the stand-in product says it kept a connection key it was sent. */
+let keeps = true;
 const APP_TOKEN = "a".repeat(64);
 
 const request = (id: string, over: Record<string, unknown> = {}) => ({
@@ -31,7 +36,11 @@ const request = (id: string, over: Record<string, unknown> = {}) => ({
 
 const { fake, handleRequest } = await site((call) => {
   const path = call.url.pathname;
-  if (path === "/v1/capabilities") return json(CAPABILITIES);
+  // A product that takes connection keys lists the label their statement is signed under;
+  // test/connect-without-keys.test.ts holds one that does not.
+  if (path === "/v1/capabilities") {
+    return json({ ...CAPABILITIES, protocol: { ...CAPABILITIES.protocol, labels: { connection_key: "agent-state:connection-key:v1" } } });
+  }
   if (path === "/v1/conversations") return json({ items: [], unread_conversations: 0, requests_waiting: 0 });
   if (path === "/v1/passkeys/verify") {
     return json({ peer_id: "c".repeat(64), token: "session-token-new", expires_at: new Date(Date.now() + 3600_000).toISOString() });
@@ -44,10 +53,17 @@ const { fake, handleRequest } = await site((call) => {
       scope: ["read"],
     }));
   }
+  if (path === `/v1/authorizations/${ODD_LIFETIME}`) return json(request(ODD_LIFETIME, { token_lifetime_days: 1.5 }));
+  // Asked about one request, the product answers with another.
+  if (path === `/v1/authorizations/${SWAPPED}`) return json(request(ID));
   if (path === `/v1/authorizations/${EXPIRED}`) return json(request(EXPIRED, { state: "expired" }));
   if (path === `/v1/authorizations/${DECIDED}`) return json(request(DECIDED, { state: "approved" }));
   if (path === `/v1/authorizations/${ID}/approve`) {
-    return json({ decision: "approved", redirect_to: "https://claude.ai/api/mcp/auth_callback?code=the-code&state=s&iss=https%3A%2F%2Fapi.schellingaf.com" });
+    const sent = JSON.parse(call.body ?? "{}");
+    return json({
+      decision: "approved", redirect_to: "https://claude.ai/api/mcp/auth_callback?code=the-code&state=s&iss=https%3A%2F%2Fapi.schellingaf.com",
+      ...(sent.connection_key && keeps ? { connection_key: "kept" } : {}),
+    });
   }
   if (path === `/v1/authorizations/${ID}/decline`) {
     return json({ decision: "declined", redirect_to: "https://claude.ai/api/mcp/auth_callback?error=access_denied&state=s" });
@@ -75,11 +91,12 @@ const { safeNext } = await import("../src/me.ts");
 const FORM = "application/x-www-form-urlencoded";
 let people = 0;
 
-async function signedIn() {
+async function signedIn(credentialId?: string) {
   const n = ++people;
-  const value = (await createSession({ token: `person-token-${n}`, peerId: n.toString(16).padStart(64, "d"), expiresAt: Date.now() + 3600_000 }, `198.51.100.${n}`))!;
+  const peerId = n.toString(16).padStart(64, "d");
+  const value = (await createSession({ token: `person-token-${n}`, peerId, expiresAt: Date.now() + 3600_000, ...(credentialId ? { credentialId } : {}) }, `198.51.100.${n}`))!;
   const session = (await readSession(new Request(`${SITE}/me`, { headers: { Cookie: `__Host-schellingaf_session=${value}` } }), true))!;
-  return { cookie: `__Host-schellingaf_session=${value}`, csrf: session.csrf, token: `person-token-${n}` };
+  return { cookie: `__Host-schellingaf_session=${value}`, csrf: session.csrf, token: `person-token-${n}`, peerId };
 }
 
 async function send(path: string, init: RequestInit = {}) {
@@ -262,6 +279,204 @@ describe("an app's request to connect", () => {
       assert.equal(res.headers.get("X-Robots-Tag"), "noindex, nofollow");
       assert.equal(res.headers.get("Cache-Control"), "private, no-store", word);
     }
+  });
+});
+
+// ------------------------------------------------------------------ letting the app sign
+
+const CREDENTIAL = "Q3JlZGVudGlhbElkRm9yVGhlVGVzdHM";
+const CK = ["ck_statement", "ck_seed", "ck_credential_id", "ck_client_data_json", "ck_authenticator_data", "ck_signature"];
+const b64u = (b: Uint8Array | string) => Buffer.from(b).toString("base64url");
+/** A seed no test could mistake for anything else, so finding it anywhere is finding it. */
+const SEED = b64u(Buffer.from("SEED-CANARY-0123456789abcdefghij"));
+const KEY = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+/** What src/connect-signing.js puts in the Allow form once the passkey has signed, for
+ *  this person and this request, with `change` laid over it. */
+function signedFields(peerId: string, change: Record<string, string> = {}, statement: { peerId?: string; connection?: string } = {}): Record<string, string> {
+  return {
+    ck_statement: b64u(statementBytes({
+      peerId: statement.peerId ?? peerId, key: KEY, connection: statement.connection ?? ID,
+      notBefore: Math.floor(Date.now() / 1000), notAfter: Math.floor(Date.now() / 1000) + 90 * 86400 + 3600,
+    })),
+    ck_seed: SEED,
+    ck_credential_id: CREDENTIAL,
+    ck_client_data_json: b64u('{"type":"webauthn.get","challenge":"x","origin":"https://schellingaf.com"}'),
+    ck_authenticator_data: b64u(Buffer.alloc(37, 5)),
+    ck_signature: b64u(Buffer.alloc(70, 9)),
+    ...change,
+  };
+}
+
+/** Every console method, recording what it was called with, for the length of `work`. */
+async function watchingTheLog<T>(work: () => Promise<T>): Promise<{ result: T; logged: string }> {
+  const methods = ["log", "info", "warn", "error", "debug", "trace"] as const;
+  const real = methods.map((m) => console[m]);
+  const lines: string[] = [];
+  for (const m of methods) console[m] = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+  try {
+    return { result: await work(), logged: lines.join("\n") };
+  } finally {
+    methods.forEach((m, i) => { console[m] = real[i]!; });
+  }
+}
+
+const allow = (me: { cookie: string; csrf: string }, fields: Record<string, string>) => send("/me/connect", {
+  method: "POST",
+  headers: { Origin: SITE, Cookie: me.cookie, "Content-Type": FORM },
+  body: new URLSearchParams({ csrf: me.csrf, request: ID, ...fields }).toString(),
+});
+
+const approveBody = (calls: { method: string; url: URL; body: string | null }[]) => {
+  const call = calls.find((c) => c.url.pathname === `/v1/authorizations/${ID}/approve`);
+  return call ? JSON.parse(call.body ?? "null") : undefined;
+};
+
+describe("letting an app sign the person's posts", () => {
+  test("an app that may write is offered the box, ticked, with what it means, and the form carries what the script builds the statement from", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const before = Math.floor(Date.now() / 1000);
+    const { res, text } = await send(`/me/connect?request=${ID}`, { headers: { Cookie: me.cookie } });
+    assert.equal(res.status, 200);
+    assert.ok(text.includes('<label><input type="checkbox" name="sign_posts" value="1" form="allow-app" checked> Let this app sign your posts</label>'), "the box is not there, ticked");
+    assert.match(text, /your passkey signs once to let this app connection sign the posts the app sends, until an hour after its access token would run out\. Revoking the app ends that sooner, and a post the app sends after it ends is not signed\./);
+    assert.match(text, /While the app is connected, the service holds the key this app connection signs with\./);
+    assert.match(text, /A post signed this way shows that your key allowed this app connection to sign for it, and that the app connection, or the service, signed it\. It does not show that you saw it\./);
+    const form = /<form method="post" action="\/me\/connect" class="inline" id="allow-app" autocomplete="off" data-connection-key([^>]*)>([\s\S]*?)<\/form>/.exec(text);
+    assert.ok(form, "no Allow form for the script, kept out of the browser's form memory");
+    const attr = (name: string) => new RegExp(` ${name}="([^"]*)"`).exec(form[1]!)?.[1];
+    assert.equal(attr("data-connection"), ID);
+    assert.equal(attr("data-peer"), me.peerId);
+    assert.equal(attr("data-lifetime-days"), "90");
+    assert.ok(Math.abs(Number(attr("data-not-before")) - before) <= 2, `the page's time: ${attr("data-not-before")}`);
+    // No app is named in what the statement is built from.
+    assert.doesNotMatch(form[1]!, /client|claude\.ai/);
+    assert.equal(attr("data-rp-id"), "schellingaf.com");
+    assert.equal(attr("data-credential"), CREDENTIAL);
+    for (const name of CK) assert.ok(form[2]!.includes(`<input type="hidden" name="${name}" value="">`), `${name} is not an empty field`);
+    assert.ok(form[2]!.includes('<input type="hidden" name="signing_offered" value="1">'));
+    assert.match(form[2]!, /<button type="submit" data-guard disabled>Allow<\/button> <span class="meta" data-guard-note role="status" aria-live="polite"><\/span>$/);
+    // Nothing on the page is bytes for a passkey to sign: the script writes the statement.
+    assert.doesNotMatch(text, /challenge/i);
+    // Its script runs after the guard's, under the policy the page had: this site's own
+    // script and no request of any kind.
+    assert.ok(text.indexOf('<script src="/allow.js"></script>') < text.indexOf('<script type="module" src="/connect-signing.js"></script>'));
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    assert.match(csp, /script-src 'self'/);
+    assert.doesNotMatch(csp, /connect-src/);
+  });
+
+  test("an app that may only read, or a lifetime in parts of a day, is offered no box", async () => {
+    const me = await signedIn(CREDENTIAL);
+    for (const request of [LOOPBACK, ODD_LIFETIME]) {
+      const { text } = await send(`/me/connect?request=${request}`, { headers: { Cookie: me.cookie } });
+      assert.doesNotMatch(text, /sign_posts|connect-signing\.js|data-connection-key|ck_seed|signing_offered/, request);
+      assert.match(text, /<button type="submit" data-guard disabled>Allow<\/button>/, request);
+    }
+  });
+
+  test("an answer about another request than the one asked for is shown as nothing to answer", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const { res, text } = await send(`/me/connect?request=${SWAPPED}`, { headers: { Cookie: me.cookie } });
+    assert.equal(res.status, 502);
+    assert.doesNotMatch(text, /data-connection-key|value="allow"/);
+  });
+
+  test("Allow with what the passkey signed passes it on as connection_key, and logs none of it", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const fields = signedFields(me.peerId);
+    const { result: { res, text, asked: calls }, logged } = await watchingTheLog(() => allow(me, { decision: "allow", signing_offered: "1", sign_posts: "1", ...fields }));
+    assert.equal(res.status, 200, text.slice(0, 400));
+    assert.deepEqual(approveBody(calls), {
+      connection_key: {
+        statement: fields.ck_statement,
+        signature: {
+          alg: "webauthn", credential_id: fields.ck_credential_id, client_data_json: fields.ck_client_data_json,
+          authenticator_data: fields.ck_authenticator_data, signature: fields.ck_signature,
+        },
+        seed: SEED,
+      },
+    });
+    assert.match(text, /The app can now act as your key\. It signs the posts it sends with the key your passkey allowed\. Revoke it any time on Access tokens\. Returning you to claude\.ai\./);
+    for (const value of Object.values(fields)) {
+      assert.ok(!logged.includes(value), "the site logged part of what the passkey signed");
+      assert.ok(!text.includes(value), "the answer carries part of what the passkey signed");
+    }
+    assert.ok(!logged.includes("SEED-CANARY") && !text.includes("SEED-CANARY"));
+  });
+
+  test("the page says the app signs only when the product says it kept the key", async () => {
+    const me = await signedIn(CREDENTIAL);
+    keeps = false;
+    try {
+      const { text, asked: calls } = await allow(me, { decision: "allow", signing_offered: "1", sign_posts: "1", ...signedFields(me.peerId) });
+      assert.ok(approveBody(calls)?.connection_key, "the key was not sent");
+      assert.match(text, /The app can now act as your key\. Its posts will not be signed\. Revoke it any time on Access tokens\./);
+      assert.doesNotMatch(text, /It signs the posts/);
+    } finally {
+      keeps = true;
+    }
+  });
+
+  test("Allow with the box ticked and nothing the script makes beside it allows nothing, and asks again", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const { res, text, asked: calls } = await allow(me, { decision: "allow", signing_offered: "1", sign_posts: "1", ...Object.fromEntries(CK.map((n) => [n, ""])) });
+    assert.equal(res.status, 400);
+    assert.deepEqual(asked(calls), [`GET /v1/authorizations/${ID}`], "something was allowed");
+    assert.ok(text.includes('<p class="note warn" role="alert">Nothing was allowed: this page had not finished preparing to let the app sign your posts. Press Allow again, or untick the box to allow the app without signing.</p>'));
+    assert.match(text, /data-connection-key/, "the page is not drawn again to answer");
+    assert.ok(text.includes('name="sign_posts" value="1" form="allow-app" checked'));
+  });
+
+  test("Allow with the box unticked connects the app unsigned and says so", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const unticked = await allow(me, { decision: "allow", signing_offered: "1", ...Object.fromEntries(CK.map((n) => [n, ""])) });
+    assert.equal(unticked.res.status, 200);
+    assert.deepEqual(approveBody(unticked.asked), {});
+    assert.match(unticked.text, /The app can now act as your key\. Its posts will not be signed\. Revoke it any time on Access tokens\./);
+    // An app that may only read was offered nothing, so nothing is said of signing.
+    const reading = await allow(me, { decision: "allow" });
+    assert.deepEqual(approveBody(reading.asked), {});
+    assert.match(reading.text, /The app can now act as your key\. Revoke it any time on Access tokens\./);
+  });
+
+  test("Allow with anything between, which no page of this site sends, asks the product for nothing", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const full = signedFields(me.peerId);
+    const cases: [string, Record<string, string>][] = [
+      ["one field missing", { ...full, ck_signature: "" }],
+      ["the seed a byte short", { ...full, ck_seed: b64u(Buffer.alloc(31, 1)) }],
+      ["the seed a byte long", { ...full, ck_seed: b64u(Buffer.alloc(33, 1)) }],
+      ["the seed padded", { ...full, ck_seed: `${SEED}=` }],
+      ["a field that is not base64url", { ...full, ck_client_data_json: "not base64url!" }],
+      ["a statement for another key", signedFields(me.peerId, {}, { peerId: "e".repeat(64) })],
+      ["a statement for another request", signedFields(me.peerId, {}, { connection: LOOPBACK })],
+      ["a statement that is not canonical", { ...full, ck_statement: b64u(JSON.stringify(JSON.parse(Buffer.from(full.ck_statement!, "base64url").toString()), null, 1)) }],
+      ["a statement too long", { ...full, ck_statement: b64u(Buffer.alloc(520, 0x61)) }],
+    ];
+    for (const [what, fields] of cases) {
+      const { res, text, asked: calls } = await allow(me, { decision: "allow", signing_offered: "1", sign_posts: "1", ...fields });
+      assert.equal(res.status, 400, what);
+      assert.match(text, /That was not what this page sends to let an app sign your posts, so nothing was changed\./, what);
+      assert.deepEqual(asked(calls), [], what);
+      assert.ok(!text.includes(SEED), what);
+    }
+  });
+
+  test("what the script makes, sent with the box unticked, allows nothing, and asks again", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const { res, text, asked: calls } = await allow(me, { decision: "allow", signing_offered: "1", ...signedFields(me.peerId) });
+    assert.equal(res.status, 400);
+    assert.deepEqual(asked(calls), [`GET /v1/authorizations/${ID}`], "something was allowed");
+    assert.ok(text.includes('<p class="note warn" role="alert">Nothing was allowed: this page sent a key for the app to sign with, but the box was not ticked. Press Allow again.</p>'));
+    assert.ok(!text.includes(SEED));
+  });
+
+  test("Decline never sends any of it on", async () => {
+    const me = await signedIn(CREDENTIAL);
+    const { asked: calls } = await allow(me, { decision: "decline", ...signedFields(me.peerId) });
+    const call = calls.find((c) => c.url.pathname === `/v1/authorizations/${ID}/decline`)!;
+    assert.deepEqual(JSON.parse(call.body ?? "null"), {});
   });
 });
 

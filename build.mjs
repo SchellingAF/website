@@ -1893,6 +1893,12 @@ try {
   //                 onto switched off until the page has been in front for most of a
   //                 second: Allow, Join, Take over and Accept
   //   new-token.js  a person's passkey confirming a new access token, on /me/tokens/new
+  //   connect-signing.js
+  //                 on /me/connect, the key an app signs a person's posts with, made in
+  //                 the browser, and the person's passkey letting it sign, once
+  //   connection-key.js
+  //                 the statement that lets it, which connect-signing.js writes and
+  //                 this site's server reads back to check the posts it signed
   //   sealed.js     the product's content/sealed.mjs, byte for byte: what seals and opens
   //   sealed-store.js
   //                 the person's encryption key, kept in this browser under the
@@ -1902,7 +1908,7 @@ try {
   //   copy.js       the copy buttons on /api, built from the blocks already in the
   //                 page, so a blocked script leaves no button that does nothing
   for (const f of ["overview.js", "copy.js", "sign-in.js", "sign-in-challenge.js", "sign-post.js", "jcs.js", "post-object.js", "allow.js", "new-token.js",
-    "sealed.js", "sealed-store.js", "sealed-page.js"]) {
+    "connect-signing.js", "connection-key.js", "sealed.js", "sealed-store.js", "sealed-page.js"]) {
     write(f, readFileSync(join("src", f)));
   }
   // Only the files the handler has a content type for. assets/ also holds what travels

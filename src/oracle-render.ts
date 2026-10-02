@@ -22,7 +22,7 @@ import { parseDocument, type ParsedDocument } from "./document.ts";
 import { documentHtml, documentJson, documentMarkdown, referencesHtml, type DocumentLinks } from "./document-render.ts";
 import { diffHtml, diffMarkdown, MAX_EDITS, MAX_LINES, type DiffOp } from "./diff.ts";
 import {
-  codeSpan, esc, fence, htmlPage, keyLine, keyLink, nameLine, noticeHtml, outsideMark, ownWord, record, seqLine, spaceTrail, textOrNull, timeLine, when, wordLine,
+  codeSpan, esc, fence, htmlPage, keyLine, keyLink, nameLine, noticeHtml, outsideMark, ownWord, record, seqLine, signedByOf, signedWords, spaceTrail, textOrNull, timeLine, when, wordLine,
   NOT_A_MEMBER_LINE, PEER_NOTICE, PEER_NOTICE_LINE, SOURCE_WITHDRAWN,
   type Drawn, type Shell,
 } from "./render.ts";
@@ -32,6 +32,13 @@ import { API_ORIGIN } from "./routes.generated.ts";
 
 /** "not a member", after a version's author, as every other post shows it. */
 const notAMember = (v: Version): string => outsideMark({ no_role: v.noRole });
+/** A signed version's line of markdown, saying how, as its HTML does. */
+const signedLine = (v: Version): string => `- signed: ${v.signedBy === "connection" ? "through an app connection" : "yes"}, checked on its own page`;
+/** "signed", or "signed through an app connection", after a version's author. */
+const signedMark = (v: Version): string => {
+  const words = signedWords({ signed: v.signed, signed_by: v.signedBy });
+  return words ? ` &middot; ${esc(words)}` : "";
+};
 
 // ------------------------------------------------------------------ the shapes
 
@@ -46,6 +53,9 @@ export interface Version {
   /** What its author said the change is: the version's title. Agent text. */
   summary: string | null;
   signed: boolean;
+  /** Who signed it, as the service says: its author's key, or an app connection that
+   *  key allowed; null when it does not say. */
+  signedBy: "key" | "connection" | null;
   /** Whether its author held no role in the oracle space when it proposed it, as the
    *  service marks it: a stranger's proposal, which any key may make. */
   noRole: boolean;
@@ -124,6 +134,7 @@ export function readableVersion(raw: unknown): Version | null {
     // author's summary and the start of its text included, whatever the service sent.
     summary: unavailable ? null : textOrNull(v.summary),
     signed: v.signed === true,
+    signedBy: signedByOf(v),
     noRole: v.no_role === true,
     unavailable,
     sourceWithdrawn: v.source_withdrawn === true,
@@ -332,7 +343,7 @@ export function documentSection(v: DocumentView): Drawn {
     let body = `<p>${v.work ? "Nothing is written in this document yet. Whoever may post here may propose its first version." : "Nothing is written in this document yet. Any key may propose its first version."}</p>`;
     const ver = v.version;
     if (ver) {
-      const meta = `<p class="meta">Version ${versionLink(v.spaceHref, ver.seq)}, by ${keyLink(ver.author)}, ${esc(when(ver.posted_at))}${ver.signed ? " &middot; signed" : ""}${notAMember(ver)}. ${howItCame(ver, v.spaceHref)} <a href="${esc(history)}">History</a>${ver.edits ? ` &middot; <a href="${esc(compareHref(v.spaceHref, ver.edits, ver.seq))}">what it changed</a>` : ""}</p>`;
+      const meta = `<p class="meta">Version ${versionLink(v.spaceHref, ver.seq)}, by ${keyLink(ver.author)}, ${esc(when(ver.posted_at))}${signedMark(ver)}${notAMember(ver)}. ${howItCame(ver, v.spaceHref)} <a href="${esc(history)}">History</a>${ver.edits ? ` &middot; <a href="${esc(compareHref(v.spaceHref, ver.edits, ver.seq))}">what it changed</a>` : ""}</p>`;
       const summary = (ver.summary ? `<p class="meta">Its author's summary: <span dir="auto">${esc(ver.summary)}</span></p>` : "")
         + (ver.sourceWithdrawn ? `${ver.summary ? "\n" : ""}<p class="meta">${esc(SOURCE_WITHDRAWN)}</p>` : "");
       let content = `<p class="note warn">${esc(noText(ver))}</p>`;
@@ -366,7 +377,7 @@ ${body}
     L.push(`- version: #${seqLine(ver.seq)}, ${v.spaceHref}/${ver.seq}.md`);
     L.push(`- author: ${keyLine(ver.author)}`);
     L.push(`- posted: ${timeLine(ver.posted_at)}`);
-    if (ver.signed) L.push("- signed: yes, checked on its own page");
+    if (ver.signed) L.push(signedLine(ver));
     if (ver.noRole) L.push(`- ${NOT_A_MEMBER_LINE}`);
     if (ver.summary) L.push(`- summary: ${codeSpan(ver.summary)}`);
     if (ver.sourceWithdrawn) L.push(`- ${SOURCE_WITHDRAWN}`);
@@ -422,6 +433,7 @@ function versionJson(v: Version, spaceHref: string) {
     posted_at: v.posted_at,
     summary: v.summary,
     signed: v.signed,
+    signed_by: v.signedBy,
     ...(v.noRole ? { no_role: true } : {}),
     ...(v.sourceWithdrawn ? { source_withdrawn: true } : {}),
     edits: v.edits,
@@ -553,7 +565,7 @@ function rowHtml(r: Version, v: HistoryView): string {
     ? `<p class="note warn">${esc(`This version is ${goneWords(r.unavailable)}. Its place is kept; its text is not shown.`)}</p>`
     : r.snippet ? `<pre>${esc(r.snippet)}${r.snippetCut ? "…" : ""}</pre>` : "";
   return `<div class="item">
-<p class="meta">${tag}${versionLink(v.spaceHref, r.seq)} &middot; ${esc(when(r.posted_at))} &middot; by ${keyLink(r.author)}${r.signed ? " &middot; signed" : ""}${notAMember(r)}${edits}${undo}</p>
+<p class="meta">${tag}${versionLink(v.spaceHref, r.seq)} &middot; ${esc(when(r.posted_at))} &middot; by ${keyLink(r.author)}${signedMark(r)}${notAMember(r)}${edits}${undo}</p>
 ${r.summary ? `<h3 dir="auto">${esc(r.summary)}</h3>` : ""}
 ${text}
 ${decision}
@@ -592,6 +604,7 @@ export function historyMarkdown(v: HistoryView): string {
     L.push(`- page: ${v.spaceHref}/${r.seq}.md`);
     L.push(`- author: ${keyLine(r.author)}`);
     L.push(`- posted: ${timeLine(r.posted_at)}`);
+    if (r.signed) L.push(signedLine(r));
     if (r.noRole) L.push(`- ${NOT_A_MEMBER_LINE}`);
     if (r.summary) L.push(`- summary: ${codeSpan(r.summary)}`);
     L.push(r.edits ? `- edits: #${seqLine(r.edits)}, ${compareHref(v.spaceHref, r.edits, r.seq)}` : "- edits: nothing, a first version");

@@ -41,6 +41,9 @@ export interface Capabilities {
   protocol?: {
     /** Whether a passkey may prove a KEY, and for which relying party and pages. */
     passkeys?: { status?: string; rp_id?: string; origins?: string[] };
+    /** Every label the service hashes or signs under; connection_key is the one a KEY
+     *  signs under to let an app connection sign its posts. */
+    labels?: Record<string, unknown>;
   };
   /** How spaces are filed, as far as the Vocabulary page says it: how many categories a
    *  space takes, and the top categories by id. The categories themselves are read by
@@ -113,6 +116,14 @@ export function itemLimits(caps: Capabilities): { fingerprints: number; recipien
  * when the service publishes none, and then a passkey-signed post cannot be
  * confirmed, which its page says.
  */
+/**
+ * Whether the service takes a connection key with an app's approval: its capability
+ * document lists the label a KEY signs the statement under. Never the fallback's guess,
+ * which lists none, so a site deployed before its product offers no app signing.
+ */
+export const takesConnectionKeys = (caps: Capabilities): boolean =>
+  caps.protocol?.labels?.connection_key === "agent-state:connection-key:v1";
+
 export function passkeySite(caps: Capabilities): { rpId: string; origins: string[] } | null {
   const p = caps.protocol?.passkeys;
   return typeof p?.rp_id === "string" && Array.isArray(p.origins) ? { rpId: p.rp_id, origins: p.origins } : null;

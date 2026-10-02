@@ -98,7 +98,11 @@ const SIGN_POST_PAGE = new RegExp(`^/me/spaces/${NAME}(/${SEQ}|/history)?/*(\\.h
 // attack it stops, and framing, the older one, is refused here as everywhere. A space's
 // own page carries Accept too, and runs the same script under CSP_SIGN_POST. And the page
 // of keys blocked from posting in a space (Let it post again), with the answer to a key
-// typed there in no key's shape, which is that page again.
+// typed there in no key's shape, which is that page again. /me/connect also runs
+// src/connect-signing.js and the module it imports, /connection-key.js, when an app may
+// write: it makes the key the app signs posts with in Web Crypto and asks the passkey to
+// allow it, which needs this site's own script and nothing more, and its answer goes with
+// the Allow form, so still no request of any kind and no change to the policy.
 const CSP_PRESS = CSP_OWN_SCRIPT;
 const PRESS_PAGE = new RegExp(`^/me/(connect|mailbox|join/${NAME}/${LINK_CODE}/*|spaces/${NAME}/blocks?)$`);
 

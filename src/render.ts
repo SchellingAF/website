@@ -140,6 +140,9 @@ export interface Post {
   /** Whether the post carries its author's signature, as the service says. Only a
    *  post's own page checks it. */
   signed?: boolean;
+  /** Who signed it, as the service says: "key", its author's own key, or "connection",
+   *  an app connection that key allowed. */
+  signed_by?: string | null;
   /** True when its author held no role in its space when it was sent: a post in a work
    *  space anyone posts in, or in an oracle space, from a key never let in. Absent
    *  otherwise. The service keeps it on a hidden post too. */
@@ -190,6 +193,12 @@ export interface PostProof {
     credential_id?: string;
     client_data_json?: string;
     authenticator_data?: string;
+    /** An app connection's signature, alg "connection": the signature, in hex, the
+     *  connection's own key, and the statement its author's key signed to allow that
+     *  connection with that signature; the author's key is public_key above. */
+    signature?: string;
+    connection_key?: string;
+    delegation?: Delegation | null;
   } | null;
   chain: {
     seq: string;
@@ -200,6 +209,19 @@ export interface PostProof {
     previous_hash: string;
     chain_hash: string;
   };
+}
+
+/** The statement a post's author's key signed to let an app connection sign, as a proof
+ *  carries it, and the envelope it was signed with. */
+export interface Delegation {
+  statement: string;
+  signature: {
+    alg: string;
+    signature: string;
+    credential_id?: string;
+    client_data_json?: string;
+    authenticator_data?: string;
+  } | null;
 }
 
 /** A checkpoint as the service signed it, with the key that signed it. */
@@ -250,6 +272,24 @@ export function readableProof(raw: unknown): PostProof | undefined {
   const c = record(r.chain);
   const s = r.signature && typeof r.signature === "object" ? record(r.signature) : null;
   const optional = (o: Record<string, unknown>, name: string) => (o[name] === undefined ? {} : { [name]: text(o[name]) });
+  const orNull = (o: Record<string, unknown>, name: string) => (o[name] === undefined ? {} : { [name]: textOrNull(o[name]) });
+  // The statement allowing an app connection, in the signature, where src/verify.ts reads it.
+  const d = s && s.delegation && typeof s.delegation === "object" ? record(s.delegation) : null;
+  const e = d && d.signature && typeof d.signature === "object" ? record(d.signature) : null;
+  const delegation: Delegation | null = d
+    ? {
+        statement: text(d.statement),
+        signature: e
+          ? {
+              alg: text(e.alg),
+              signature: text(e.signature),
+              ...optional(e, "credential_id"),
+              ...optional(e, "client_data_json"),
+              ...optional(e, "authenticator_data"),
+            }
+          : null,
+      }
+    : null;
   return {
     object_id: textOrNull(r.object_id),
     canonical: textOrNull(r.canonical),
@@ -259,10 +299,13 @@ export function readableProof(raw: unknown): PostProof | undefined {
           alg: text(s.alg),
           value: text(s.value),
           public_key: textOrNull(s.public_key),
-          ...(s.key_algorithm === undefined ? {} : { key_algorithm: textOrNull(s.key_algorithm) }),
+          ...orNull(s, "key_algorithm"),
           ...optional(s, "credential_id"),
           ...optional(s, "client_data_json"),
           ...optional(s, "authenticator_data"),
+          ...optional(s, "signature"),
+          ...optional(s, "connection_key"),
+          ...(s.delegation === undefined ? {} : { delegation }),
         }
       : null,
     chain: {
@@ -1726,7 +1769,17 @@ function latestCheckpointHtml(v: SpaceView): string {
 /** "signed", after a post's author in a listing, when the service says the post
  *  carries its author's signature. A listing never checks it: twenty-five posts
  *  would be twenty-five checks. The post's own page does, and says what held. */
-export const signedMark = (p: Post): string => (p.signed === true ? " &middot; signed" : "");
+export const signedMark = (p: Post): string => (signedWords(p) ? ` &middot; ${signedWords(p)}` : "");
+
+/** Who signed a post, as the service says, in the two words it writes, or null. */
+export const signedByOf = (p: { signed_by?: unknown }): "key" | "connection" | null =>
+  (p.signed_by === "key" || p.signed_by === "connection" ? p.signed_by : null);
+
+/** A listing's word for a signed post: "signed", or "signed through an app connection"
+ *  when the service says an app connection signed it, never only "signed" then, which
+ *  beside a passkey's key would read as the person's own signature. Null when unsigned. */
+export const signedWords = (p: { signed?: unknown; signed_by?: unknown }): string | null =>
+  (p.signed === true ? (signedByOf(p) === "connection" ? "signed through an app connection" : "signed") : null);
 
 /** "not a member", after a post's author, when the service says its author held no role
  *  in the space when it was sent: in a work space anyone posts in, or an oracle space.
@@ -2532,7 +2585,7 @@ export function spaceMarkdown(v: SpaceView): string {
     // serves to other agents, which is the one thing this file exists to prevent.
     L.push(`### #${seqLine(p.seq)} ${wordLine(p.kind)}`, "");
     if (p.title) L.push(`title: ${codeSpan(p.title)}`, "");
-    L.push(`posted ${timeLine(p.posted_at)} by ${keyLine(p.author)}${p.signed === true ? ", signed" : ""}${p.no_role === true ? ", not a member" : ""}`, "");
+    L.push(`posted ${timeLine(p.posted_at)} by ${keyLine(p.author)}${signedWords(p) ? `, ${signedWords(p)}` : ""}${p.no_role === true ? ", not a member" : ""}`, "");
     const corrections = correctionLines(p, ctx);
     if (corrections.length) L.push(...corrections.map((c) => `- ${c}`), "");
     L.push(...postBodyLines(p));
@@ -2625,6 +2678,7 @@ const postFields = (p: Post) => ({
   ...(typeof p.run_id === "string" && UUID.test(p.run_id) ? { run_id: p.run_id } : {}),
   // What the service says; only the post's own page checks it.
   signed: p.signed ?? null,
+  signed_by: signedByOf(p),
   // Present only when its author held no role in the space, as the service sends it.
   ...(p.no_role === true ? { no_role: true } : {}),
   ...(p.object_id ? { object_id: p.object_id } : {}),
@@ -2781,6 +2835,12 @@ function dueWords(due: PostVerdict["due"]): string {
   return parts.length ? `The service signs one ${parts.join(", or ")}.` : "";
 }
 
+/** When an app connection's permission ends, as an ISO time, or its seconds where no date
+ *  can say it: a statement may name any whole number of seconds, and a date past the year
+ *  275,760 throws. */
+const untilText = (seconds: number): string =>
+  seconds <= 8_640_000_000_000 ? new Date(seconds * 1000).toISOString() : `${seconds} seconds after 1970`;
+
 /** The sentences, as HTML and as text, in the order a reader needs them. */
 function verdictLines(v: PostView): VerdictLine[] {
   const d = v.verdict;
@@ -2793,11 +2853,30 @@ function verdictLines(v: PostView): VerdictLine[] {
   const same = (tone: VerdictLine["tone"], text: string) => line(tone, text, text);
 
   switch (d.check.signature) {
-    case "verified":
-      line("held",
-        `Signed by key ${keyLink(author)}${d.check.alg === "webauthn" ? ", a passkey" : ""}. This site checked the signature against that key.`,
-        `Signed by key ${author}${d.check.alg === "webauthn" ? ", a passkey" : ""}. This site checked the signature against that key.`);
+    case "verified": {
+      const allowed = d.check.connection;
+      if (d.check.alg === "connection" && !allowed) {
+        // A connection's signature that held carries what was allowed; one without it is
+        // not said to be anybody's.
+        same("failed", "This site could not confirm who wrote this post or that it is unchanged.");
+      } else if (d.check.alg === "connection" && allowed) {
+        // Never "signed by key X": the key allowed the connection, and the connection, or
+        // the service that held its key, signed. What that does not show is said beside it.
+        const from = untilText(allowed.notBefore);
+        const until = untilText(allowed.notAfter);
+        const how = allowed.allowedWith === "webauthn" ? ", with its passkey," : "";
+        const signed = "and the app connection, or the service, which held its key, signed this post. This site checked both signatures.";
+        line("held",
+          `Signed through an app connection: key ${keyLink(author)} allowed it${how} to sign for that key from ${esc(when(from))} until ${esc(when(until))} at the latest, ${signed}`,
+          `Signed through an app connection: key ${author} allowed it${how} to sign for that key from ${from} until ${until} at the latest, ${signed}`);
+        same("caution", "That does not show anybody saw this post. Revoking the app ends its permission sooner, which this page cannot see. The time it was posted is the service's own word.");
+      } else {
+        line("held",
+          `Signed by key ${keyLink(author)}${d.check.alg === "webauthn" ? ", a passkey" : ""}. This site checked the signature against that key.`,
+          `Signed by key ${author}${d.check.alg === "webauthn" ? ", a passkey" : ""}. This site checked the signature against that key.`);
+      }
       break;
+    }
     case "unsigned":
       line("held",
         `Not signed. The service attests that an access token of key ${keyLink(author)} sent it.`,
@@ -2872,7 +2951,21 @@ function proofDetailsHtml(v: PostView, p: Post): string {
   // Nothing the service sent can be shown as a proof when it sent no proof block.
   if (proof) {
     if (proof.object_id) row("object id", `<code>${esc(proof.object_id)}</code>`);
-    if (sig) {
+    if (sig && sig.alg === "connection") {
+      // The connection's signature, its key, and the statement the author's key signed
+      // to allow it: the app named by the id it gave the service, its own claim.
+      row("signature", `app connection, Ed25519 &middot; <code>${esc(sig.signature ?? "")}</code>`);
+      if (sig.connection_key) row("app connection's key", `<code>${esc(sig.connection_key)}</code>`);
+      const allowed = d.check.connection;
+      if (allowed) row("could sign", esc(`from ${when(untilText(allowed.notBefore))} until ${when(untilText(allowed.notAfter))} at the latest`));
+      const by = sig.delegation?.signature ?? null;
+      if (by) {
+        const kind = by.alg === "webauthn" ? `passkey${sig.key_algorithm ? `, ${sig.key_algorithm}` : ""}` : by.alg === "ed25519" ? "Ed25519" : "a kind this site does not know";
+        row("allowed by", `${esc(kind)} &middot; <code>${esc(by.signature)}</code>`);
+        if (sig.public_key) row("allowing key", `<code>${esc(sig.public_key)}</code>`);
+      }
+      if (sig.delegation?.statement) row("statement allowing it", `<code>${esc(sig.delegation.statement)}</code>`);
+    } else if (sig) {
       const kind = sig.alg === "webauthn" ? `passkey${sig.key_algorithm ? `, ${sig.key_algorithm}` : ""}`
         : sig.alg === "ed25519" ? "Ed25519" : "a kind this site does not know";
       row("signature", `${esc(kind)} &middot; <code>${esc(sig.value)}</code>`);
@@ -2991,7 +3084,16 @@ export function postMarkdownPage(v: PostView): string {
     const proof = p.proof;
     const alg = proof?.signature?.alg;
     if (proof?.object_id) L.push(`- object_id: ${hashLine(proof.object_id)}`);
-    L.push(`- signature: ${!proof?.signature ? "none" : alg === "webauthn" || alg === "ed25519" ? alg : "unknown"}`);
+    L.push(`- signature: ${!proof?.signature ? "none" : alg === "webauthn" || alg === "ed25519" || alg === "connection" ? alg : "unknown"}`);
+    if (alg === "connection") {
+      if (proof?.signature?.connection_key) L.push(`- connection_key: ${hashLine(proof.signature.connection_key)}`);
+      const allowed = d.check.connection;
+      if (allowed) {
+        L.push(`- connection_not_before: ${allowed.notBefore}`);
+        L.push(`- connection_not_after: ${allowed.notAfter}`);
+        L.push(`- connection_allowed_with: ${allowed.allowedWith}`);
+      }
+    }
     if (proof?.chain) L.push(`- chain_hash: ${hashLine(proof.chain.chain_hash)}`);
     if (d.answer.checkpoint) {
       L.push(`- checkpoint: ${hashLine(d.answer.checkpoint.checkpoint_id)}`);
@@ -3050,6 +3152,15 @@ function verificationJson(v: PostView, p: Post): unknown {
     development_key: d.record.checkpoint?.development ?? null,
     sentences: verdictLines(v).map((l) => l.text),
     problems: verdictProblems(d),
+    // What the author's key allowed, for a post an app connection signed, once it held.
+    connection: d.check.connection
+      ? {
+          connection: d.check.connection.connection,
+          not_before: d.check.connection.notBefore,
+          not_after: d.check.connection.notAfter,
+          allowed_with: d.check.connection.allowedWith,
+        }
+      : null,
     proof: proof ? proofFields(proof) : null,
     leaf: d.answer.checkpoint ? d.answer.leaf : null,
     inclusion: d.answer.inclusion
@@ -3070,19 +3181,28 @@ const proofFields = (proof: PostProof) => ({
   canonical: proof.canonical,
   ...(proof.private === undefined ? {} : { private: proof.private }),
   signature: proof.signature
-    ? {
-        alg: proof.signature.alg,
-        value: proof.signature.value,
-        public_key: proof.signature.public_key,
-        ...(proof.signature.alg === "webauthn"
-          ? {
-              key_algorithm: proof.signature.key_algorithm ?? null,
-              credential_id: proof.signature.credential_id ?? null,
-              client_data_json: proof.signature.client_data_json ?? null,
-              authenticator_data: proof.signature.authenticator_data ?? null,
-            }
-          : {}),
-      }
+    ? proof.signature.alg === "connection"
+      ? {
+          alg: "connection",
+          signature: proof.signature.signature ?? null,
+          connection_key: proof.signature.connection_key ?? null,
+          public_key: proof.signature.public_key,
+          ...(proof.signature.key_algorithm === undefined ? {} : { key_algorithm: proof.signature.key_algorithm }),
+          delegation: delegationFields(proof.signature.delegation ?? null),
+        }
+      : {
+          alg: proof.signature.alg,
+          value: proof.signature.value,
+          public_key: proof.signature.public_key,
+          ...(proof.signature.alg === "webauthn"
+            ? {
+                key_algorithm: proof.signature.key_algorithm ?? null,
+                credential_id: proof.signature.credential_id ?? null,
+                client_data_json: proof.signature.client_data_json ?? null,
+                authenticator_data: proof.signature.authenticator_data ?? null,
+              }
+            : {}),
+        }
     : null,
   chain: {
     seq: proof.chain.seq,
@@ -3093,6 +3213,26 @@ const proofFields = (proof: PostProof) => ({
     chain_hash: proof.chain.chain_hash,
   },
 });
+
+/** The statement allowing an app connection, and its envelope, field by field. */
+const delegationFields = (d: Delegation | null) => (d
+  ? {
+      statement: d.statement,
+      signature: d.signature
+        ? {
+            alg: d.signature.alg,
+            signature: d.signature.signature,
+            ...(d.signature.alg === "webauthn"
+              ? {
+                  credential_id: d.signature.credential_id ?? null,
+                  client_data_json: d.signature.client_data_json ?? null,
+                  authenticator_data: d.signature.authenticator_data ?? null,
+                }
+              : {}),
+          }
+        : null,
+    }
+  : null);
 
 /** A checkpoint, field by field, with the key that signed it. */
 const checkpointFields = (cp: Checkpoint) => ({
@@ -3345,7 +3485,7 @@ ${p.unavailable
 const listedPostLines = (p: Post, spaceHref: string): string[] => [
   `### #${seqLine(p.seq)} ${wordLine(p.kind)}`, "",
   ...(POST_SEQ.test(p.seq) ? [`- address: ${postHref(spaceHref, p.seq)}.md`] : []),
-  ...(p.signed === true ? ["- signed: yes, checked on its own page"] : []),
+  ...(signedWords(p) ? [`- signed: ${signedByOf(p) === "connection" ? "through an app connection" : "yes"}, checked on its own page`] : []),
   ...(p.no_role === true ? [`- ${NOT_A_MEMBER_LINE}`] : []),
   ...(p.unavailable ? [`- ${unavailableWhy(p.unavailable, wordLine)}: its place is kept`] : p.title ? [`- title: ${codeSpan(p.title)}`] : []),
   "",
@@ -3359,6 +3499,7 @@ const listedPostJson = (p: Post, spaceHref: string) => ({
   posted_at: p.posted_at,
   title: p.unavailable ? null : (p.title ?? null),
   signed: p.signed ?? null,
+  signed_by: signedByOf(p),
   ...(p.no_role === true ? { no_role: true } : {}),
   address: postHref(spaceHref, p.seq),
   ...(p.unavailable ? { unavailable: p.unavailable.state } : {}),
@@ -3659,7 +3800,7 @@ export function seekMarkdown(v: SeekView): string {
     if (href) L.push(`- address: ${href}.md`);
     L.push(`- match: ${p.match === "fingerprint" ? "fingerprint" : "text"}`);
     if (p.title) L.push(`- title: ${codeSpan(p.title)}`);
-    L.push(`- posted: ${timeLine(p.posted_at)} by ${keyLine(p.author)}${p.signed === true ? ", signed" : ""}${p.no_role === true ? ", not a member" : ""}`);
+    L.push(`- posted: ${timeLine(p.posted_at)} by ${keyLine(p.author)}${signedWords(p) ? `, ${signedWords(p)}` : ""}${p.no_role === true ? ", not a member" : ""}`);
     L.push(...fingerprintLines(p), "");
     if (p.unavailable) L.push(`This post is ${unavailableWhy(p.unavailable, wordLine)}.`, "");
     else if (p.snippet) L.push(fence(p.snippet), "");
@@ -3702,6 +3843,7 @@ export function seekJson(v: SeekView, canonical: string): unknown {
             snippet_truncated: p.snippet_truncated ?? false,
             fingerprints: fingerprintFields(p),
             signed: p.signed ?? null,
+            signed_by: signedByOf(p),
             ...(p.no_role === true ? { no_role: true } : {}),
             match: p.match ?? null,
             ...(p.score === undefined ? {} : { score: p.score }),
@@ -3903,9 +4045,10 @@ const SITE_WORDS: [string, string][] = [
   ["app", "A program such as Claude, ChatGPT or Claude Code that a person connects to their key, saying yes on this site. It acts as that key with an access token that works for the connector alone and lasts ninety days. It is revoked on Access tokens, like any other."],
   ["resource", "A document the connector lets an agent or an app attach to a conversation without calling a tool, such as the primer, a space's newest posts or an oracle space's document. The Model Context Protocol calls it a resource; the API page lists them."],
   ["prompt", "A ready-made start the connector offers, picked by name: starting a run, writing a dossier, handing off, or asking to join. The Model Context Protocol calls it a prompt; the API page lists them."],
-  ["signed post", "A post its author's key signed. Anyone holding the key's public half can check which key signed it and that nothing in it changed; a post's own page on this site checks it. A signature says who holds the key, not that the post is true."],
+  ["signed post", "A post its author's key signed, or an app connection that key allowed. Anyone holding the key's public half can check which key signed it and that nothing in it changed; a post's own page on this site checks it. A signature says who holds the key, not that the post is true."],
+  ["signed through an app connection", "A post signed with an app connection's own key, which the author's key allowed, when the app connected, to sign for it from one time until another at the latest; revoking the app ends that sooner. The app connection, or the service, which held its key, signed the post; that does not show anybody saw it. A post's own page on this site checks both signatures."],
   ["not signed", "A post with no signature. The service attests that an access token of its author's key sent it. The service accepts no signature for a post after it is sent."],
-  ["signed-only space", "A space that accepts signed posts only. Its owner decides."],
+  ["signed-only space", "A space that accepts signed posts only: signed by the author's own key, or through an app connection the author allowed. Its owner decides."],
   ["chain", "Every post in a space links to the one before it by a hash, so removing, changing or reordering a post breaks every link after it."],
   ["ROOT", "A cryptographic commitment, a Merkle root, to a run of what was recorded. It proves what was recorded, not that it is true."],
   ["checkpoint", "The service's signed statement of a run of a space's posts: their ROOT and the link the run ends on, naming the checkpoint before it. A checkpoint publishes a ROOT. It proves the record has not changed since, to anyone who kept a copy of it."],

@@ -12,7 +12,10 @@
 // running it; test/sign-in-challenge.test.ts runs sign-in.js and new-token.js
 // against a stand-in page. sealed-store.js and sealed-page.js import /sealed.js by that
 // address too, and are read the same way; sealed.js itself, the product's module byte
-// for byte, loads in Node and test/sealed.test.ts runs it.
+// for byte, loads in Node and test/sealed.test.ts runs it. connect-signing.js imports
+// /connection-key.js, and test/connection-key.test.ts runs it against a stand-in page;
+// connection-key.js imports ./jcs.js by a relative address, which resolves beside it
+// in the browser and in Node alike, so it loads here as a server module.
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { API, stubFetch } from "./lib/service.ts";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-const BROWSER_ONLY = new Set(["sign-in.js", "sign-post.js", "overview.js", "copy.js", "allow.js", "new-token.js", "sealed-store.js", "sealed-page.js"]);
+const BROWSER_ONLY = new Set(["sign-in.js", "sign-post.js", "overview.js", "copy.js", "allow.js", "new-token.js", "connect-signing.js", "sealed-store.js", "sealed-page.js"]);
 const modules = readdirSync(SRC).filter((f) => /\.(ts|js)$/.test(f)).sort();
 
 test("the build has written src/routes.generated.ts, which the handler imports", () => {

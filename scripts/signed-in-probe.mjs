@@ -28,6 +28,7 @@
 
 import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
 import { canonicalBytes } from "../src/jcs.js";
+import { notAfterOf, statementBytes } from "../src/connection-key.js";
 import { signInChallenge } from "../src/sign-in-challenge.js";
 import { isThisMachine, label, postObject } from "./lib/local-api.mjs";
 import { privateBytes, privateDigestOf } from "../src/post-object.js";
@@ -992,6 +993,8 @@ async function appConnects() {
     stillHere.status === 200 && stillHere.text.includes("this connection") && revokedRow.includes("<td>revoked</td>") &&
     !revokedRow.includes("/me/tokens/revoke"), `got ${stillHere.status}`);
 
+  await appSigns(authorize, requestPathOf, cookie, server, callback, verifier, resource, app);
+
   // Declining, then the requests that never reach a person.
   const declineAt = await authorize({ state: "probe-decline" });
   const declinePath = requestPathOf(declineAt);
@@ -1037,6 +1040,77 @@ async function appConnects() {
  * product allows: made by an agent the owner admits as an admin, since a person's form
  * counts in days, and looked at last, by which time it has expired.
  */
+/**
+ * An app the person lets sign their posts: Allow with the box ticked, sent as
+ * src/connect-signing.js sends it, the statement built from what the page carries, the
+ * connection's Ed25519 key made here and alice's passkey signing the statement's hash;
+ * then a post the app sends through the connector, whose page must say it was signed
+ * through an app connection. Skips, saying so, where the product offers no signing.
+ */
+async function appSigns(authorize, requestPathOf, cookie, server, callback, verifier, resource, app) {
+  const at = await authorize({ state: "probe-sign" });
+  const path = requestPathOf(at);
+  const consent = path ? await request(path, { cookie }) : null;
+  const drawn = (name) => new RegExp(` ${name}="([^"]*)"`).exec(consent?.text ?? "")?.[1] ?? null;
+  const requestId = path ? path.slice("/me/connect?request=".length) : "";
+  check("the consent page offers to let the app sign, ticked, and carries what the statement is built from and nothing for a passkey to sign",
+    consent?.status === 200 && consent.text.includes('<input type="checkbox" name="sign_posts" value="1" form="allow-app" checked>') &&
+    drawn("data-connection") === requestId && drawn("data-peer") === aliceId && /^[1-9][0-9]*$/.test(drawn("data-not-before") ?? "") &&
+    consent.text.includes('<script type="module" src="/connect-signing.js"></script>') && !/challenge/i.test(consent.text) &&
+    !consent.text.includes(`"${app.client_id}"`),
+    consent ? said(consent) : `went to '${at}'`);
+  const script = await request("/connect-signing.js");
+  const rule = await request("/connection-key.js");
+  check("/connect-signing.js and /connection-key.js, which it imports, are served as scripts",
+    [script, rule].every((r) => r.status === 200 && /javascript/.test(r.headers.get("content-type") ?? "")), `${script.status} ${rule.status}`);
+  const notBefore = Number(drawn("data-not-before"));
+  const notAfter = notAfterOf(notBefore, Number(drawn("data-lifetime-days")));
+  if (!consent || notAfter === null || !drawn("data-rp-id")) return;
+
+  const key = generateKeyPairSync("ed25519");
+  const seed = key.privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
+  const statement = Buffer.from(statementBytes({
+    peerId: aliceId, key: key.publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("hex"),
+    connection: requestId, notBefore, notAfter,
+  }));
+  const signed = answer(alice, sha256(Buffer.concat([label("connection-key"), statement])).toString("hex"), drawn("data-rp-id"));
+  const allowed = await post("/me/connect", cookie, {
+    csrf: csrfOf(consent.text) ?? "", request: requestId, decision: "allow", signing_offered: "1", sign_posts: "1",
+    ck_statement: b64u(statement), ck_seed: b64u(seed), ck_credential_id: signed.credential_id, ck_client_data_json: signed.client_data_json,
+    ck_authenticator_data: signed.authenticator_data, ck_signature: signed.signature,
+  });
+  const code = refreshTo(allowed)?.searchParams.get("code");
+  check("Allow with the box ticked passes the key the passkey allowed to the product, which takes it",
+    allowed.status === 200 && allowed.text.includes("It signs the posts it sends with the key your passkey allowed.") && Boolean(code), said(allowed));
+  check("the page after Allow carries none of the key's seed", !allowed.text.includes(b64u(seed)), "the seed reached the page");
+  if (!code) return;
+
+  const traded = await fetch(server.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: callback, client_id: app.client_id, code_verifier: verifier, resource: resource.resource }),
+  });
+  const token = (await traded.json().catch(() => ({}))).access_token;
+  if (typeof token !== "string") return bad("the app trades the code of a signing connection for an access token", `got ${traded.status}`);
+  const title = `Sent through the app ${randomBytes(3).toString("hex")}`;
+  const sent = await connector(token, "tools/call", { name: "schellingaf_post", arguments: { space: spaceName, kind: "obs", title, body: "Signed by the app's connection." } });
+  const seq = sent.body?.result?.structuredContent?.seq ?? /at seq (\d+)/.exec(sent.body?.result?.content?.[0]?.text ?? "")?.[1];
+  check("the app posts through the connector", sent.status === 200 && /^\d+$/.test(String(seq ?? "")), `${sent.status} ${JSON.stringify(sent.body).slice(0, 300)}`);
+  if (!seq) return;
+
+  const page = await request(`/me/spaces/${spaceName}/${seq}`, { cookie });
+  check("the post's page says it was signed through an app connection alice's key allowed with its passkey, and what that does not show",
+    page.status === 200 && page.text.includes("Signed through an app connection: key") && page.text.includes("allowed it, with its passkey, to sign for that key from") &&
+    page.text.includes("That does not show anybody saw this post.") && !page.text.includes("Signed by key"), said(page));
+  const listed = await request(`/me/spaces/${spaceName}`, { cookie });
+  check("the space's page marks the post signed through an app connection", listed.text.includes("signed through an app connection"), said(listed));
+  const doc = JSON.parse((await request(`/me/spaces/${spaceName}/${seq}.json`, { cookie })).text || "{}");
+  check("its JSON says this site checked a connection's signature, from the time the page drew until an hour past the token's lifetime",
+    doc.verification?.signature === "verified" && doc.verification?.alg === "connection" && doc.verification?.problems?.length === 0 &&
+    doc.verification?.connection?.not_before === notBefore && doc.verification?.connection?.not_after === notAfter,
+    JSON.stringify(doc.verification ?? null).slice(0, 300));
+}
+
 async function linksSetup() {
   const name = `probe-links-${randomBytes(3).toString("hex")}`;
   const made = await post("/me/new", aliceCookie, {

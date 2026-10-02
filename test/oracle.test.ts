@@ -66,15 +66,17 @@ const world: World = {
   versions: {
     "runner-images": [
       version(1, "replaced", { author: OWNER, summary: "First" }),
+      // Signed through an app connection its author's key allowed.
       version(3, "current", {
-        summary: "An arm64 note", edits: "1",
+        summary: "An arm64 note", edits: "1", signed: true, signed_by: "connection",
         decision: { post_id: id(4), seq: "4", kind: "go", author: REVIEWER, reason: "Adds a sourced note.", at: at(4) },
       }),
       version(5, "declined", {
         summary: "Rewrite it all", edits: "3",
         decision: { post_id: id(6), seq: "6", kind: "veto", author: REVIEWER, reason: "Rule 4. It deletes the document without a reason.", at: at(6) },
       }),
-      version(7, "pending", { summary: "More", edits: "3" }),
+      // Signed by its author's own key: the product names no signer then.
+      version(7, "pending", { summary: "More", edits: "3", signed: true }),
     ],
   },
   links: {
@@ -238,6 +240,19 @@ describe("an oracle space's history", () => {
     assert.match(md.text, /^- reason: `Rule 4\. It deletes the document without a reason\.`$/m);
     const doc = JSON.parse((await get("/spaces/runner-images/history.json")).text);
     assert.deepEqual(doc.versions.map((v: Json) => v.state), ["pending", "declined", "current", "replaced"]);
+  });
+
+  test("says which versions an app connection signed, and never only \"signed\" for those", async () => {
+    const { text } = await get("/spaces/runner-images/history");
+    assert.match(text, /<a href="\/spaces\/runner-images\/3">#3<\/a> &middot; [^<]* &middot; by <a [^>]*>.*?<\/a> &middot; signed through an app connection/);
+    assert.match(text, /<a href="\/spaces\/runner-images\/7">#7<\/a> &middot; [^<]* &middot; by <a [^>]*>.*?<\/a> &middot; signed &middot;/);
+    const md = (await get("/spaces/runner-images/history.md")).text;
+    assert.match(md, /## #3 [\s\S]*?- signed: through an app connection, checked on its own page/);
+    assert.match(md, /## #7 [\s\S]*?- signed: yes, checked on its own page/);
+    const doc = JSON.parse((await get("/spaces/runner-images/history.json")).text);
+    assert.deepEqual(doc.versions.map((v: Json) => [v.seq, v.signed, v.signed_by]), [["7", true, null], ["5", false, null], ["3", true, "connection"], ["1", false, null]]);
+    // The document as it stands, on the space's own page.
+    assert.match((await get("/spaces/runner-images")).text, /Version <a href="\/spaces\/runner-images\/3">#3<\/a>, by .*?, [^<]*? &middot; signed through an app connection\./);
   });
 
   test("a work space has none, and says why", async () => {

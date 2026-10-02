@@ -36,10 +36,27 @@
 //   6. The app's name is set apart from the sentence around it (<bdi>), and a
 //      publisher is said to be where a document was found, not somebody vouching:
 //      a host that serves anybody's files serves the document too.
+//   7. An app that may write is offered signing: a box, ticked, "Let this app sign
+//      your posts". With it ticked, src/connect-signing.js makes the connection a key
+//      of its own in the browser, the person's passkey signs once the statement that
+//      lets that key sign for theirs (src/connection-key.js), and the statement, the
+//      passkey's answer and the key's seed come back with Allow. They go on to the
+//      product as connection_key and nowhere else: never logged, never stored here,
+//      never written into a page. Unticked, Allow connects the app unsigned as before.
+//      Ticked with nothing beside it, because the script never handled the press,
+//      nothing is connected and the page is shown again, so a ticked box never becomes
+//      an unsigned connection by itself; and what the script makes, sent with the box
+//      unticked, is shown again the same way. The box is offered only when the
+//      product's capability document lists the label the statement is signed under, so
+//      a site deployed before its product never offers it. The page after Allow says the app signs only
+//      when the product says it kept the key. The page carries what the script builds the
+//      statement from, and never bytes for a passkey to sign.
 
 import { apiGet, apiWrite, type Refusal } from "./api.ts";
-import { buttonForm, formShell, guardScript, guardedButtonForm, resultHtml } from "./me-render.ts";
-import { esc, htmlPage, shortKey, when, type Viewer } from "./render.ts";
+import { capabilities, passkeySite, takesConnectionKeys, type Capabilities } from "./capabilities.ts";
+import { notAfterOf, readStatement, statementBytes } from "./connection-key.js";
+import { buttonForm, emptyFields, formShell, guardScript, guardedButtonForm, hiddenFields, refusalAlert, resultHtml } from "./me-render.ts";
+import { csrfField, esc, htmlPage, shortKey, when, type Viewer } from "./render.ts";
 import { badForm, html, page, type SignedInContext } from "./signed-in.ts";
 import { UUID } from "./grammar.ts";
 
@@ -120,7 +137,92 @@ function mayDo(scope: string[]): string {
     : "read everything your key can read, in every space your key is in, including private ones, and nothing else: it cannot post or change anything.";
 }
 
-function consentHtml(ctx: SignedInContext, a: Authorization): string {
+/** The fields src/connect-signing.js fills once the passkey has signed, each going on to
+ *  the product under connection_key, with the most characters of unpadded base64url each
+ *  may hold: a statement of the product's 512 bytes, D's 32-byte seed exactly, and a
+ *  passkey's answer within the bounds src/me.ts holds a signed post's to. */
+const CONNECTION_KEY_FIELDS = [
+  ["ck_statement", 683],
+  ["ck_seed", 43],
+  ["ck_credential_id", 1_366],
+  ["ck_client_data_json", 5_462],
+  ["ck_authenticator_data", 5_462],
+  ["ck_signature", 1_366],
+] as const;
+
+/** What a person reads beside the box. OURS, for the owner's approval. */
+const SIGNING_LABEL = "Let this app sign your posts";
+const SIGNING_NOTE =
+  "When you press Allow, your passkey signs once to let this app connection sign the posts the app sends, until an hour after its access token would run out. " +
+  "Revoking the app ends that sooner, and a post the app sends after it ends is not signed. " +
+  "While the app is connected, the service holds the key this app connection signs with. " +
+  "A post signed this way shows that your key allowed this app connection to sign for it, and that the app connection, or the service, signed it. " +
+  "It does not show that you saw it. " +
+  "Untick the box to allow the app without signing: a space that accepts signed posts only then refuses its posts.";
+
+/** What the page says when Allow arrived with the box ticked and nothing beside it. OURS. */
+const NOT_PREPARED =
+  "Nothing was allowed: this page had not finished preparing to let the app sign your posts. Press Allow again, or untick the box to allow the app without signing.";
+
+/** What the page says when Allow arrived with a key for signing and the box unticked. OURS. */
+const NOT_TICKED =
+  "Nothing was allowed: this page sent a key for the app to sign with, but the box was not ticked. Press Allow again.";
+
+/** What the browser builds the statement from, beside the request's id and the key's. */
+interface Signing { days: number }
+
+/** Now, in whole seconds, by this site's server's clock. */
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+/**
+ * What the browser builds the statement from, when this request can have one: a service
+ * that takes connection keys, an app that may write, and a lifetime in whole days that
+ * makes a statement the statement's own writer takes, with this key and request. Null
+ * otherwise, and the page offers no box.
+ */
+function signingFor(a: Authorization, peerId: string, caps: Capabilities): Signing | null {
+  if (!takesConnectionKeys(caps) || !a.scope.includes("write")) return null;
+  const days = a.token_lifetime_days;
+  const notBefore = nowSeconds();
+  const notAfter = notAfterOf(notBefore, days);
+  if (notAfter === null) return null;
+  try {
+    statementBytes({ peerId, key: "0".repeat(64), connection: a.request_id, notBefore, notAfter });
+  } catch {
+    return null;
+  }
+  return { days };
+}
+
+/**
+ * Allow, for an app that may be let sign: the box, what it means, and the form that
+ * carries what src/connect-signing.js builds the statement from. The box sits outside the
+ * form and belongs to it by its form attribute, so Allow and Decline keep one line.
+ */
+function allowWithSigning(ctx: SignedInContext, a: Authorization, signing: Signing, rpId: string | null): string {
+  const viewer = ctx.viewer;
+  const attributes = [
+    ["data-connection", a.request_id],
+    ["data-peer", viewer.peerId],
+    ["data-lifetime-days", String(signing.days)],
+    // When the permission starts: the time the page is drawn, by this site's server's
+    // clock, never the browser's, which may be wrong by any amount. The product checks it
+    // against its own clock, allowing for a little difference between the two.
+    ["data-not-before", String(nowSeconds())],
+    ...(rpId ? [["data-rp-id", rpId]] : []),
+    ...(viewer.passkey ? [["data-credential", viewer.passkey]] : []),
+  ].map(([name, value]) => ` ${name}="${esc(value!)}"`).join("");
+  return `<div class="connection-key">
+<p><label><input type="checkbox" name="sign_posts" value="1" form="allow-app" checked> ${esc(SIGNING_LABEL)}</label></p>
+<p class="meta">${esc(SIGNING_NOTE)}</p>
+<p class="meta" data-sign-status role="status" aria-live="polite"></p>
+</div>
+<p><form method="post" action="/me/connect" class="inline" id="allow-app" autocomplete="off" data-connection-key${attributes}>${csrfField(viewer)}${
+    hiddenFields({ request: a.request_id, decision: "allow", signing_offered: "1" })}${emptyFields(CONNECTION_KEY_FIELDS.map(([name]) => name))}<button type="submit" data-guard disabled>Allow</button> <span class="meta" data-guard-note role="status" aria-live="polite"></span></form> ${
+    buttonForm(viewer, "/me/connect", "Decline", { request: a.request_id, decision: "decline" })}</p>`;
+}
+
+function consentHtml(ctx: SignedInContext, a: Authorization, signing: Signing | null, rpId: string | null, said: string | null): string {
   const name = a.client.name ? `“<bdi>${esc(a.client.name)}</bdi>”` : "an app that gave no name";
   const who = a.client.kind === "metadata_document" && a.client.publisher
     ? `<dt>its description is published at</dt><dd><code>${esc(a.client.publisher)}</code>. The name above is what that description says, and anybody who can put a file on that host could have written it.</dd>`
@@ -129,6 +231,12 @@ function consentHtml(ctx: SignedInContext, a: Authorization): string {
     ? `<p class="note warn">It returns you to a program on this computer, not to a website. Allow it only if you started connecting from a program here yourself, just now, such as Claude Code.</p>`
     : "";
   const answer = (decision: "allow" | "decline") => ({ request: a.request_id, decision });
+  const buttons = signing
+    ? allowWithSigning(ctx, a, signing, rpId)
+    : `<p>${guardedButtonForm(ctx.viewer, "/me/connect", "Allow", answer("allow"))} ${buttonForm(ctx.viewer, "/me/connect", "Decline", answer("decline"))}</p>`;
+  // The module runs once the page is read, so after src/allow.js, whose press check
+  // then comes first on every Allow.
+  const scripts = `${guardScript("Allow", "Decline needs no script.")}${signing ? `\n<script type="module" src="/connect-signing.js"></script>` : ""}`;
   return htmlPage(formShell("Connect an app", ctx.viewer), `<h1>An app wants to connect as your key</h1>
 <p class="lead">If you allow it, ${name} can ${esc(mayDo(a.scope))}</p>
 <dl>
@@ -141,17 +249,24 @@ ${who}
 <dt>answer by</dt><dd>${esc(when(a.expires_at))}</dd>
 </dl>
 ${loopback}<p class="note">Allow only an app you started connecting yourself, just now. Nothing here can check what the app will do; what it does as your key is done by your key.</p>
-<p>${guardedButtonForm(ctx.viewer, "/me/connect", "Allow", answer("allow"))} ${buttonForm(ctx.viewer, "/me/connect", "Decline", answer("decline"))}</p>
-${guardScript("Allow", "Decline needs no script.")}`);
+${refusalAlert(said)}${buttons}
+${scripts}`);
 }
 
 export async function readConnect(ctx: SignedInContext): Promise<Response> {
   const id = ctx.url.searchParams.get("request") ?? "";
   if (!UUID.test(id)) return connectArrivalError(ctx.url, ctx.viewer);
+  return consentPage(ctx, id, null);
+}
+
+/** The page that asks the person about request `id`, with `said` above its buttons when
+ *  a press of Allow came back. */
+async function consentPage(ctx: SignedInContext, id: string, said: string | null): Promise<Response> {
   const res = await apiGet<unknown>({ ...ctx.env }, `/v1/authorizations/${id}`, "session");
   if (!res.ok) return answered(ctx, res);
   const a = shape(res.data);
-  if (!a) {
+  // The request asked about, and no other: its id goes into the statement the passkey signs.
+  if (!a || a.request_id !== id) {
     return page(resultHtml(formShell("Connect an app", ctx.viewer), "Not shown",
       "The service answered with something this site cannot show, so nothing was asked of you.", [["/me", "Your key"]], true), 502);
   }
@@ -160,7 +275,48 @@ export async function readConnect(ctx: SignedInContext): Promise<Response> {
     return page(resultHtml(formShell("Connect an app", ctx.viewer), "Already answered",
       "This request to connect was already allowed or declined. To connect the app again, start again from the app.", [["/me/tokens", "Access tokens"], ["/me", "Your key"]]), 409);
   }
-  return html(consentHtml(ctx, a));
+  const caps = await capabilities();
+  const signing = signingFor(a, ctx.viewer.peerId, caps);
+  const site = signing ? passkeySite(caps) : null;
+  return page(consentHtml(ctx, a, signing, site?.rpId ?? null, said), said ? 400 : 200);
+}
+
+/** Unpadded base64url, strictly: re-encoded it must be what was sent. */
+function base64url(value: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try {
+    const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const again = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return again === value ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What an Allow form carries for the product's connection_key: every field filled by
+ * src/connect-signing.js in its shape, a statement of exactly its shape for this key and
+ * this request, and a seed of 32 bytes. "none" when the form carries none of them, which
+ * is Allow unticked, or ticked in a page whose script never handled the press; null for
+ * anything between, which no page of this site sends.
+ *
+ * The product checks the statement whole, its signature and that `key` is the seed's
+ * own; this checks only what this site can, so a form that could never be accepted is
+ * refused here with nothing sent.
+ */
+function connectionKeyOf(form: URLSearchParams, requestId: string, peerId: string): Record<string, unknown> | "none" | null {
+  const values = CONNECTION_KEY_FIELDS.map(([name, max]) => [form.get(name) ?? "", max] as const);
+  if (values.every(([value]) => value === "")) return "none";
+  if (values.some(([value, max]) => value === "" || value.length > max || base64url(value) === null)) return null;
+  const [statement, seed, credentialId, clientData, authenticatorData, signature] = values.map(([value]) => value) as string[];
+  const read = readStatement(base64url(statement!));
+  if (!read || read.peer_id !== peerId || read.connection !== requestId || base64url(seed!)!.length !== 32) return null;
+  return {
+    statement,
+    signature: { alg: "webauthn", credential_id: credentialId, client_data_json: clientData, authenticator_data: authenticatorData, signature },
+    seed,
+  };
 }
 
 export async function actOnConnect(ctx: SignedInContext, form: URLSearchParams): Promise<Response> {
@@ -169,8 +325,20 @@ export async function actOnConnect(ctx: SignedInContext, form: URLSearchParams):
   if (!UUID.test(id) || (decision !== "allow" && decision !== "decline")) {
     return badForm(ctx.viewer);
   }
-  const res = await apiWrite<{ redirect_to?: unknown }>(ctx.session, "POST",
-    `/v1/authorizations/${id}/${decision === "allow" ? "approve" : "decline"}`, {});
+  // Read only for Allow: a decline sends nothing of it anywhere.
+  const key = decision === "allow" ? connectionKeyOf(form, id, ctx.viewer.peerId) : "none";
+  if (key === null) {
+    return badForm(ctx.viewer, "That was not what this page sends to let an app sign your posts, so nothing was changed. Go back, reload the page and press Allow again.");
+  }
+  // The box ticked, and nothing the script makes beside it: the press reached here before
+  // the script handled it, or without it. Or what the script makes, with the box unticked.
+  // Either way the form does not say what it sends: nothing is allowed, and the person is
+  // asked again.
+  const ticked = form.get("sign_posts") === "1";
+  if (decision === "allow" && key === "none" && ticked) return consentPage(ctx, id, NOT_PREPARED);
+  if (decision === "allow" && key !== "none" && !ticked) return consentPage(ctx, id, NOT_TICKED);
+  const res = await apiWrite<{ redirect_to?: unknown; connection_key?: unknown }>(ctx.session, "POST",
+    `/v1/authorizations/${id}/${decision === "allow" ? "approve" : "decline"}`, key === "none" ? {} : { connection_key: key });
   if (!res.ok) return answered(ctx, res);
   const to = returnAddress(res.data.redirect_to);
   if (to === null) {
@@ -179,8 +347,13 @@ export async function actOnConnect(ctx: SignedInContext, form: URLSearchParams):
   }
   const host = new URL(to).host || new URL(to).protocol.replace(/:$/, "");
   const heading = decision === "allow" ? "Allowed" : "Declined";
+  // Whether its posts are signed, said only where the page offered the box: an app that
+  // may only read posts nothing. Signed only on the product's word that it kept the key.
+  const signing = key !== "none" && res.data.connection_key === "kept"
+    ? " It signs the posts it sends with the key your passkey allowed."
+    : key !== "none" || form.get("signing_offered") === "1" ? " Its posts will not be signed." : "";
   const detail = decision === "allow"
-    ? `The app can now act as your key. Revoke it any time on Access tokens. Returning you to ${host}.`
+    ? `The app can now act as your key.${signing} Revoke it any time on Access tokens. Returning you to ${host}.`
     : `The app was told you declined, and nothing was connected. Returning you to ${host}.`;
   // The address carries the app's code, so this answer is never stored and never
   // indexed (src/index.ts sends every signed-in response private, no-store), and it

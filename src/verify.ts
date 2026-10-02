@@ -9,7 +9,10 @@
 //                   the post says; the key that signed is the one the author's key
 //                   id is derived from; and the signature verifies, an Ed25519 key's
 //                   over the object-signature preimage, a passkey's over the
-//                   browser's envelope whose challenge is that preimage's hash
+//                   browser's envelope whose challenge is that preimage's hash; or,
+//                   for a post an app connection signed, the author's key signed the
+//                   statement allowing that connection's key, for this author, and
+//                   that key signed the preimage before the permission ended
 //   the chain       the post's link is the hash of its place, its admission, the
 //                   link before it and its object_id
 //   the record      the post is a leaf of the checkpoint covering it; the checkpoint
@@ -23,6 +26,7 @@
 // here fetches: the handler hands it what the service returned.
 
 import { sameValue } from "./jcs.js";
+import { readStatement, signedBytes } from "./connection-key.js";
 import { ISO_TIME, KEY_ID, POSITION, POST_SEQ, UUID } from "./grammar.ts";
 
 /** Bytes backed by an ordinary ArrayBuffer, which is what Web Crypto takes. */
@@ -125,6 +129,85 @@ function derToRaw(der: Bytes): Bytes | null {
   return r && s && at === der.length ? concat(r, s) : null;
 }
 
+/** The sentences a passkey's signature is checked in, one for each way it can fail. A
+ *  post's own signature and the statement that lets an app connection sign each say
+ *  them of what they are. */
+interface PasskeyWords {
+  shape: string;
+  notAuthor: string;
+  notGet: string;
+  challenge: string;
+  framed: string;
+  noSite: string;
+  origin: string;
+  rpId: string;
+  flags: string;
+  verifies: string;
+}
+
+const POST_PASSKEY: PasskeyWords = {
+  shape: "The passkey's signature is not written as a browser's prompt writes one.",
+  notAuthor: "The passkey that signed is not the author's key.",
+  notGet: "The browser did not record a signing prompt.",
+  challenge: "The passkey signed a different challenge from this post's.",
+  framed: "The passkey prompt ran inside another site's frame.",
+  noSite: "The service publishes no site or pages for its passkeys, so this site cannot confirm where this passkey signed.",
+  origin: "The passkey prompt ran on a page the service does not accept.",
+  rpId: "The passkey belongs to another site.",
+  flags: "The passkey did not confirm the person was present and verified.",
+  verifies: "The passkey's signature does not verify.",
+};
+
+const ALLOWING_PASSKEY: PasskeyWords = {
+  shape: "The passkey's signature allowing the app connection is not written as a browser's prompt writes one.",
+  notAuthor: "The passkey that allowed the app connection is not the author's key.",
+  notGet: "The browser did not record a signing prompt for allowing the app connection.",
+  challenge: "The passkey allowing the app connection signed a different challenge from the statement's.",
+  framed: "The passkey prompt allowing the app connection ran inside another site's frame.",
+  noSite: "The service publishes no site or pages for its passkeys, so this site cannot confirm where the passkey allowing the app connection signed.",
+  origin: "The passkey prompt allowing the app connection ran on a page the service does not accept.",
+  rpId: "The passkey allowing the app connection belongs to another site.",
+  flags: "The passkey allowing the app connection did not confirm the person was present and verified.",
+  verifies: "The passkey's signature allowing the app connection does not verify.",
+};
+
+/**
+ * A passkey's signature, as a browser's prompt writes one, over `challenge`: the key is
+ * the author's, the prompt was a signing one for exactly that challenge, on a page and
+ * for a site the service names, outside another site's frame, with the person present
+ * and verified, and the signature verifies over the authenticator data and the hash of
+ * the client data. The problems, in `words`, in that order.
+ */
+async function passkeyProblems(fields: { keyAlgorithm: unknown; publicKey: unknown; clientDataJson: unknown; authenticatorData: unknown; value: unknown },
+  challenge: Bytes, author: string, passkeys: Passkeys, words: PasskeyWords): Promise<string[]> {
+  const problems: string[] = [];
+  const keyAlgorithm = typeof fields.keyAlgorithm === "string" && /^(ES256|EdDSA|RS256)$/.test(fields.keyAlgorithm) ? fields.keyAlgorithm : null;
+  const spki = base64url(fields.publicKey);
+  const clientData = base64url(fields.clientDataJson);
+  const auth = base64url(fields.authenticatorData);
+  const value = base64url(fields.value);
+  const client = clientData ? json(clientData) : undefined;
+  if (!spki || !clientData || !auth || !value || !client || typeof client !== "object" || auth.length < 37 || keyAlgorithm === null) {
+    return [words.shape];
+  }
+  if (toHex(await sha256(label("passkey"), spki)) !== author) problems.push(words.notAuthor);
+  if (client.type !== "webauthn.get") problems.push(words.notGet);
+  if (client.challenge !== toBase64url(challenge)) problems.push(words.challenge);
+  if (client.crossOrigin === true || client.topOrigin !== undefined) problems.push(words.framed);
+  // Where a passkey signed is part of what it signed. Without the service's word on
+  // which site and pages its passkeys belong to, a prompt run on any other site would
+  // pass, so this cannot be confirmed at all.
+  if (passkeys === null) {
+    problems.push(words.noSite);
+  } else {
+    if (!passkeys.origins.includes(client.origin)) problems.push(words.origin);
+    if (!equal(auth.slice(0, 32), await sha256(encoder.encode(passkeys.rpId)))) problems.push(words.rpId);
+  }
+  if ((auth[32]! & 0x05) !== 0x05) problems.push(words.flags);
+  if (!(await passkeySignature(keyAlgorithm, spki, value, concat(auth, await sha256(clientData))))) problems.push(words.verifies);
+  return problems;
+}
+
 async function passkeySignature(algorithm: string, spki: Bytes, signature: Bytes, message: Bytes): Promise<boolean> {
   try {
     if (algorithm === "ES256") {
@@ -159,16 +242,101 @@ const UNREADABLE = "The service's proof is not in a shape this site can read.";
 /** Two JSON values equal by value, where an absent value is null. */
 const same = (a: unknown, b: unknown): boolean => sameValue(a ?? null, b ?? null);
 
+/**
+ * A post an app connection signed. The proof's signature is the connection's,
+ * {"alg":"connection","signature":hex,"connection_key":hex}, and inside it the proof
+ * carries the statement its author's key signed to allow that connection, `delegation`,
+ * {"statement":b64u,"signature":envelope} (src/connection-key.js), and the author's own
+ * key, `public_key` and a passkey's `key_algorithm`, as a post's own signature does: a
+ * reader with no key of its own cannot ask the service for the author's, and this checks
+ * it against the author's id, so it need not trust the service for it. Checked in this
+ * order: the connection's signature and key are written as Ed25519's are; the statement is
+ * canonical and of exactly its shape; it names the post's author as the key that allows,
+ * and the key that signed the post as the connection's; the post was sent within the
+ * permission, from not_before to not_after, by the time the service gives it; the author's
+ * key signed the statement, an Ed25519 key over L("connection-key") ‖ statement or a
+ * passkey whose challenge is the hash of that, and that key is the one the author's id is
+ * derived from; and the connection's key signed the post, over the same preimage an
+ * author's own Ed25519 key signs.
+ */
+async function connectionProblems(sig: any, preimage: Bytes, post: any, passkeys: Passkeys):
+  Promise<{ problems: string[]; allowed: AllowedConnection | null }> {
+  const key = hex(sig.connection_key, 32);
+  const value = hex(sig.signature, 64);
+  if (!key || !value) return { problems: ["The app connection's signature or its key is not written as an Ed25519 signature is."], allowed: null };
+  const given = sig.delegation && typeof sig.delegation === "object" ? sig.delegation : {};
+  const bytes = base64url(given.statement);
+  const statement = bytes ? readStatement(bytes) : null;
+  const envelope = given.signature && typeof given.signature === "object" ? given.signature : null;
+  if (!bytes || !statement || !envelope) {
+    return { problems: ["The post carries no statement of its author allowing the app connection that this site can read."], allowed: null };
+  }
+  const problems: string[] = [];
+  if (statement.peer_id !== post.author) problems.push("The statement allowing the app connection names another key than the post's author.");
+  if (statement.key !== sig.connection_key) problems.push("The statement allowing the app connection names another key than the one that signed the post.");
+  const sent = typeof post.posted_at === "string" && ISO_TIME.test(post.posted_at) ? Date.parse(post.posted_at) : NaN;
+  if (Number.isNaN(sent)) {
+    problems.push("The post does not say when it was sent, so this site cannot check that the app connection could sign it then.");
+  } else if (sent < statement.not_before * 1000) {
+    problems.push("The post was sent before its author's key allowed the app connection to sign.");
+  } else if (sent > statement.not_after * 1000) {
+    problems.push("The post was sent after its author's permission for the app connection ended.");
+  }
+
+  const signed: Bytes = signedBytes(bytes);
+  const authorPublicKey = sig.public_key;
+  let allowedWith: AllowedConnection["allowedWith"] | null = null;
+  if (envelope.alg === "ed25519") {
+    allowedWith = "ed25519";
+    const authorKey = hex(authorPublicKey, 32);
+    const authorSignature = hex(envelope.signature, 64);
+    if (!authorKey || !authorSignature) {
+      problems.push("The signature allowing the app connection, or its key, is not written as an Ed25519 signature is.");
+    } else {
+      if (toHex(await sha256(label("agent"), authorKey)) !== post.author) problems.push("The key that allowed the app connection is not the author's key.");
+      if (!(await ed25519(authorKey, authorSignature, signed))) problems.push("The Ed25519 signature allowing the app connection does not verify.");
+    }
+  } else if (envelope.alg === "webauthn") {
+    allowedWith = "webauthn";
+    problems.push(...await passkeyProblems(
+      { keyAlgorithm: sig.key_algorithm, publicKey: authorPublicKey, clientDataJson: envelope.client_data_json, authenticatorData: envelope.authenticator_data, value: envelope.signature },
+      await sha256(signed), post.author, passkeys, ALLOWING_PASSKEY));
+  } else {
+    problems.push("The statement allowing the app connection carries a signature of a kind this site does not know.");
+  }
+  if (!(await ed25519(key, value, preimage))) problems.push("The app connection's signature does not verify.");
+  return {
+    problems,
+    allowed: allowedWith ? { connection: statement.connection, notBefore: statement.not_before, notAfter: statement.not_after, allowedWith } : null,
+  };
+}
+
 export interface PostCheck {
-  /** verified: its author's key signed these bytes. unsigned: nobody did. withheld:
-   *  the bytes are not served. hidden: not served either, because the owner or an admin
-   *  of its space hid the post. failed: a check did not hold, named in problems. */
+  /** verified: its author's key signed these bytes, or an app connection that key
+   *  allowed did. unsigned: nobody did. withheld: the bytes are not served. hidden: not
+   *  served either, because the owner or an admin of its space hid the post. failed: a
+   *  check did not hold, named in problems. */
   signature: "verified" | "unsigned" | "withheld" | "hidden" | "failed";
-  /** How it was signed, when it was: an Ed25519 key's own signature, or a passkey's. */
-  alg: "ed25519" | "webauthn" | null;
+  /** How it was signed, when it was: an Ed25519 key's own signature, a passkey's, or an
+   *  app connection's key that the author's key allowed. */
+  alg: "ed25519" | "webauthn" | "connection" | null;
   /** Whether the link is its formula. */
   chain: "holds" | "broken";
   problems: string[];
+  /** For a post an app connection signed, once every check held: what the author's key
+   *  allowed, from the statement it signed. Null otherwise. */
+  connection?: AllowedConnection | null;
+}
+
+/** What a statement letting an app connection sign says, once it checked out. */
+export interface AllowedConnection {
+  /** The request to connect it was allowed on. */
+  connection: string;
+  /** When the permission starts and ends, in whole seconds since 1970. */
+  notBefore: number;
+  notAfter: number;
+  /** How the author's key signed the statement: a passkey, or an Ed25519 key. */
+  allowedWith: "webauthn" | "ed25519";
 }
 
 /**
@@ -180,8 +348,9 @@ export interface PostCheck {
 export async function checkPost(post: any, passkeys: Passkeys, spaceId: string | null = null): Promise<PostCheck> {
   const problems: string[] = [];
   let alg: PostCheck["alg"] = null;
-  let keyAlgorithm: string | null = null;
-  const result = (signature: PostCheck["signature"], chain: PostCheck["chain"]): PostCheck => ({ signature, alg, chain, problems });
+  let connection: AllowedConnection | null = null;
+  const result = (signature: PostCheck["signature"], chain: PostCheck["chain"]): PostCheck =>
+    ({ signature, alg, chain, problems, connection: signature === "verified" ? connection : null });
   try {
     const proof = post?.proof;
     const objectId = hex(proof?.object_id, 32);
@@ -278,33 +447,15 @@ export async function checkPost(post: any, passkeys: Passkeys, spaceId: string |
           signature = problems.length ? "failed" : "verified";
         } else if (sig.alg === "webauthn") {
           alg = "webauthn";
-          keyAlgorithm = typeof sig.key_algorithm === "string" && /^(ES256|EdDSA|RS256)$/.test(sig.key_algorithm) ? sig.key_algorithm : null;
-          const spki = base64url(sig.public_key);
-          const clientData = base64url(sig.client_data_json);
-          const auth = base64url(sig.authenticator_data);
-          const value = base64url(sig.value);
-          const client = clientData ? json(clientData) : undefined;
-          if (!spki || !clientData || !auth || !value || !client || typeof client !== "object" || auth.length < 37 || keyAlgorithm === null) {
-            problems.push("The passkey's signature is not written as a browser's prompt writes one.");
-          } else {
-            if (toHex(await sha256(label("passkey"), spki)) !== post.author) problems.push("The passkey that signed is not the author's key.");
-            if (client.type !== "webauthn.get") problems.push("The browser did not record a signing prompt.");
-            if (client.challenge !== toBase64url(await sha256(preimage))) problems.push("The passkey signed a different challenge from this post's.");
-            if (client.crossOrigin === true || client.topOrigin !== undefined) problems.push("The passkey prompt ran inside another site's frame.");
-            // Where a passkey signed is part of what it signed. Without the service's
-            // word on which site and pages its passkeys belong to, a prompt run on any
-            // other site would pass, so this cannot be confirmed at all.
-            if (passkeys === null) {
-              problems.push("The service publishes no site or pages for its passkeys, so this site cannot confirm where this passkey signed.");
-            } else {
-              if (!passkeys.origins.includes(client.origin)) problems.push("The passkey prompt ran on a page the service does not accept.");
-              if (!equal(auth.slice(0, 32), await sha256(encoder.encode(passkeys.rpId)))) problems.push("The passkey belongs to another site.");
-            }
-            if ((auth[32]! & 0x05) !== 0x05) problems.push("The passkey did not confirm the person was present and verified.");
-            if (!(await passkeySignature(keyAlgorithm, spki, value, concat(auth, await sha256(clientData))))) {
-              problems.push("The passkey's signature does not verify.");
-            }
-          }
+          problems.push(...await passkeyProblems(
+            { keyAlgorithm: sig.key_algorithm, publicKey: sig.public_key, clientDataJson: sig.client_data_json, authenticatorData: sig.authenticator_data, value: sig.value },
+            await sha256(preimage), post.author, passkeys, POST_PASSKEY));
+          signature = problems.length ? "failed" : "verified";
+        } else if (sig.alg === "connection") {
+          alg = "connection";
+          const checked = await connectionProblems(sig, preimage, post, passkeys);
+          problems.push(...checked.problems);
+          connection = checked.allowed;
           signature = problems.length ? "failed" : "verified";
         } else {
           problems.push("The post carries a signature of a kind this site does not know.");
