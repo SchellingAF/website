@@ -67,7 +67,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
-import { NO_DOCUMENT, UNREAD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
+import { NO_DOCUMENT, UNREAD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, vouched, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -2781,6 +2781,9 @@ async function numbersPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
 /** A proposal's space is named with this and filed under this category. */
 const PROPOSAL_PREFIX = "proposal-";
 const PROPOSAL_CATEGORY = "this-service";
+/** The space whose owner decides: a status counts only in a version of a document that
+ *  its owner posted. */
+const PROPOSALS_SPACE = "proposals";
 /** The most proposals whose documents one build of the page reads, newest first. Anybody can
  *  open a space that fits the two rules above, and every one costs the service a read. */
 const PROPOSALS_SHOWN = 100;
@@ -2812,6 +2815,11 @@ type Found = Omit<ProposalRow, "status">;
  * them within PROPOSAL_READ_BUDGET_MS, and none after the service says to slow down. A
  * proposal whose document was not read says so and the page is held for a minute only. A
  * space that keeps no document answers NOT_AN_ORACLE, which is "no document yet".
+ *
+ * WHO SET A STATUS. Any key may open a proposal and write its document, so a decision counts
+ * only in a version posted by the owner of the space proposals, whom the build reads once
+ * (proposalsOwner). Each document names the key that posted the version it shows, and
+ * vouched() compares the two. When the owner cannot be read, a decision is not shown at all.
  */
 async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   const found = new Map<string, Found>();
@@ -2848,6 +2856,7 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   const listed = all.slice(0, PROPOSALS_SHOWN);
 
   const statuses: Status[] = listed.map(() => UNREAD);
+  const owner = listed.length ? await proposalsOwner(env, as) : null;
   const until = Date.now() + PROPOSAL_READ_BUDGET_MS;
   let taken = 0;
   let slowDown = false;
@@ -2855,14 +2864,24 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
     for (let i = taken++; i < listed.length; i = taken++) {
       if (slowDown || Date.now() > until) return;
       const res = await apiGet<unknown>(env, `/v1/spaces/${listed[i]!.name}/document`, as);
-      if (res.ok) statuses[i] = readStatus(readableDocument(res.data).text);
-      else if (res.code === "NOT_AN_ORACLE") statuses[i] = NO_DOCUMENT;
+      if (res.ok) {
+        const current = readableDocument(res.data);
+        statuses[i] = vouched(readStatus(current.text), current.version?.author ?? "", owner);
+      } else if (res.code === "NOT_AN_ORACLE") statuses[i] = NO_DOCUMENT;
       else if (res.status === 429) slowDown = true;
     }
   };
   await Promise.all(Array.from({ length: PROPOSAL_READS_AT_ONCE }, worker));
 
   return { ok: true, view: { rows: listed.map((p, i) => ({ ...p, status: statuses[i]! })), more: cut || all.length > listed.length } };
+}
+
+/** The owner of the space proposals, as the service gives it, or null when it cannot be read
+ *  or is not a key's id: one read for the whole build. */
+async function proposalsOwner(env: ApiEnv, as: ReadAs): Promise<string | null> {
+  const res = await apiGet<unknown>(env, `/v1/spaces/${PROPOSALS_SPACE}`, as);
+  const owner = res.ok ? textOrNull(record(res.data).owner) : null;
+  return owner !== null && KEY_ID.test(owner) ? owner : null;
 }
 
 /** The build under way, if one is: a visitor who comes while it is being made waits for it

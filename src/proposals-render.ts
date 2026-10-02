@@ -12,8 +12,15 @@
 // reason a declined proposal gives. Both are text under the escaping rule of
 // src/render.ts, and the status is only ever one of the six words below, written in this
 // file, never the document's own spelling of it.
+//
+// WHO SET A STATUS MATTERS, because any key may open a proposal and write its document. Under
+// the proposal routine a status counts only in a version of the document posted by the owner of
+// the space proposals. accepted, in progress, merged and declined are the words that say what
+// was decided, so one written by anyone else is shown with a note that says so; proposed and
+// discussing decide nothing and are shown as they are.
 
 import { lines, parseDocument } from "./document.ts";
+import { API_ORIGIN } from "./routes.generated.ts";
 import { PEER_NOTICE, PEER_NOTICE_LINE, codeSpan, day, esc, htmlPage, nameLine, noticeHtml, timeLine, trimAtWord, type Shell } from "./render.ts";
 
 // ------------------------------------------------------------------- the status
@@ -30,7 +37,7 @@ const LEADING = new RegExp(`^(${STATUS_WORDS.join("|")})(?![\\p{L}\\p{N}_-])`, "
 const REASON_MAX = 300;
 
 export type Status =
-  | { kind: "word"; word: StatusWord; reason: string | null }
+  | { kind: "word"; word: StatusWord; reason: string | null; /** A decision written by a key that is not the owner's. */ notOwners: boolean }
   /** No document, or one with no Status section, or one whose Status section is empty. */
   | { kind: "no-document" }
   /** A Status section that does not begin with one of the six words. */
@@ -61,7 +68,23 @@ export function readStatus(text: string | null): Status {
   const reason = word === "declined"
     ? trimAtWord(body.slice(first[0].length).replace(/^[\s:;,.–—-]+/u, ""), REASON_MAX).text
     : "";
-  return { kind: "word", word, reason: reason === "" ? null : reason };
+  return { kind: "word", word, reason: reason === "" ? null : reason, notOwners: false };
+}
+
+/** The words that say what was decided, which count only from the owner of the space proposals. */
+const DECISIONS: readonly StatusWord[] = ["accepted", "in progress", "merged", "declined"];
+
+/**
+ * A status as far as who wrote it allows. `author` is the key that posted the version of the
+ * document it was read from, and `owner` the owner of the space proposals, or null when that
+ * could not be read. A decision from the owner stands; from any other key it is the same word
+ * with a note; and with no owner to compare it to it is not shown, since it could be either.
+ * The key is compared whole and exactly, as the service writes one.
+ */
+export function vouched(status: Status, author: string, owner: string | null): Status {
+  if (status.kind !== "word" || !DECISIONS.includes(status.word)) return status;
+  if (owner === null) return UNREAD;
+  return author === owner ? status : { ...status, notOwners: true };
 }
 
 // ------------------------------------------------------------------------ the view
@@ -86,15 +109,21 @@ export interface ProposalsView {
 
 const SPACE_PATH = "/spaces/proposals";
 const CATEGORY_PATH = "/spaces/by/category/this-service";
+/** The steps, in the service's reference. */
+const REFERENCE = `${API_ORIGIN}/reference?section=proposing-a-change`;
 
-/** What a proposal is and how one is opened, with the two places it points to written by
- *  the format: `code` for a name, `link` for the category and the space. */
-const lead = (code: (s: string) => string, link: (text: string, path: string) => string): string =>
+/** What a proposal is and how one is opened, with the three places it points to written by
+ *  the format: `code` for a name, `link` for the category, the space and the reference. */
+const lead = (code: (s: string) => string, link: (text: string, to: string) => string): string =>
   `A proposal is a request to change the service, kept in a public work space whose name starts with ${code("proposal-")} ` +
   `and that is filed under the category ${link("this-service", CATEGORY_PATH)}. ` +
-  `To open one, start with the space ${link("proposals", SPACE_PATH)}.`;
+  `To open one, start with the space ${link("proposals", SPACE_PATH)}. ` +
+  `The steps are in ${link("the reference", REFERENCE)}.`;
 
 const LEAD_TEXT = lead((s) => s, (text) => text);
+
+/** After a decision's word, when the key that wrote it is not the owner of the space proposals. */
+const NOT_OWNERS = "(not set by the service's owner)";
 
 /** Where a status comes from, so that no page says more of it than a document does. */
 const STATUS_NOTE = "A proposal's status is the first words of the Status section of its document.";
@@ -111,6 +140,9 @@ const STATUS_TEXT = {
 /** A status as the page says it: one of the six words, or why there is none. */
 const statusText = (s: Status): string => (s.kind === "word" ? s.word : STATUS_TEXT[s.kind]);
 
+/** The note that follows a decision's word when it was not the owner's, or "". */
+const noteOf = (s: Status): string => (s.kind === "word" && s.notOwners ? NOT_OWNERS : "");
+
 /** A proposal's title, cut at a word the same way in all three formats, or its name when
  *  it has none to show. */
 const titleOf = (r: ProposalRow): string => trimAtWord(r.title, 300).text || r.name;
@@ -122,7 +154,7 @@ function rowHtml(r: ProposalRow): string {
   const opened = r.created_at;
   return `<div class="item">
 <h3><a href="/spaces/${esc(r.name)}">${esc(titleOf(r))}</a></h3>
-<p class="meta"><span class="tag">${esc(statusText(r.status))}</span> <code>${esc(r.name)}</code>${opened ? ` &middot; opened ${esc(day(opened))}` : ""}</p>
+<p class="meta"><span class="tag">${esc(statusText(r.status))}</span>${noteOf(r.status) ? ` ${esc(noteOf(r.status))}` : ""} <code>${esc(r.name)}</code>${opened ? ` &middot; opened ${esc(day(opened))}` : ""}</p>
 ${reason ? `<p>Reason: ${esc(reason)}</p>\n` : ""}</div>`;
 }
 
@@ -138,13 +170,16 @@ ${v.more ? `<p class="meta">${esc(MORE)}</p>` : ""}`);
 
 export function proposalsMarkdown(v: ProposalsView): string {
   const L: string[] = ["# Proposals", ""];
-  L.push(lead((s) => `\`${s}\``, (text, path) => `[${text}](${path}.md)`), "", STATUS_NOTE, "");
+  // The site's own pages have markdown twins, linked as a link; the reference is the service's
+  // own address, which a markdown page here writes out, as every one writes an address that is
+  // not its own.
+  L.push(lead((s) => `\`${s}\``, (text, to) => (to.startsWith("/") ? `[${text}](${to}.md)` : `${text} (${to})`)), "", STATUS_NOTE, "");
   L.push(PEER_NOTICE_LINE, "");
   if (!v.rows.length) L.push(NONE, "");
   for (const r of v.rows) {
     L.push(`## ${nameLine(r.name)}`, "");
     L.push(`- title: ${codeSpan(titleOf(r))}`);
-    L.push(`- status: ${statusText(r.status)}`);
+    L.push(`- status: ${statusText(r.status)}${noteOf(r.status) ? ` ${noteOf(r.status)}` : ""}`);
     if (r.status.kind === "word" && r.status.reason) L.push(`- reason: ${codeSpan(r.status.reason)}`);
     if (r.created_at) L.push(`- opened: ${timeLine(r.created_at)}`);
     L.push(`- page: /spaces/${r.name}`, "");
@@ -154,24 +189,30 @@ export function proposalsMarkdown(v: ProposalsView): string {
 }
 
 /** Named fields, never the service's answer forwarded on. `status` is one of the six
- *  words or null, and a null says why in `status_note`, in the words the page uses. */
+ *  words or null, and `status_note` says, in the words the page uses, why it is null or that
+ *  a decision was not the owner's. */
 export function proposalsJson(v: ProposalsView, canonical: string): unknown {
   return {
     title: "Proposals",
     url: canonical,
     about: LEAD_TEXT,
+    reference: REFERENCE,
     status_means: STATUS_NOTE,
     notice: PEER_NOTICE,
     space: SPACE_PATH,
     category: CATEGORY_PATH,
-    items: v.rows.map((r) => ({
-      name: r.name,
-      title: titleOf(r),
-      status: r.status.kind === "word" ? r.status.word : null,
-      ...(r.status.kind === "word" ? (r.status.reason ? { reason: r.status.reason } : {}) : { status_note: statusText(r.status) }),
-      created_at: r.created_at,
-      page: `/spaces/${r.name}`,
-    })),
+    items: v.rows.map((r) => {
+      const note = r.status.kind === "word" ? noteOf(r.status) : statusText(r.status);
+      return {
+        name: r.name,
+        title: titleOf(r),
+        status: r.status.kind === "word" ? r.status.word : null,
+        ...(r.status.kind === "word" && r.status.reason ? { reason: r.status.reason } : {}),
+        ...(note ? { status_note: note } : {}),
+        created_at: r.created_at,
+        page: `/spaces/${r.name}`,
+      };
+    }),
     has_more: v.more,
     ...(v.more ? { more_means: MORE } : {}),
   };

@@ -23,12 +23,17 @@ export interface Proposal {
   /** The text of its document. Absent: the space keeps no document. null: it keeps one that
    *  has no version yet. */
   document?: string | null;
+  /** The key that posted the document's version: the owner of the space proposals, unless
+   *  given. */
+  author?: string;
   /** Fields of the space's listing over the stand-in's own: a hostile service's, or a space
    *  that is not public. */
   fields?: Json;
 }
 
-const OWNER = "a1b2".repeat(16);
+/** The owner of the space proposals, and a key that is nobody's but its own. */
+export const OWNER = "a1b2".repeat(16);
+export const STRANGER = "c3d4".repeat(16);
 /** A proposal's document as the plan shapes it, ending in the section a status is read from.
  *  `status` null leaves the section out; the empty string leaves it empty. */
 export const proposalText = (title: string, status: string | null): string =>
@@ -37,13 +42,15 @@ export const proposalText = (title: string, status: string | null): string =>
 
 const uuid = (n: number, seq: number) => `0199f0f0-0000-7000-8${String(n % 10)}00-${String(n * 10 + seq).padStart(12, "0")}`;
 
-/** A world whose spaces are these proposals and whatever else is given, in the order given. */
+/** A world whose spaces are these proposals and whatever else is given, in the order given,
+ *  and the space proposals, owned by OWNER, unless one of the others is it. */
 export function proposalWorld(proposals: Proposal[], others: Json[] = []): World {
   const spaces: Json[] = [];
   const posts: Record<string, Json[]> = {};
   const versions: Record<string, Json[]> = {};
   proposals.forEach((p, n) => {
     const created = p.created ?? "2026-10-01T12:00:00.000Z";
+    const author = p.author ?? OWNER;
     const space: Json = {
       name: p.name, space_id: uuid(n, 0), title: p.title ?? `Title of ${p.name}`, description: "A proposal.", visibility: "public",
       join_policy: "open", status: "active", signed_only: false, replaced_by: null, oracle: false, categories: ["this-service"],
@@ -54,11 +61,11 @@ export function proposalWorld(proposals: Proposal[], others: Json[] = []): World
     if (typeof p.document === "string") {
       space.document = { version: { post_id: uuid(n, 1), seq: "1" }, pending: 0 };
       posts[p.name] = [{
-        post_id: uuid(n, 1), space: p.name, seq: "1", kind: "version", author: OWNER, posted_at: created, title: "First", to: [],
+        post_id: uuid(n, 1), space: p.name, seq: "1", kind: "version", author, posted_at: created, title: "First", to: [],
         reply_to: null, supersedes: null, retracts: null, fingerprints: [], signed: false, space_id: uuid(n, 0), body: p.document,
       }];
       versions[p.name] = [{
-        post_id: uuid(n, 1), seq: "1", author: OWNER, posted_at: created, summary: null, signed: false, state: "current",
+        post_id: uuid(n, 1), seq: "1", author, posted_at: created, summary: null, signed: false, state: "current",
         edits: null, same_text_as: null, decision: null,
       }];
     } else if (p.document === null) {
@@ -68,7 +75,8 @@ export function proposalWorld(proposals: Proposal[], others: Json[] = []): World
   });
   return {
     capabilities: CAPABILITIES, categories: [...CATEGORIES, THIS_SERVICE],
-    spaces: [...spaces, ...others], posts, versions, proofs: {}, checkpoints: {}, peers: {},
+    spaces: [...spaces, ...(others.some((s) => s.name === "proposals") ? [] : [otherSpace("proposals")]), ...others], posts, versions,
+    proofs: {}, checkpoints: {}, peers: {},
   };
 }
 

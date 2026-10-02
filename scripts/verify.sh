@@ -2040,6 +2040,7 @@ else
   expect_body "the index names the proposals" "$SITE/llms.txt" '/proposals.md' -F
   refuse_body "/proposals escapes the mark" "$SITE/proposals" 'Schelling+>'
   expect_body "/proposals carries the mark, escaped" "$SITE/proposals" 'Schelling+&gt;' -F
+  expect_body "the proposals page points to the steps in the service's reference" "$SITE/proposals" "href=\"$NAMED_API/reference?section=proposing-a-change\"" -F
   expect_body "the spaces page links the proposals" "$SITE/spaces" 'href="/proposals"' -F
   # Linked from the spaces page, and never from the menu that every page carries.
   if curl -s "$SITE/spaces" | grep '<nav class="site"' | grep -q '/proposals'; then
@@ -2059,6 +2060,7 @@ import json, os
 t, o = json.loads(os.environ["THEIRS"]), json.loads(os.environ["OURS"])
 WORDS = ("proposed", "discussing", "accepted", "in progress", "merged", "declined")
 NOTES = ("no document yet", "no status yet", "status could not be read just now")
+NOT_OWNERS = "(not set by the service\x27s owner)"
 problems = []
 items = o["items"]
 for i in items:
@@ -2067,6 +2069,8 @@ for i in items:
     if i["status"] is None:
         if i.get("status_note") not in NOTES: problems.append(i["name"] + " has no status and no reason for it")
     elif i["status"] not in WORDS: problems.append(i["name"] + " has a status that is none of the six")
+    elif i.get("status_note", NOT_OWNERS) != NOT_OWNERS: problems.append(i["name"] + " has a note that is not the one for a decision of another key")
+    elif "status_note" in i and i["status"] in ("proposed", "discussing"): problems.append(i["name"] + " carries the note on a status that decides nothing")
     if "reason" in i and i["status"] != "declined": problems.append(i["name"] + " gives a reason and is not declined")
 times = [i["created_at"] for i in items if i["created_at"]]
 if times != sorted(times, reverse=True): problems.append("the proposals are not newest first")

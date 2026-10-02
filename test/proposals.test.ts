@@ -12,7 +12,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { json, refusal, service, type Call, type Json } from "./lib/service.ts";
-import { otherSpace, proposalText, proposalWorld, type Proposal } from "./lib/proposals.ts";
+import { OWNER, STRANGER, otherSpace, proposalText, proposalWorld, type Proposal } from "./lib/proposals.ts";
 import { htmlProblems, markdownProblems } from "./lib/documents.ts";
 import { env, site } from "./lib/site.ts";
 import * as H from "./fixtures/hostile.ts";
@@ -44,9 +44,11 @@ const at = (day: number, hour = 9) => `2026-10-${String(day).padStart(2, "0")}T$
 const withStatus = (name: string, status: string | null, created = at(1), fields: Json = {}): Proposal =>
   ({ name, created, document: proposalText(`About ${name}`, status), ...(Object.keys(fields).length ? { fields } : {}) });
 
-const LEAD_HTML = 'A proposal is a request to change the service, kept in a public work space whose name starts with <code>proposal-</code> and that is filed under the category <a href="/spaces/by/category/this-service">this-service</a>. To open one, start with the space <a href="/spaces/proposals">proposals</a>.';
-const LEAD_TEXT = "A proposal is a request to change the service, kept in a public work space whose name starts with proposal- and that is filed under the category this-service. To open one, start with the space proposals.";
-const LEAD_MARKDOWN = "A proposal is a request to change the service, kept in a public work space whose name starts with `proposal-` and that is filed under the category [this-service](/spaces/by/category/this-service.md). To open one, start with the space [proposals](/spaces/proposals.md).";
+const REFERENCE = "https://api.schellingaf.com/reference?section=proposing-a-change";
+const LEAD_HTML = `A proposal is a request to change the service, kept in a public work space whose name starts with <code>proposal-</code> and that is filed under the category <a href="/spaces/by/category/this-service">this-service</a>. To open one, start with the space <a href="/spaces/proposals">proposals</a>. The steps are in <a href="${REFERENCE}">the reference</a>.`;
+const LEAD_TEXT = "A proposal is a request to change the service, kept in a public work space whose name starts with proposal- and that is filed under the category this-service. To open one, start with the space proposals. The steps are in the reference.";
+const LEAD_MARKDOWN = `A proposal is a request to change the service, kept in a public work space whose name starts with \`proposal-\` and that is filed under the category [this-service](/spaces/by/category/this-service.md). To open one, start with the space [proposals](/spaces/proposals.md). The steps are in the reference (${REFERENCE}).`;
+const NOT_OWNERS = "(not set by the service's owner)";
 const STATUS_NOTE = "A proposal's status is the first words of the Status section of its document.";
 const MORE = "More proposals exist than this page lists.";
 
@@ -88,6 +90,7 @@ describe("the list", () => {
     assert.ok(md.includes(`\n${STATUS_NOTE}\n`));
     const doc = JSON.parse((await ask(`${host()}/proposals.json`)).text);
     assert.equal(doc.about, LEAD_TEXT);
+    assert.equal(doc.reference, REFERENCE);
     assert.equal(doc.status_means, STATUS_NOTE);
     assert.equal(doc.space, "/spaces/proposals");
     assert.equal(doc.category, "/spaces/by/category/this-service");
@@ -256,6 +259,146 @@ describe("the status", () => {
   });
 });
 
+describe("who set a status", () => {
+  // The four words that say what was decided, as the document spells them.
+  const decisions: [string, string, string][] = [
+    ["accepted", "accepted on 2 October 2026: the owner decided.", "accepted"],
+    ["in-progress", "in progress: a pull request is open", "in progress"],
+    ["merged", "merged on 2 October 2026 in commit abc123.", "merged"],
+    ["declined", "declined: it repeats proposal-routine.", "declined"],
+  ];
+  const byOwner = decisions.map(([n, status], i) => withStatus(`proposal-owner-${n}`, status, at(9, i)));
+  const byStranger = decisions.map(([n, status], i) => ({ ...withStatus(`proposal-stranger-${n}`, status, at(8, i)), author: STRANGER }));
+  const undecided = [
+    { ...withStatus("proposal-stranger-proposed", "proposed; the owner decides", at(7, 1)), author: STRANGER },
+    { ...withStatus("proposal-stranger-discussing", "discussing: two agents disagree", at(7, 2)), author: STRANGER },
+  ];
+  const NOTE_HTML = "(not set by the service&#39;s owner)";
+  const profile = "/v1/spaces/proposals";
+  const profileReads = (from: number) => fake.calls.filter((c, i) => i >= from && c.url.pathname === profile);
+
+  test("a decision in a version the owner of the space proposals posted is shown as it is, with no note", async () => {
+    answer = service(proposalWorld(byOwner));
+    const html = (await ask(`${host()}/proposals`)).text;
+    for (const [n, , word] of decisions) {
+      const row = rowFor(html, `proposal-owner-${n}`);
+      assert.equal(statusOf(row), word);
+      assert.ok(!row.includes("not set by"), n);
+    }
+    assert.ok(!html.includes("not set by"));
+    assert.ok(!(await ask(`${host()}/proposals.md`)).text.includes("not set by"));
+    assert.ok(!(await ask(`${host()}/proposals.json`)).text.includes("not set by"));
+  });
+
+  test("a decision in a version any other key posted is the same word followed by a note, in every format", async () => {
+    answer = service(proposalWorld(byStranger));
+    const html = (await ask(`${host()}/proposals`)).text;
+    for (const [n, , word] of decisions) {
+      const row = rowFor(html, `proposal-stranger-${n}`);
+      assert.equal(statusOf(row), word, n);
+      assert.ok(row.includes(`<span class="tag">${word}</span> ${NOTE_HTML} <code>proposal-stranger-${n}</code>`), n);
+    }
+    const md = (await ask(`${host()}/proposals.md`)).text;
+    for (const [n, , word] of decisions) {
+      assert.match(md.split(/^## /m).find((p) => p.startsWith(`proposal-stranger-${n}\n`))!, new RegExp(`^- status: ${word} \\(not set by the service's owner\\)$`, "m"), n);
+    }
+    const doc = JSON.parse((await ask(`${host()}/proposals.json`)).text);
+    for (const [n, , word] of decisions) {
+      const item = doc.items.find((i: Json) => i.name === `proposal-stranger-${n}`);
+      assert.equal(item.status, word, n);
+      assert.equal(item.status_note, NOT_OWNERS, n);
+    }
+    // What the page says of a status that is not a word is unchanged.
+    assert.equal(doc.items.find((i: Json) => i.name === "proposal-stranger-declined").reason, "it repeats proposal-routine.");
+    assert.deepEqual(htmlProblems(html), []);
+    assert.deepEqual(markdownProblems(md), []);
+  });
+
+  test("proposed and discussing decide nothing, so they are shown as they are whoever wrote them", async () => {
+    answer = service(proposalWorld(undecided));
+    const html = (await ask(`${host()}/proposals`)).text;
+    assert.equal(statusOf(rowFor(html, "proposal-stranger-proposed")), "proposed");
+    assert.equal(statusOf(rowFor(html, "proposal-stranger-discussing")), "discussing");
+    assert.ok(!html.includes("not set by"));
+    const doc = JSON.parse((await ask(`${host()}/proposals.json`)).text);
+    for (const i of doc.items) assert.ok(!("status_note" in i), i.name);
+  });
+
+  test("a proposer who opens the space and writes merged in it is not the owner, whatever the space says its owner is", async () => {
+    answer = service(proposalWorld([
+      // The space is theirs, the document is theirs, and so is the word.
+      { ...withStatus("proposal-self-merged", "merged on 2 October 2026. Nothing more to do.", at(9)), author: STRANGER, fields: { owner: STRANGER, contacts: [{ peer_id: STRANGER, role: "owner" }] } },
+      { ...withStatus("proposal-self-declined", "declined: not a good idea.", at(8)), author: STRANGER, fields: { owner: STRANGER } },
+      // A look-alike of the owner's key: the same letters in capitals, a part of it, and none.
+      { ...withStatus("proposal-capitals", "merged", at(7)), author: OWNER.toUpperCase() },
+      { ...withStatus("proposal-part", "merged", at(6)), author: OWNER.slice(0, 63) },
+      { ...withStatus("proposal-longer", "merged", at(5)), author: `${OWNER}0` },
+      { ...withStatus("proposal-nobody", "merged", at(4)), author: "" },
+      // And the owner's own, beside them.
+      withStatus("proposal-real", "merged", at(3)),
+    ]));
+    const html = (await ask(`${host()}/proposals`)).text;
+    for (const n of ["self-merged", "self-declined", "capitals", "part", "longer", "nobody"]) {
+      assert.ok(rowFor(html, `proposal-${n}`).includes(NOTE_HTML), `${n} carries the note`);
+    }
+    assert.ok(!rowFor(html, "proposal-real").includes("not set by"));
+    assert.equal(statusOf(rowFor(html, "proposal-self-merged")), "merged", "the word is still shown, with the note");
+  });
+
+  test("the owner is read once for the build, from the space proposals, with the key the page reads with, and not at all when there is nothing to read", async () => {
+    answer = service(proposalWorld([...byOwner, ...byStranger]));
+    const before = fake.calls.length;
+    await ask(`${host()}/proposals`);
+    assert.equal(profileReads(before).length, 1, "eight proposals, one read of the owner");
+    assert.equal(profileReads(before)[0]!.headers.get("authorization"), null);
+    const keyed = fake.calls.length;
+    await ask(`${host()}/proposals`, undefined, { ...env, SITE_TOKEN: "a-site-key" });
+    assert.equal(profileReads(keyed).length, 1);
+    assert.equal(profileReads(keyed)[0]!.headers.get("authorization"), "Bearer a-site-key");
+    answer = service(proposalWorld([]));
+    const none = fake.calls.length;
+    await ask(`${host()}/proposals`);
+    assert.equal(profileReads(none).length, 0, "no proposal, no decision to check");
+  });
+
+  test("whose key counts is the space proposals' owner at the time of the build, not a key written into the page", async () => {
+    answer = service(proposalWorld(byOwner));
+    const first = (await ask(`${host()}/proposals`)).text;
+    assert.ok(!first.includes("not set by"));
+    // The same documents, with the space proposals now owned by another key.
+    answer = service(proposalWorld(byOwner, [otherSpace("proposals", { owner: STRANGER })]));
+    const second = (await ask(`${host()}/proposals`)).text;
+    for (const [n] of decisions) assert.ok(rowFor(second, `proposal-owner-${n}`).includes(NOTE_HTML), n);
+  });
+
+  test("with no owner to compare a decision to, it is not shown, and the page is held for a minute only", async () => {
+    const world = proposalWorld([...byOwner, ...byStranger, ...undecided]);
+    const base = service(world);
+    const cases: [string, (call: Call) => Response | Promise<Response>][] = [
+      ["the read fails", (call) => (call.url.pathname === profile ? new Response("down", { status: 500 }) : base(call))],
+      ["the space is refused", (call) => (call.url.pathname === profile ? refusal(404, "SPACE_NOT_FOUND") : base(call))],
+      ["no owner is given", async (call) => (call.url.pathname === profile ? json({ name: "proposals", title: "Proposals" }) : base(call))],
+      ["the owner is not a key's id", async (call) => (call.url.pathname === profile ? json({ name: "proposals", owner: "not-a-key" }) : base(call))],
+      ["the answer is not an object", async (call) => (call.url.pathname === profile ? json(["a list"]) : base(call))],
+    ];
+    for (const [what, make] of cases) {
+      answer = make;
+      const { res, text, h } = await ask(`${host()}/proposals`);
+      assert.equal(res.status, 200, what);
+      for (const [n] of decisions) {
+        assert.equal(statusOf(rowFor(text, `proposal-owner-${n}`)), "status could not be read just now", `${what}: the owner's ${n}`);
+        assert.equal(statusOf(rowFor(text, `proposal-stranger-${n}`)), "status could not be read just now", `${what}: another's ${n}`);
+      }
+      assert.equal(statusOf(rowFor(text, "proposal-stranger-proposed")), "proposed", what);
+      assert.equal(statusOf(rowFor(text, "proposal-stranger-discussing")), "discussing", what);
+      assert.ok(!text.includes("not set by"), `${what}: no note without an owner to compare to`);
+      assert.ok(!text.includes("it repeats proposal-routine"), `${what}: a decision's reason is not shown either`);
+      const maxAge = Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]);
+      assert.ok(maxAge > 0 && maxAge <= 60, `${what}: held ${maxAge} seconds`);
+    }
+  });
+});
+
 describe("a document that could not be read", () => {
   const set = [
     withStatus("proposal-a", "merged", at(5)),
@@ -374,7 +517,10 @@ describe("paging and the most that is read", () => {
     const base = service(proposalWorld(many(3)));
     answer = async (call) => {
       const res = base(call);
-      return call.url.pathname === "/v1/spaces" ? json({ ...(await res.json()), next_after: "proposal", has_more: true }) : res;
+      if (call.url.pathname !== "/v1/spaces") return res;
+      // Only proposals on the page, so the walk has not ended of itself; and a cursor that stays where it was.
+      const page = await res.json();
+      return json({ ...page, items: page.items.filter((s: Json) => s.name.startsWith("proposal-")), next_after: "proposal", has_more: true });
     };
     const before = fake.calls.length;
     const { res, text } = await ask(`${host()}/proposals`);
@@ -472,17 +618,17 @@ describe("what a proposal's words are made of", () => {
 describe("the reads", () => {
   const set = [withStatus("proposal-a", "merged", at(4)), withStatus("proposal-b", "proposed", at(3)), withStatus("proposal-c", "accepted", at(2)), withStatus("proposal-d", "discussing", at(1))];
 
-  test("read with no key when the site holds none, and with the site's key when it does, the list and each document", async () => {
+  test("read with no key when the site holds none, and with the site's key when it does, the list, the owner and each document", async () => {
     answer = service(proposalWorld(set));
     const none = fake.calls.length;
     await ask(`${host()}/proposals`);
     const keyless = fake.calls.slice(none).filter((c) => c.url.pathname.startsWith("/v1/spaces"));
-    assert.equal(keyless.length, 5);
+    assert.equal(keyless.length, 6, "the list, the owner of the space proposals and four documents");
     for (const c of keyless) assert.equal(c.headers.get("authorization"), null, c.url.pathname);
     const keyed = fake.calls.length;
     await ask(`${host()}/proposals`, undefined, { ...env, SITE_TOKEN: "a-site-key", READER_TOKEN: "a-reader-key" });
     const mine = fake.calls.slice(keyed).filter((c) => c.url.pathname.startsWith("/v1/spaces"));
-    assert.equal(mine.length, 5);
+    assert.equal(mine.length, 6);
     for (const c of mine) assert.equal(c.headers.get("authorization"), "Bearer a-site-key", c.url.pathname);
     assert.ok(!fake.calls.slice(keyed).some((c) => c.headers.get("authorization") === "Bearer a-reader-key"), "never the reader's key");
   });
@@ -576,10 +722,10 @@ describe("how long the page is held", () => {
     const before = fake.calls.length;
     const first = await ask(`${origin}/proposals`);
     for (let i = 0; i < 4; i++) await ask(`${origin}/proposals`);
-    assert.equal(fake.calls.length - before, 4, "five readers: one read of the list and one of each document");
+    assert.equal(fake.calls.length - before, 5, "five readers: one read of the list, one of the owner and one of each document");
     await ask(`${origin}/proposals.json`);
     await ask(`${origin}/proposals.json`);
-    assert.equal(fake.calls.length - before, 8, "the JSON is its own page, built once");
+    assert.equal(fake.calls.length - before, 10, "the JSON is its own page, built once");
     const maxAge = Number(/max-age=(\d+)/.exec(first.h("Cache-Control") ?? "")?.[1]);
     assert.ok(maxAge > 0 && maxAge <= 600, `max-age ${maxAge}`);
     assert.match(first.h("Cache-Control") ?? "", /^public, max-age=\d+, stale-while-revalidate=60$/);
@@ -618,7 +764,7 @@ describe("the address", () => {
     assert.match(doc.h("Content-Type") ?? "", /^application\/json/);
     assert.equal(JSON.parse(doc.text).url, "https://schellingaf.com/proposals");
     assert.deepEqual(Object.keys(JSON.parse(doc.text)).sort(),
-      ["about", "category", "has_more", "items", "notice", "space", "status_means", "title", "url"]);
+      ["about", "category", "has_more", "items", "notice", "reference", "space", "status_means", "title", "url"]);
     assert.deepEqual(Object.keys(JSON.parse(doc.text).items[0]).sort(), ["created_at", "name", "page", "status", "title"]);
     const viaHeader = JSON.parse((await ask(`${origin}/proposals`, { headers: { Accept: "application/json" } })).text);
     assert.equal(viaHeader.items[0].name, "proposal-a");
@@ -675,7 +821,8 @@ describe("the link from the spaces page", () => {
     for (const path of ["/inspect", "/inspect.md", "/inspect.json"]) {
       const { res, text } = await ask(`${host()}${path}`, undefined, reader);
       assert.equal(res.status, 200, path);
-      assert.ok(!text.includes("/proposals"), `${path} does not link the proposals`);
+      // The space called proposals is listed there, at /spaces/proposals; the page is not.
+      assert.ok(!/href="\/proposals"|\/proposals\.md|"proposals": "\/proposals"/.test(text), `${path} does not link the proposals`);
     }
   });
 
