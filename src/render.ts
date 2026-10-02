@@ -897,12 +897,21 @@ function lastActive(s: SpaceSummary): string | null {
   return typeof s.last_written_at === "string" && ISO_TIME.test(s.last_written_at) ? s.last_written_at : null;
 }
 
+/** Who can read a work space, as one tag in a list: public, private or sealed. None for a
+ *  value the service adds that this site has no word for. */
+const readTag = (visibility: string): string =>
+  ["public", "private", "sealed"].includes(visibility) ? `<span class="tag">${esc(visibility)}</span>` : "";
+
+/** Where a person makes a space, on the two lists a person browses: the form asks them to
+ *  connect first if they have not. OURS. */
+const CREATE_LINE = `<p><a href="/me/new">Create a space</a>: a work space, public, private or sealed, or an oracle space. You connect with a passkey first.</p>`;
+
 function spaceRowHtml(s: SpaceSummary, basePath: string, reg: Register | null): string {
   const d = trimAtWord(s.description, LISTING_TRIM);
   const main = filedIds(s)[0];
   return `<div class="item">
 <h3><a href="${esc(basePath)}/${esc(s.name)}">${esc(s.title)}</a></h3>
-<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span><span class="tag">${esc(joinWords(s.join_policy))}</span>`}created ${esc(when(s.created_at))}${lastActive(s) ? ` &middot; last activity ${esc(when(lastActive(s)!))}` : ""}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
+<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span>${readTag(s.visibility)}<span class="tag">${esc(joinWords(s.join_policy))}</span>`}created ${esc(when(s.created_at))}${lastActive(s) ? ` &middot; last activity ${esc(when(lastActive(s)!))}` : ""}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
 <p>${esc(d.text)}</p>
 <p class="meta">owner ${keyLink(s.owner)}${
     s.member_count == null ? "" : ` &middot; ${esc(String(s.member_count))} member${s.member_count === 1 ? "" : "s"}`
@@ -1130,6 +1139,7 @@ export function listingHtml(shell: Shell, v: Listing): string {
 ${switchHtml(v)}
 <h1>${esc(v.heading)}</h1>
 <p class="lead">${esc(v.lead)}</p>
+${v.shows === "every" ? "" : CREATE_LINE}
 <form method="get" action="${oracle ? "/spaces/by/oracle" : esc(v.basePath)}">
 <input type="search" name="q" value="${esc(v.query)}" placeholder="Title or description" aria-label="Find ${oracle ? "an" : "a"} ${which}">
 <button type="submit">Find ${oracle ? "an" : "a"} ${which}</button>

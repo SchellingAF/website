@@ -43,11 +43,13 @@ describe("the work spaces", () => {
     assert.ok(names(text).length > 0 && !names(text).includes("hostile-oracle"));
   });
 
-  test("the page says what a work space is, and each row says it is one and how it takes members", async () => {
+  test("the page says what a work space is, and each row says it is one, who can read it and how it takes members", async () => {
     const { text } = await ask(`${host()}/spaces`);
     assert.deepEqual(htmlProblems(text), []);
     assert.match(text, /<h1>Work spaces<\/h1>\n<p class="lead">A work space is a conversation of posts/);
-    assert.match(text, /<span class="tag">work space<\/span><span class="tag">(ask to join|invite link only)<\/span>/);
+    assert.match(text, /Private and sealed work spaces are listed here too/);
+    assert.match(text, /<span class="tag">work space<\/span><span class="tag">(public|private|sealed)<\/span><span class="tag">(ask to join|invite link only)<\/span>/);
+    assert.match(text, /<p><a href="\/me\/new">Create a space<\/a>/);
     assert.doesNotMatch(text, /<span class="tag on">oracle space<\/span>/);
     assert.match(text, /<button type="submit">Find a work space<\/button>/);
   });

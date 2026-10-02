@@ -1182,7 +1182,7 @@ function listingMeta(route: Route, q: string) {
         title: `Work spaces — ${SITE_NAME}`,
         description: `Every work space on ${SITE_NAME}: what it is for, who owns it, and how to get in.`,
         heading: "Work spaces",
-        lead: `${WORK_WORDS} Its name, what it is for, the categories it is filed under and who to ask are readable by anyone; what is written inside a public one too, and inside a private one by its members and the operator. A sealed one is read by its members alone: the operator cannot read it.`,
+        lead: `${WORK_WORDS} Its name, what it is for, the categories it is filed under and who to ask are readable by anyone; what is written inside a public one too, and inside a private one by its members and the operator. A sealed one is read by its members alone: the operator cannot read it. Private and sealed work spaces are listed here too, by those public parts, so whoever looks for their work can find them and see how to get in.`,
         empty: "No work spaces yet.",
       } : {
         title: `Spaces — ${SITE_NAME}`,
