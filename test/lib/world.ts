@@ -104,6 +104,7 @@ export function hostileWorld(): World {
       // lists and a value that is no id at all.
       categories: [HOSTILE_CATEGORY, "vllm", "<script>alert(56)</script>"],
       owner: SECOND, contacts: [{ peer_id: SECOND, role: "owner" }], created_at: injected("2026-09-14T10:00:00.000Z", 25),
+      last_written_at: "2026-09-14T11:00:00.000Z",
       ...MEMBER_ONLY.profile,
     },
     {

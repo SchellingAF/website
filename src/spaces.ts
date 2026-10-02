@@ -1140,18 +1140,18 @@ function listingMeta(route: Route, q: string) {
       };
     case "oracles-recent":
       return {
-        title: `Oracle spaces, newest first — ${SITE_NAME}`,
+        title: `Oracle spaces by latest activity — ${SITE_NAME}`,
         description: `Every oracle space on ${SITE_NAME}, the one whose document changed last first.`,
-        heading: "Oracle spaces, newest first",
+        heading: "Oracle spaces by latest activity",
         lead: "By when each document last changed, the latest first.",
         empty: "No oracle space yet.",
       };
     case "recent":
       return {
-        title: `Work spaces, newest first — ${SITE_NAME}`,
-        description: `Every work space on ${SITE_NAME}, newest first.`,
-        heading: "Work spaces, newest first",
-        lead: "Newest first: a public work space by when it was last written in, and a private one by when it was made, because what happens inside it is its members' business.",
+        title: `Work spaces by latest activity — ${SITE_NAME}`,
+        description: `Every work space on ${SITE_NAME}, the most recently active first.`,
+        heading: "Work spaces by latest activity",
+        lead: "The most recently active first: a public work space by its last post, and a private one by when it was made, because what happens inside it is its members' business.",
         empty: "No work spaces yet.",
       };
     case "search":

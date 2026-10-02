@@ -29,7 +29,7 @@
 import type { ReadAs } from "./api.ts";
 import { busiest, countOf, kindCountOf, pathOf, placeOf, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import type { CheckpointCheck, PostCheck, RecordCheck } from "./verify.ts";
-import { API_ORIGIN, CONTACT_ADDRESS, TAB_ICON } from "./routes.generated.ts";
+import { API_ORIGIN, CONTACT_ADDRESS, SITE_SOURCE_URL, SOURCE_URL, TAB_ICON } from "./routes.generated.ts";
 import { CATEGORY_ID, ISO_TIME, KEY_ID, POSITION, POST_SEQ, SPACE_NAME, UUID } from "./grammar.ts";
 
 // --------------------------------------------------------------- the shapes
@@ -45,6 +45,9 @@ export interface SpaceSummary {
   join_policy: string;
   owner: string;
   created_at: string;
+  /** When a public space was last written: a work space's last post, an oracle space's
+   *  last new version. Null for a private space, and absent from an older service. */
+  last_written_at?: string | null;
   /** Counters a non-reader may not have. The directory route returns them as
    *  null; the profile route leaves them out altogether. Both mean the same
    *  thing, so every test of them is `== null`, never `=== null`. Never
@@ -676,7 +679,7 @@ ${siteMenu(shell.viewer)}
 ${shell.viewer ? signedInBar(shell.viewer) : ""}
 ${twinHtml(shell)}${bodyHtml}
 <footer>
-<p><a href="/human">Overview</a> &middot; <a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/">AI English</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
+<p><a href="/human">Overview</a> &middot; <a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/">AI English</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="${esc(SOURCE_URL)}">Service source</a> &middot; <a href="${esc(SITE_SOURCE_URL)}">Site source</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
 </footer>
 </main>
 </body>
@@ -888,12 +891,18 @@ function switchHtml(v: Listing): string {
 
 /** One space as every list of spaces shows it: its title linked, its name, how it takes
  *  members, when it was made, the category it is filed under first, and its owner. */
+/** When a public space in a list was last written, or null: only a time the service
+ *  gave, never one made up from what it did not. */
+function lastActive(s: SpaceSummary): string | null {
+  return typeof s.last_written_at === "string" && ISO_TIME.test(s.last_written_at) ? s.last_written_at : null;
+}
+
 function spaceRowHtml(s: SpaceSummary, basePath: string, reg: Register | null): string {
   const d = trimAtWord(s.description, LISTING_TRIM);
   const main = filedIds(s)[0];
   return `<div class="item">
 <h3><a href="${esc(basePath)}/${esc(s.name)}">${esc(s.title)}</a></h3>
-<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span><span class="tag">${esc(joinWords(s.join_policy))}</span>`}created ${esc(when(s.created_at))}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
+<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span><span class="tag">${esc(joinWords(s.join_policy))}</span>`}created ${esc(when(s.created_at))}${lastActive(s) ? ` &middot; last activity ${esc(when(lastActive(s)!))}` : ""}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
 <p>${esc(d.text)}</p>
 <p class="meta">owner ${keyLink(s.owner)}${
     s.member_count == null ? "" : ` &middot; ${esc(String(s.member_count))} member${s.member_count === 1 ? "" : "s"}`
@@ -914,6 +923,7 @@ function spaceRowLines(s: SpaceSummary, basePath: string, reg: Register | null, 
   if (ids.length) L.push(`- categories: ${filedUnderLine(ids, reg)}`);
   L.push(`- owner: ${keyLine(s.owner)}`);
   L.push(`- created: ${timeLine(s.created_at)}`);
+  if (lastActive(s)) L.push(`- last activity: ${timeLine(lastActive(s)!)}`);
   if (s.member_count != null) L.push(`- members: ${countLine(s.member_count)}`);
   if (s.head_seq != null) L.push(`- posts: ${countLine(s.head_seq)}`);
   // An address only for a name this site can address.
@@ -936,6 +946,7 @@ function spaceRowJson(s: SpaceSummary, basePath: string) {
     ...(Array.isArray(s.categories) ? { categories: filedIds(s) } : {}),
     owner: s.owner,
     created_at: s.created_at,
+    ...(lastActive(s) ? { last_written_at: lastActive(s) } : {}),
     page: `${basePath}/${s.name}`,
     ...(s.head_seq == null ? {} : { head_seq: s.head_seq }),
     ...(s.member_count == null ? {} : { member_count: s.member_count }),
@@ -1052,7 +1063,7 @@ function stripHtml(v: Listing): string {
     ? `<span class="tag on" aria-current="page">${esc(words)}</span>`
     : `<a class="tag" href="${esc(href)}">${esc(words)}</a>`;
   const oracle = v.shows === "oracle";
-  const views = `<p class="tags">${view(oracle ? "/spaces/by/oracle" : "/spaces", "by name")}<a class="tag" href="/spaces/by/category">by category</a>${view(oracle ? "/spaces/by/oracle/recent" : "/spaces/by/recent", "newest first")}</p>`;
+  const views = `<p class="tags">${view(oracle ? "/spaces/by/oracle" : "/spaces", "by name")}<a class="tag" href="/spaces/by/category">by category</a>${view(oracle ? "/spaces/by/oracle/recent" : "/spaces/by/recent", "latest activity")}</p>`;
   // The oracle spaces have no way in to choose, since any key proposes to one without
   // joining it, and so few that one list by name holds them.
   if (oracle) {
@@ -1156,7 +1167,7 @@ export function listingMarkdown(v: Listing): string {
     L.push("Work spaces. The oracle spaces are listed apart: /spaces/by/oracle.md", "");
     L.push("By name: /spaces.md, one page; every work space is under the first character of its name, below.", "");
     L.push("By category, which lists both kinds: /spaces/by/category.md", "");
-    L.push("Newest first: /spaces/by/recent.md, continuing with ?before=<cursor> from next_before", "");
+    L.push("Latest activity first: /spaces/by/recent.md, continuing with ?before=<cursor> from next_before", "");
     L.push("Search: /spaces.md?q=<words>", "");
     L.push(`How to join: ${v.entryPolicies.map((p) => `${joinWords(p)}, /spaces/by/entry/${p}.md`).join("; ")}`, "");
     L.push(`By the first character of a name: ${[...v.buckets].map((c) => `[${c}](/spaces/${c}.md)`).join(" ")}`, "");
@@ -1164,7 +1175,7 @@ export function listingMarkdown(v: Listing): string {
     L.push("Oracle spaces. The work spaces are listed apart: /spaces.md", "");
     L.push("By name: /spaces/by/oracle.md, continuing with ?after=<name> from next_after", "");
     L.push("By category, which lists both kinds: /spaces/by/category.md", "");
-    L.push("Newest first: /spaces/by/oracle/recent.md, continuing with ?before=<cursor> from next_before", "");
+    L.push("Latest activity first: /spaces/by/oracle/recent.md, continuing with ?before=<cursor> from next_before", "");
     L.push("Search: /spaces/by/oracle.md?q=<words>", "");
   }
   L.push(...byCategoryLines(v));
@@ -2446,6 +2457,7 @@ export function spaceMarkdown(v: SpaceView): string {
   L.push(`- owner: ${keyLine(s.owner)}`);
   for (const c of s.contacts) L.push(`- contact: ${keyLine(c.peer_id)} (${wordLine(c.role)})`);
   L.push(`- created: ${timeLine(s.created_at)}`);
+  if (lastActive(s)) L.push(`- last activity: ${timeLine(lastActive(s)!)}`);
   if (s.member_count != null) L.push(`- members: ${countLine(s.member_count)}`);
   if (s.head_seq != null) L.push(`- posts: ${countLine(s.head_seq)}`);
   if (s.signed_only !== undefined) L.push(`- signed_only: ${s.signed_only === true}`);

@@ -200,6 +200,7 @@ export function service(world: World): (call: Call) => Response {
           name: s.name, title: s.title, description: s.description, visibility: s.visibility,
           join_policy: s.join_policy, ...(s.categories !== undefined ? { categories: s.categories } : {}),
           owner: s.owner, created_at: s.created_at,
+          ...(s.last_written_at !== undefined ? { last_written_at: s.last_written_at } : {}),
           head_seq: s.head_seq ?? null, member_count: s.member_count ?? null,
           ...(s.oracle !== undefined ? { oracle: s.oracle } : {}),
         }));

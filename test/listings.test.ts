@@ -58,7 +58,7 @@ describe("the work spaces", () => {
     assert.match(strip, /aria-label="Browse work spaces"/);
     const rows = strip.split("\n").filter((l) => l.startsWith('<p class="tags">'));
     // The views first, the same three as the oracle spaces', by name lit on the directory.
-    assert.equal(rows[0], '<p class="tags"><span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">newest first</a></p>');
+    assert.equal(rows[0], '<p class="tags"><span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">latest activity</a></p>');
     // Then how to join, labelled, and nothing else in its row.
     assert.equal(rows[1], '<p class="tags"><span class="meta">How to join:</span> <a class="tag" href="/spaces/by/entry/invite">invite link only</a><a class="tag" href="/spaces/by/entry/request">ask to join</a></p>');
     // Then the letters.
@@ -71,7 +71,7 @@ describe("the work spaces", () => {
     assert.doesNotMatch(search, /<span class="tag on" aria-current="page">by name<\/span>/, "a search lights no filter");
     // The oracle spaces' views are the same three, pointing at their own list.
     const oracle = (await ask(`${host()}/spaces/by/oracle`)).text;
-    assert.match(oracle, /<p class="tags"><span class="tag on" aria-current="page">by name<\/span><a class="tag" href="\/spaces\/by\/category">by category<\/a><a class="tag" href="\/spaces\/by\/oracle\/recent">newest first<\/a><\/p>/);
+    assert.match(oracle, /<p class="tags"><span class="tag on" aria-current="page">by name<\/span><a class="tag" href="\/spaces\/by\/category">by category<\/a><a class="tag" href="\/spaces\/by\/oracle\/recent">latest activity<\/a><\/p>/);
     assert.doesNotMatch(oracle, /How to join:/);
   });
 
@@ -86,6 +86,17 @@ describe("the work spaces", () => {
     const before = "1757851200000000~hostile-public";
     await ask(`${at}/spaces/by/recent.json?before=${encodeURIComponent(before)}`);
     assert.equal(lists().at(-1)?.url.searchParams.get("before"), before);
+  });
+
+  test("each public space says when it was last active, and a private one does not", async () => {
+    const at = host();
+    const page = (await ask(`${at}/spaces/by/recent`)).text;
+    assert.match(page, /last activity 14 Sep 2026, 11:00 UTC/);
+    assert.equal(page.match(/last activity/g)?.length, 1, "the private space says nothing of its activity");
+    assert.match((await ask(`${at}/spaces/by/recent.md`)).text, /^- last activity: 2026-09-14T11:00:00\.000Z$/m);
+    const doc = JSON.parse((await ask(`${at}/spaces/by/recent.json`)).text);
+    const rows = doc.items ?? doc.spaces;
+    assert.equal(rows.find((s: { name: string }) => s.name === "hostile-public").last_written_at, "2026-09-14T11:00:00.000Z");
   });
 
   test("newest first drops a cursor in any other shape, and is the same page as none", async () => {
@@ -149,7 +160,7 @@ describe("the oracle spaces", () => {
     assert.doesNotMatch(text, /href="\/spaces\/by\/entry\//);
     assert.doesNotMatch(text, /<a class="tag" href="\/spaces\/a">/);
     assert.match(text, /<a class="tag" href="\/spaces\/by\/category">by category<\/a>/);
-    assert.match(text, /<a class="tag" href="\/spaces\/by\/oracle\/recent">newest first<\/a>/);
+    assert.match(text, /<a class="tag" href="\/spaces\/by\/oracle\/recent">latest activity<\/a>/);
   });
 
   test("searches oracle spaces alone, from its own box, and a search is not listed", async () => {

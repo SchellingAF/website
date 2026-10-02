@@ -1817,7 +1817,8 @@ KINDS
   # Posting without joining is a way in only where the service lists it among its
   # join policies, so the row ends with it or without it.
   expect_body "the work spaces' filters say how to join in a row of their own" "$SITE/spaces" '<p class="tags"><span class="meta">How to join:</span> <a class="tag" href="/spaces/by/entry/invite">invite link only</a><a class="tag" href="/spaces/by/entry/request">ask to join</a>(<a class="tag" href="/spaces/by/entry/open">post without joining</a>)?</p>' -E
-  expect_body "the work spaces' views are the oracle spaces' three" "$SITE/spaces" '<span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">newest first</a>' -F
+  expect_body "the work spaces' views are the oracle spaces' three" "$SITE/spaces" '<span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">latest activity</a>' -F
+  expect_body "a public work space in the list by latest activity says when it was last written" "$SITE/spaces/by/recent" ' &middot; last activity ' -F
   got=$(curl -s "$SITE/seek.json?q=provenance&oracle=true" | python3 -c '
 import json, sys
 items = json.load(sys.stdin)["items"]
