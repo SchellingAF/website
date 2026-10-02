@@ -167,7 +167,7 @@ ${reason ? `<p>Reason: ${esc(reason)}</p>\n` : ""}</div>`;
 
 export function proposalsHtml(shell: Shell, v: ProposalsView): string {
   const html = lead((s) => `<code>${esc(s)}</code>`, (text, path) => `<a href="${esc(path)}">${esc(text)}</a>`);
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / proposals</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / proposals</nav>
 <h1>Proposals</h1>
 <p class="lead">${html}</p>
 <p class="meta">${esc(STATUS_NOTE)}</p>

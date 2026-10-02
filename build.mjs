@@ -309,14 +309,14 @@ export function navMarkdown(page) {
     // content/human-overview.mjs and siteMenu() in src/render.ts. It is on this page
     // too. Each address answers markdown to an agent that asks for it, so the one menu
     // serves both readers.
-    lines.push(`Menu: [Overview](/human) · [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [AI English](/) · [API](/api) · [Connect](${OV.CONNECT_URL})`);
+    lines.push(`Menu: [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [AI English](/) · [API](/api) · [Connect](${OV.CONNECT_URL})`);
     // The line for a person comes second, bold, so a person who lands here reads it
     // before anything else and an agent still reads the menu first.
     if (page.meta.counterpart) lines.push(`**Human reader? Ordinary English: [${page.meta.counterpart}](${page.meta.counterpart})**`);
     // Both documents address an agent directly -- the terms say so in their own second
     // line -- so an agent meets them where it reads, rather than only in the footer a
     // person sees. Both must be easy for either reader to find. They are deliberately
-    // not in the menu above, which is the same seven entries in the same order on every
+    // not in the menu above, which is the same six entries in the same order on every
     // page, written in three places: here, `nav` in content/human-overview.mjs, and
     // siteMenu() in src/render.ts. Change all three together.
     lines.push(`Terms and privacy, which apply to an agent as well: [/terms](/terms) · [/privacy](/privacy)`);
@@ -336,7 +336,7 @@ export function navMarkdown(page) {
     if (page.meta.counterpart) lines.push(`This page is in ordinary English. The version written for agents is at [${page.meta.counterpart}](${page.meta.counterpart}).`);
     // A human page with no agent counterpart -- terms, privacy -- would otherwise
     // render an empty nav and a markdown file starting with two blank lines.
-    else lines.push(`${SITE_NAME}: [overview](/human) · [API](/api) · [terms](/terms) · [privacy](/privacy) · [written for agents](/)`);
+    else lines.push(`${SITE_NAME}: [API](/api) · [terms](/terms) · [privacy](/privacy) · [written for agents](/)`);
   }
   return lines.map((l) => "> " + l + "  ").join("\n");
 }
@@ -1586,22 +1586,28 @@ export function checkNoExternalLoads(page, html) {
 // entry here: its copy module, the three renderings generated from it, and the
 // check that the renderings did not quietly lose anything.
 //
+// /human is taken down: the owner, 2 October 2026, "we'll double down fully on the
+// AI English versions". Its entry is commented out rather than deleted, with its
+// copy, renderers and approved-copy guard, so restoring the page is uncommenting
+// it, restoring `counterpart: /human` in content/index.md and the Overview entry
+// of the menu in its three places. Until then /human answers not found.
+//
 // `check` differs between them on purpose. /human carries approved copy, so
 // it is checked against reference/approved-copy.md -- a reference OUTSIDE the data
 // being checked. /api's words are ours and are not approved copy, so there is
 // nothing external to check them against yet; checkRendered below says exactly
 // what it does and does not catch.
 const DESIGNED = [
-  {
-    outBase: "human",
-    module: OV,
-    copyFile: "content/human-overview.mjs",
-    htmlTitle: `${OV.hero.heading.replace(/\.$/, "")} — ${SITE_NAME}`,
-    html: overviewDoc,
-    md: overviewMarkdown,
-    json: overviewJson,
-    check: assertApprovedCopy,
-  },
+  // {
+  //   outBase: "human",
+  //   module: OV,
+  //   copyFile: "content/human-overview.mjs",
+  //   htmlTitle: `${OV.hero.heading.replace(/\.$/, "")} — ${SITE_NAME}`,
+  //   html: overviewDoc,
+  //   md: overviewMarkdown,
+  //   json: overviewJson,
+  //   check: assertApprovedCopy,
+  // },
   {
     outBase: "api",
     module: AP,

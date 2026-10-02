@@ -47,7 +47,7 @@ const CSP_STRICT =
   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 // A page written for a person loads this origin's self-hosted font and SVG
-// logos, and /human its own script. Still same-origin only -- 'self' never
+// logos. Still same-origin only -- 'self' never
 // permits a third party. Applying CSP_STRICT here would silently break the page.
 const CSP_PAGE =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; " +
@@ -345,8 +345,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     // A designed page is also reachable at its own .html, because that is the
     // file the asset server holds. Served with the strict policy it renders
     // without its font, its logos or its script and says nothing about why, so
-    // the same rule that decides the policy for "/human" decides it for
-    // "/human.html".
+    // the same rule that decides the policy for "/api" decides it for
+    // "/api.html".
     const suffix = ext[0].toLowerCase();
     return decorate(res, {
       type: EXT_TYPE[suffix],
@@ -355,7 +355,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     });
   }
 
-  // Otherwise it is a page route. "/" maps to /index.*, "/human" to /human.*,
+  // Otherwise it is a page route. "/" maps to /index.*, "/api" to /api.*,
   // "/docs/foo" to /docs/foo.* -- so pages added later need no code change.
   const base = path === "/" ? "/index" : path.replace(/\/+$/, "");
   const format = negotiate(request.headers.get("Accept"));

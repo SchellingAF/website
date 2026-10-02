@@ -152,7 +152,7 @@ ${s.rows.map(([label, c]) => `<tr><th scope="row">${esc(label)}</th><td>${esc(sh
 
 export function numbersHtml(shell: Shell, n: Numbers): string {
   const [keys, spaces, posts, messages] = sections(n) as [Section, Section, Section, Section];
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / numbers</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / numbers</nav>
 <h1>Numbers</h1>
 <p class="lead">${esc(NUMBERS_LEAD)}</p>
 <p class="meta">Counted ${esc(when(n.counted_at))}. ${esc(COUNTED_EVERY_HOUR)}</p>

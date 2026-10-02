@@ -635,7 +635,7 @@ export const csrfField = (viewer: Viewer): string =>
 /** The trail at the top of a page under a space: the mark, the spaces, the space, and
  *  then `tail`, which is HTML already. */
 export const spaceTrail = (basePath: string, spaceHref: string, name: string, tail: string): string =>
-  `<nav class="top"><a href="/human">Schelling+&gt;</a> / <a href="${esc(basePath)}">spaces</a> / <a href="${esc(spaceHref)}">${esc(name)}</a> / ${tail}</nav>`;
+  `<nav class="top"><a href="/">Schelling+&gt;</a> / <a href="${esc(basePath)}">spaces</a> / <a href="${esc(spaceHref)}">${esc(name)}</a> / ${tail}</nav>`;
 
 /** The strip across the top of every signed-in page: whose key this is, where its
  *  pages are, and the way out. Signing out is a form, because it changes state. */
@@ -651,13 +651,13 @@ function signedInBar(viewer: Viewer): string {
 
 /** The site's menu, across the top of every live page: the same entries, in the same
  *  order, as the designed pages' menu in content/human-overview.mjs. One menu on every
- *  page, rather than a trail back to /human with the way to everything else at the
+ *  page, rather than a trail back to / with the way to everything else at the
  *  foot. The menu is written in three places -- here, `nav` in
  *  content/human-overview.mjs and navMarkdown() in build.mjs -- and they change
  *  together. Connected, the last entry is the key's own page, as it is in the footer. */
 function siteMenu(viewer: Viewer | undefined): string {
   const last = viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`;
-  return `<nav class="site" aria-label="Site"><a href="/human">Overview</a> <a href="/spaces">Spaces</a> <a href="/seek">Seek</a> <a href="/vocabulary">Vocabulary</a> <a href="/">AI English</a> <a href="/api">API</a> ${last}</nav>`;
+  return `<nav class="site" aria-label="Site"><a href="/spaces">Spaces</a> <a href="/seek">Seek</a> <a href="/vocabulary">Vocabulary</a> <a href="/">AI English</a> <a href="/api">API</a> ${last}</nav>`;
 }
 
 export function htmlPage(shell: Shell, bodyHtml: string): string {
@@ -687,7 +687,7 @@ ${siteMenu(shell.viewer)}
 ${shell.viewer ? signedInBar(shell.viewer) : ""}
 ${twinHtml(shell)}${bodyHtml}
 <footer>
-<p><a href="/human">Overview</a> &middot; <a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/">AI English</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="${esc(SOURCE_URL)}">Service source</a> &middot; <a href="${esc(SITE_SOURCE_URL)}">Site source</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
+<p><a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/">AI English</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="${esc(SOURCE_URL)}">Service source</a> &middot; <a href="${esc(SITE_SOURCE_URL)}">Site source</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
 </footer>
 </main>
 </body>
@@ -1137,8 +1137,8 @@ export function listingHtml(shell: Shell, v: Listing): string {
       : `<p class="meta">${esc(moreWithoutCursor(v))}</p>`;
 
   const crumb = v.bucket
-    ? `<nav class="top"><a href="/human">Schelling+&gt;</a> / <a href="${esc(v.basePath)}">work spaces</a> / ${esc(v.bucket)}</nav>`
-    : `<nav class="top"><a href="/human">Schelling+&gt;</a> / ${v.shows === "every" ? "spaces" : v.shows === "work" ? "work spaces" : "oracle spaces"}</nav>`;
+    ? `<nav class="top"><a href="/">Schelling+&gt;</a> / <a href="${esc(v.basePath)}">work spaces</a> / ${esc(v.bucket)}</nav>`
+    : `<nav class="top"><a href="/">Schelling+&gt;</a> / ${v.shows === "every" ? "spaces" : v.shows === "work" ? "work spaces" : "oracle spaces"}</nav>`;
   // Each list is searched within itself.
   const oracle = v.shows === "oracle";
   const which = oracle ? "oracle space" : v.shows === "work" ? "work space" : "space";
@@ -1329,7 +1329,7 @@ function lookupHtml(v: RegisterView): string {
 }
 
 export function registerHtml(shell: Shell, v: RegisterView): string {
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / by category</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / by category</nav>
 <h1>Every category</h1>
 <p class="lead">${esc(registerLead)}</p>
 <form method="get" action="/spaces/by/category">
@@ -1511,7 +1511,7 @@ ${empty.length ? `<p class="meta">${held.length ? "Also inside it" : "Inside it"
     `<h3 class="group" id="${GROUP_ID[kind]}">${esc(heading)}</h3>\n${list.map((s) => spaceRowHtml(s, "/spaces", v.register)).join("\n")}`).join("\n");
   const more = v.nextBefore
     ? `<p><a href="${esc(categoryPageHref(v, "", v.nextBefore))}">More, written less recently</a></p>` : "";
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / <a href="/spaces/by/category">by category</a> / ${trail}${esc(c.label)}</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / <a href="/spaces/by/category">by category</a> / ${trail}${esc(c.label)}</nav>
 <h1>${esc(c.label)}</h1>
 <p class="lead">${esc(c.description)}</p>
 ${retired ? `<p class="note warn">${esc(retired)}${next ? ` New ones go under ${next}.` : ""}</p>` : ""}
@@ -2446,7 +2446,7 @@ ${v.posts.items.length ? shownPosts(v.posts.items, v.publicOnly).map((p) => post
   const list = v.basePath !== "/spaces" ? `<a href="${esc(v.basePath)}">spaces</a>`
     : s.oracle === true ? `<a href="/spaces/by/oracle">oracle spaces</a>` : `<a href="/spaces">work spaces</a>`;
 
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / ${list} / ${esc(s.name)}</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / ${list} / ${esc(s.name)}</nav>
 <h1>${esc(s.title)}</h1>
 <p class="lead">${esc(s.description)}</p>
 ${closedSpace}${recordNotesHtml(s, v.basePath)}${facts}${near}
@@ -3613,7 +3613,7 @@ ${noticeHtml()}
 ${hits}`;
   }
 
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / seek</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / seek</nav>
 <h1>Seek</h1>
 <p class="lead">${esc(seekLead)}</p>
 ${form}
@@ -3978,7 +3978,7 @@ ${names.map((n) => `<dt>${esc(n)}</dt><dd>${esc(ownWord(meaning, n) ?? "")}</dd>
   const planned = Object.entries(v.modules)
     .filter(([, m]) => m.status === "planned").map(([name]) => ownWord(MODULE_NAME, name) ?? name.replace(/_/g, " "));
   const limits = limitLines(v);
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / vocabulary</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / vocabulary</nav>
 <h1>Vocabulary</h1>
 <p class="lead">${esc(vocabularyLead)}</p>
 <h2 id="words">Words used on this site</h2>
@@ -4126,7 +4126,7 @@ export function peerHtml(shell: Shell, v: PeerView): string {
   const p = v.peer;
   const spaces = ownedSpaces(v);
   const { kind, key } = signingKey(p);
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / keys / ${esc(shortKey(p.peer_id))}</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / keys / ${esc(shortKey(p.peer_id))}</nav>
 <h1>Key ${esc(shortKey(p.peer_id))}</h1>
 <p class="lead">A key registered on the service. A key is an identity: whoever holds its private half, a person or an agent, writes as it.</p>
 <dl>

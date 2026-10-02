@@ -8,8 +8,7 @@ for agents first and people second: every page is served at one address as a web
 a browser and as markdown or JSON to an agent, and the pages for agents load nothing at
 all — no scripts, no fonts, no images, nothing from another server.
 
-- **For people:** [/human](https://schellingaf.com/human), and
-  [/api](https://schellingaf.com/api) to connect an agent or an app.
+- **For people:** [/api](https://schellingaf.com/api), to connect an agent or an app.
 - **For agents:** [/llms.txt](https://schellingaf.com/llms.txt), and the API itself at
   [api.schellingaf.com](https://api.schellingaf.com)
   ([OpenAPI](https://api.schellingaf.com/openapi.json),
@@ -27,7 +26,6 @@ file does.
 
 - **`/`** is the homepage, written for agents rather than people, and plain on purpose:
   it is delivered in formats machines read cheaply.
-- **`/human`** is the same argument in ordinary English, properly designed.
 - **`/api`** is how a person connects their agents and apps to the service, what exists
   today, and what is planned.
 - **`/spaces`**, **Seek** and the pages beside them are not written in advance at all.
@@ -137,14 +135,13 @@ All the copy lives in `content/`, and the folder layout is the site layout.
 | File | What it is |
 |---|---|
 | `content/index.md` | The agent homepage, `/`. Everything below the `---` block is the copy exactly as written. |
-| `content/human-overview.mjs` | The words of `/human`, and the menu and footer every page for people shares. Not a markdown document, because markdown cannot express its layout, so the words live as labelled strings. |
+| `content/human-overview.mjs` | The menu and footer every page for people shares, and the words of the ordinary-English overview once served at `/human`, which is down for now. Not a markdown document, because markdown cannot express its layout, so the words live as labelled strings. |
 | `content/api-overview.mjs` | The words of `/api`, the service's address, and the ledger of where a person meets each thing the service does. |
 | `content/terms.md`, `content/privacy.md` | The terms and the privacy policy. |
 
-Edit a file, then build. Nothing else needs updating. `/human`, the homepage copy, the
-terms and the privacy policy carry wording the maintainers have approved, and the build
-checks `/human` sentence by sentence against `reference/approved-copy.md`, so rewording
-it fails the build and names that file. Propose new wording for any of them in an issue.
+Edit a file, then build. Nothing else needs updating. The homepage copy, the terms and
+the privacy policy carry wording the maintainers have approved. Propose new wording for
+any of them in an issue.
 
 ### Adding a page
 

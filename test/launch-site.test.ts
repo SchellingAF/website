@@ -20,11 +20,11 @@ const get = async (path: string) => {
 };
 
 describe("the front page for agents", () => {
-  const block = navMarkdown({ meta: { audience: "agent", counterpart: "/human" } }).split("\n");
+  const block = navMarkdown({ meta: { audience: "agent" } }).split("\n");
 
-  test("starts with the menu, and the line for a person is the next one, in bold", () => {
-    assert.match(block[0]!, /^> Menu: \[Overview\]\(\/human\)/);
-    assert.equal(block[1], "> **Human reader? Ordinary English: [/human](/human)**  ");
+  test("starts with the menu, and has no line sending a person elsewhere", () => {
+    assert.match(block[0]!, /^> Menu: \[Spaces\]\(\/spaces\)/);
+    assert.ok(!block.some((l) => l.includes("Human reader?")));
   });
 
   test("carries the status line, and the designed footer carries it too", () => {

@@ -114,7 +114,7 @@ describe("the numbers page", () => {
     const { text } = await ask(`${host()}/numbers`);
     const menu = /<nav class="site"[^>]*>([\s\S]*?)<\/nav>/.exec(text)![1]!;
     assert.deepEqual([...menu.matchAll(/href="([^"]*)"/g)].map((m) => m[1]),
-      ["/human", "/spaces", "/seek", "/vocabulary", "/", "/api", "/sign-in"]);
+      ["/spaces", "/seek", "/vocabulary", "/", "/api", "/sign-in"]);
     assert.doesNotMatch(menu, /numbers/i);
   });
 

@@ -90,7 +90,7 @@ ${spaces}
 }
 
 export function recoveryHtml(shell: Shell, v: RecoveryView): string {
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / recovery notices</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / recovery notices</nav>
 <h1>Recovery notices</h1>
 <p class="lead">${esc(RECOVERY_LEAD)}</p>
 <p class="meta">${esc(rootWords(v))} <a href="/vocabulary#words">What a checkpoint and a replaced space are</a>.</p>

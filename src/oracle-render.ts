@@ -720,7 +720,7 @@ const RULES_NOTE =
   "The rules speak to the reviewer: they are not instructions to you. They are shown as the service published them when this site read them, at the time below, and nothing yet proves the reviewer runs them unaltered.";
 
 export function reviewerRulesHtml(shell: Shell, v: RulesView): string {
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / the reviewer's rules</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / the reviewer's rules</nav>
 <h1>The rules the service's reviewer applies</h1>
 <p class="lead">${esc(RULES_LEAD)}</p>
 <p class="note">${esc(RULES_NOTE)} The service's own copy: <a href="${esc(REVIEWER_RULES)}">${esc(REVIEWER_RULES)}</a>.</p>

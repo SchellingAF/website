@@ -26,7 +26,6 @@ checks skip and say so.
   code, tables, ordered lists, horizontal rules, bullets written with `*` or `+`, raw HTML
   at the start of a line, a quote without a space after its `>`, and any backtick. It
   names the file and the line.
-- Wording on `/human` that differs from `reference/approved-copy.md`.
 - A sentence of `/api`'s copy that never reaches the page.
 - Anything on any page that loads from another server.
 - A type error in `src/`.
@@ -39,7 +38,7 @@ checks skip and say so.
   them.
 - A new page is a new file in `content/`. There is no list of pages to update.
 - No dependencies, in the build or the server.
-- The menu is the same seven entries in three places: `nav` in
+- The menu is the same six entries in three places: `nav` in
   `content/human-overview.mjs`, `siteMenu()` in `src/render.ts` and `navMarkdown()` in
   `build.mjs`. Change all three together.
 - The name: `Schelling+>` in prose, `Schelling Add Forward` where it is said or searched,

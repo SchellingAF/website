@@ -19,7 +19,7 @@ Node 26 or later; there is nothing to install. See [Running it](README.md#runnin
 the build refuses. A pull request passes `npm test`.
 
 The homepage copy (`content/index.md`), the terms, the privacy policy and the approved
-wording of `/human` (`reference/approved-copy.md`) change only with the maintainers'
+wording in `reference/approved-copy.md` change only with the maintainers'
 approval. Propose new wording in an issue.
 
 ## Licensing

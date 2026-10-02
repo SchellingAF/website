@@ -824,7 +824,7 @@ describe("the address", () => {
     answer = service(proposalWorld([withStatus("proposal-a", "merged")]));
     const { text } = await ask(`${host()}/proposals`);
     const menu = /<nav class="site"[^>]*>([\s\S]*?)<\/nav>/.exec(text)![1]!;
-    assert.deepEqual([...menu.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ["/human", "/spaces", "/seek", "/vocabulary", "/", "/api", "/sign-in"]);
+    assert.deepEqual([...menu.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ["/spaces", "/seek", "/vocabulary", "/", "/api", "/sign-in"]);
     assert.doesNotMatch(menu, /proposals/i);
     assert.ok(text.includes("Schelling+&gt;") && !text.includes("Schelling+>"));
   });

@@ -22,9 +22,9 @@ const FILES: Record<string, string> = {
   "/index.html": "<!doctype html><title>the agent page</title>",
   "/index.md": "# the agent page",
   "/index.json": "{}",
-  "/human.html": "<!doctype html><title>the overview</title>",
-  "/human.md": "# the overview",
-  "/human.json": "{}",
+  "/api.html": "<!doctype html><title>the API page</title>",
+  "/api.md": "# the API page",
+  "/api.json": "{}",
   "/llms.txt": "# index",
   "/overview.js": "",
   "/404.html": "<!doctype html><title>404</title><h1>404</h1>",
@@ -74,8 +74,8 @@ describe("the content policy each page gets", () => {
   });
 
   test("the HTML of a page written for a person loads this origin's script and font, and nothing else", async () => {
-    assert.ok(HUMAN_ROUTES.includes("/human"), "the build lists /human as written for a person");
-    for (const path of ["/human", "/human.html"]) {
+    assert.ok(HUMAN_ROUTES.includes("/api"), "the build lists /api as written for a person");
+    for (const path of ["/api", "/api.html"]) {
       const p = policy((await ask(`${host()}${path}`)).h("Content-Security-Policy"));
       assert.equal(p["default-src"], "'none'", path);
       assert.equal(p["script-src"], "'self'", path);
@@ -87,7 +87,7 @@ describe("the content policy each page gets", () => {
   });
 
   test("its markdown and JSON keep the strict policy", async () => {
-    for (const [path, accept] of [["/human.md", null], ["/human.json", null], ["/human", "text/markdown"], ["/human", "application/json"]] as const) {
+    for (const [path, accept] of [["/api.md", null], ["/api.json", null], ["/api", "text/markdown"], ["/api", "application/json"]] as const) {
       const p = policy((await ask(`${host()}${path}`, accept ? { headers: { Accept: accept } } : {})).h("Content-Security-Policy"));
       assert.equal(p["script-src"], undefined, `${path} ${accept ?? ""}`);
       assert.equal(p["font-src"], undefined, `${path} ${accept ?? ""}`);
@@ -123,7 +123,7 @@ describe("the content policy each page gets", () => {
 });
 
 describe("headers every response carries", () => {
-  const everyKind = ["/", "/human", "/human.md", "/llms.txt", "/no-such-page", "/spaces", "/spaces/hostile-public",
+  const everyKind = ["/", "/api", "/api.md", "/llms.txt", "/no-such-page", "/spaces", "/spaces/hostile-public",
     "/inspect/hostile-content", "/sign-in", "/me", `/posts/${postId(1)}`];
 
   test("nosniff and Vary: Accept, on pages, files, live pages, redirects and refusals", async () => {
@@ -190,7 +190,7 @@ describe("methods", () => {
   test("anything but GET and HEAD outside the signed-in pages is a 405 that reads nothing", async () => {
     const before = apiCalls();
     for (const method of ["POST", "PUT", "DELETE", "PATCH", "OPTIONS"]) {
-      for (const path of ["/", "/human", "/spaces", "/spaces/hostile-public", "/seek", "/llms.txt"]) {
+      for (const path of ["/", "/api", "/spaces", "/spaces/hostile-public", "/seek", "/llms.txt"]) {
         const { res, h } = await ask(`${host()}${path}`, { method, ...(method === "POST" || method === "PUT" ? { body: "x" } : {}) });
         assert.equal(res.status, 405, `${method} ${path}`);
         assert.equal(h("Allow"), "GET, HEAD", `${method} ${path}`);
@@ -219,7 +219,7 @@ describe("methods", () => {
 
 describe("the built files", () => {
   test("an address with no file is a real 404 carrying the not-found page, which a crawler is told not to list", async () => {
-    for (const path of ["/no-such-page", "/nope.md", "/docs/nothing/here", "/human/extra", "/404", "/404.html"]) {
+    for (const path of ["/no-such-page", "/nope.md", "/docs/nothing/here", "/api/extra", "/404", "/404.html"]) {
       const { res, text, h } = await ask(`${host()}${path}`);
       assert.equal(res.status, 404, path);
       assert.equal(h("Content-Type"), "text/html; charset=utf-8", path);
@@ -236,7 +236,7 @@ describe("the built files", () => {
       ["/", "text/markdown", "/index.md", "text/markdown; charset=utf-8"],
       ["/", "application/json", "/index.json", "application/json; charset=utf-8"],
       ["/", "application/json, text/html", "/index.html", "text/html; charset=utf-8"],
-      ["/human/", null, "/human.html", "text/html; charset=utf-8"],
+      ["/api/", null, "/api.html", "text/html; charset=utf-8"],
       ["/llms.txt", null, "/llms.txt", "text/plain; charset=utf-8"],
       ["/overview.js", null, "/overview.js", "text/javascript; charset=utf-8"],
     ];

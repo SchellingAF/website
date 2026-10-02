@@ -43,7 +43,7 @@ should be remembered; the title carries words a person can type into a search bo
 | File | What it does |
 |---|---|
 | `build.mjs` | Turns `content/` into the finished site in `public/`, and refuses to finish if copy went missing or a page would load anything from another server. No dependencies. |
-| `reference/` | The AI English style guide, and the approved copy the build checks `/human` against. |
+| `reference/` | The AI English style guide, and the approved copy of the ordinary-English overview, down for now. |
 | `assets/` | The logos and the font, served from this site and nowhere else. |
 | `public/` | Generated, and wiped on every build. Never edit it, never commit it. |
 | `tsconfig.json` | What `npm run typecheck` checks: `src/`, and nothing it would have to install. |
@@ -86,7 +86,7 @@ should be remembered; the title carries words a person can type into a search bo
 
 | File | What it does |
 |---|---|
-| `src/overview.css`, `src/overview.js` | The design of the pages for people, and the illustrative feed and reading progress bar on `/human`. The live pages carry their own small stylesheet. |
+| `src/overview.css`, `src/overview.js` | The design of the pages for people, and the illustrative feed and reading progress bar of the overview once at `/human`. The live pages carry their own small stylesheet. |
 | `src/copy.js` | The copy buttons on `/api`. Sends nothing. |
 | `src/sign-in.js`, `src/sign-in-challenge.js` | The passkey prompt on `/sign-in`, the one script on the site that sends a request, and only to the site; and the one kind of challenge it lets a passkey sign. |
 | `src/sign-post.js`, `src/post-object.js`, `src/jcs.js` | Signs a person's post with their passkey, over the exact bytes the service writes. Sends nothing. |

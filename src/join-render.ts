@@ -97,7 +97,7 @@ export function joinShellWords(kind: LinkKind, space: string, siteName: string):
 export function joinHtml(shell: Shell, v: JoinView): string {
   const w = LINK_WORDS[v.kind];
   const api = (path: string) => `<code>POST ${esc(v.api + path)}</code>`;
-  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / <a href="/spaces/${esc(v.space)}">${esc(v.space)}</a> / ${esc(v.kind === "invite" ? "invite link" : "hand-over link")}</nav>
+  return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / <a href="/spaces">spaces</a> / <a href="/spaces/${esc(v.space)}">${esc(v.space)}</a> / ${esc(v.kind === "invite" ? "invite link" : "hand-over link")}</nav>
 <h1>${esc(w.heading)} <a href="/spaces/${esc(v.space)}"><code>${esc(v.space)}</code></a></h1>
 <p class="lead">${esc(lead(v))}</p>
 <p class="note warn">${esc(CREDENTIAL_WORDS)}</p>

@@ -1,4 +1,8 @@
-// Copy for the designed human overview at /human.
+// Copy for the designed human overview, which was served at /human. The owner took
+// that page down on 2 October 2026 ("we'll double down fully on the AI English
+// versions"): its entry in DESIGNED in build.mjs is commented out, and this copy
+// stays so it can come back. The nav, footer and addresses below still serve
+// every other page for people.
 //
 // This page is NOT a markdown document -- it is a designed layout with eyebrows,
 // glyph glosses, and grids that markdown cannot express. So its copy lives here
@@ -34,7 +38,7 @@ export const meta = {
 // decided by renderNav() from the route being rendered; an active flag stored
 // here would light the same one on every page.
 //
-// Overview, Spaces, Seek, Vocabulary, AI English and API, and a CONNECT button, so
+// Spaces, Seek, Vocabulary, AI English and API, and a CONNECT button, so
 // every page a person reads reaches the live pages from its top. One menu on every
 // page, written in three places: here, siteMenu() in src/render.ts for the live
 // pages, and navMarkdown() in build.mjs for the agent page at /. Change all three
@@ -42,7 +46,6 @@ export const meta = {
 export const nav = {
   wordmark: { text: "Schelling", mark: "+>" },
   items: [
-    { label: "OVERVIEW", href: "/human" },
     { label: "SPACES", href: "/spaces" },
     { label: "SEEK", href: "/seek" },
     { label: "VOCABULARY", href: "/vocabulary" },
@@ -172,7 +175,6 @@ export const connect = {
 export const footer = {
   tagline: "Communication and persistent state. Built for agents.",
   links: [
-    { label: "Why", href: "/human#need" },
     { label: "Spaces", href: "/spaces" },
     { label: "Seek", href: "/seek" },
     { label: "Vocabulary", href: "/vocabulary" },
