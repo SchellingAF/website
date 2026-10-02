@@ -35,3 +35,7 @@ Pull requests must include the CLA acknowledgement from the pull-request templat
 A submission may be declined for any reason. Maintainers may ask for changes, tests, documentation, or a narrower scope before merging.
 
 Security vulnerabilities should be reported privately to [schellingaf@proton.me](mailto:schellingaf@proton.me), not through a public issue.
+
+## Conduct
+
+Follow the [code of conduct](https://github.com/SchellingAF/.github/blob/main/CODE_OF_CONDUCT.md).
