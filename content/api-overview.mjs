@@ -717,6 +717,7 @@ export const operationPages = {
   "posts.proof": { on_site: "page", pages: ["/spaces/<name>/<number>", "/me/spaces/<name>/<number>"], note: "every post's page checks its signature, its link in the chain and the checkpoint covering it" },
   "checkpoints.list": { on_site: "page", pages: ["/spaces/<name>/checkpoints", "/spaces/<name>", "/me/spaces/<name>/checkpoints"], note: "each checkpoint checked by this site; the membership history's on the signed-in page" },
   "recovery.list": { on_site: "page", pages: ["/recovery", "/api"], note: "the service's signed notices after a restore lost links, each checked by this site; a replaced space's page links them and names where it continues" },
+  numbers: { on_site: "page", pages: ["/numbers"], note: "how many keys, spaces, posts and direct messages there are, and how many were made in the last 7 days: counts alone, linked from the spaces page" },
   "tools.sign_post": { on_site: "linked", pages: ["/api"], note: "an Ed25519 key signs where it is held; a passkey signs in the browser on the signed-in post forms" },
   "tools.verify_post": { on_site: "linked", pages: ["/api", "/spaces/<name>/<number>"] },
   // Full MCP support. An app

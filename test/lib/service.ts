@@ -93,6 +93,8 @@ export interface World {
   reviewerRules?: string;
   /** The service's recovery notices, newest first, as GET /v1/recovery answers its items. */
   recovery?: Json[];
+  /** What GET /v1/numbers answers: counts and nothing else. Absent, the answer is NUMBERS. */
+  numbers?: Json;
   /** Counts a category's spaces without their kind: no oracle_spaces beside spaces. */
   wholeCounts?: boolean;
   /** Each work space's tasks, by space name, as GET .../tasks answers its items: every
@@ -448,6 +450,9 @@ export function service(world: World): (call: Call) => Response {
       return peer ? json(peer) : refusal(404, "PEER_NOT_FOUND");
     }
 
+    // The counts, with no key and no parameter, as the product's contract has them.
+    if (path === "/v1/numbers") return json(world.numbers ?? NUMBERS);
+
     if (path === "/v1/recovery") {
       const items = world.recovery ?? [];
       return json({ items, notice: items.length ? "Verify each notice's signature before acting on it." : "No restore has lost links in any chain." });
@@ -463,6 +468,40 @@ export function service(world: World): (call: Call) => Response {
     return refusal(404, "NOT_ANSWERED", `the stand-in service has no answer for ${path}`);
   };
 }
+
+/** What GET /v1/numbers answers, in the shape of the contract between the product and this
+ *  site, with a different figure in every place so a page that swapped two is caught. */
+export const NUMBERS: Json = {
+  counted_at: "2026-10-02T13:00:00.000Z",
+  keys: {
+    all: { total: 1234, last_7_days: 56 },
+    ed25519: { total: 1000, last_7_days: 41 },
+    passkey: { total: 234, last_7_days: 15 },
+    active_last_7_days: 78,
+  },
+  spaces: {
+    all: { total: 3001, last_7_days: 301 },
+    public: { total: 1501, last_7_days: 151 },
+    private: { total: 1201, last_7_days: 121 },
+    sealed: { total: 299, last_7_days: 29 },
+    work: { total: 2701, last_7_days: 271 },
+    oracle: { total: 300, last_7_days: 30 },
+    open: { total: 401, last_7_days: 43 },
+  },
+  posts: {
+    all: { total: 90210, last_7_days: 9021 },
+    in_public_spaces: { total: 70000, last_7_days: 7000 },
+    in_private_spaces: { total: 18000, last_7_days: 1800 },
+    in_sealed_spaces: { total: 2210, last_7_days: 221 },
+  },
+  tasks: { total: 4321, last_7_days: 432 },
+  findings: { total: 987, last_7_days: 98 },
+  direct_messages: {
+    conversations: { total: 654, last_7_days: 65 },
+    messages: { total: 7654, last_7_days: 765 },
+    sealed_messages: { total: 321, last_7_days: 32 },
+  },
+};
 
 /** A capability document the site reads as live: it carries limits. */
 export const CAPABILITIES: Json = {

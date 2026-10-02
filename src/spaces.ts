@@ -31,6 +31,7 @@
 //   /sitemap-categories.xml      every category that holds a space
 //   /seek                        SEEK: prior work, by fingerprint or by text
 //   /vocabulary                  the service's words, and its limits, explained
+//   /numbers                     how many keys, spaces, posts and direct messages there are
 //   /peers/<key>                 who a key is: when it registered, what it owns
 //   /posts/<id>                  a redirect from a post's id to its address
 //   /join/<space>/<code>         an invite link or a hand-over link, and every way to
@@ -64,6 +65,7 @@ import { GROUP_MEANING, KIND_MEANING, capabilities, checkpointDue, heldKinds, is
 import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, register, resolveCategory, unknownId, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
+import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -132,6 +134,7 @@ export type RouteKind =
   | "vocabulary"  // /vocabulary
   | "reviewer-rules" // /reviewer-rules
   | "recovery"    // /recovery
+  | "numbers"     // /numbers
   | "peer"        // /peers/<key>
   | "post-id"     // /posts/<id>   -- a redirect
   | "join";       // /join/<space>/<code>   -- an invite link; reads nothing
@@ -260,6 +263,8 @@ const TTL: Record<RouteKind, number> = {
   // A notice is signed only after a restore that lost part of a record: rare, and
   // then what a reader most needs to see soon.
   recovery: 600,
+  // The service counts at most once an hour and says when; the page is held well inside that.
+  numbers: 600,
   // When a key registered never changes; the spaces it owns change rarely.
   peer: 1800,
   // A redirect is never stored by the page cache, which keeps only a 200.
@@ -320,7 +325,7 @@ export function matchSitemapChild(path: string): Route | null {
  *  three representations work by extension as well as by Accept. */
 export function matchRoute(path: string, accept: string | null, env: ApiEnv, hasQuery: boolean): Route | null {
   const within = (b: string) => path === b || path.startsWith(`${b}/`) || path.startsWith(`${b}.`);
-  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery"].find(within);
+  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery", "/numbers"].find(within);
   if (other) return matchOther(other, path, accept, env);
 
   let base: string;
@@ -512,6 +517,8 @@ function matchOther(base: string, path: string, accept: string | null, env: ApiE
     // What the service signed after a restore lost links, read with no key. Listed while
     // it holds a notice; the page itself says when it holds none.
     case "/recovery": return segment === "" ? of("recovery", null, true, "none") : null;
+    // The service's counts, read with no key: none is broken down by space or by key.
+    case "/numbers": return segment === "" ? of("numbers", null, true, "none") : null;
   }
   return null;
 }
@@ -944,6 +951,8 @@ export async function handle(route: Route, url: URL, env: ApiEnv): Promise<Respo
       return reviewerRulesPage(route, url);
     case "recovery":
       return recoveryPage(route, url, env);
+    case "numbers":
+      return numbersPage(route, url, env);
     case "peer":
       return peerPage(route, url, env);
     case "post-id":
@@ -2736,6 +2745,24 @@ async function recoveryPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
     ? res.data.next_before : null;
   const view = { rows, readAs: route.readAs, rootPinned: root !== null, before, next };
   return drawn(route, shell, view, { html: recoveryHtml, md: recoveryMarkdown, json: recoveryJson });
+}
+
+/**
+ * THE SERVICE'S NUMBERS: how many keys, spaces, posts and direct messages there are, and
+ * how many were made in the last 7 days, read with no key. The service counts at most once
+ * an hour and says when; this page is held for ten minutes, which adds no more than that to
+ * the age of the count, and it always says when the count was made. The answer is read field
+ * by field (readNumbers), so nothing the service adds to it reaches the page, and an
+ * answer out of shape is a 503 like no answer at all, never a page of guesses.
+ */
+async function numbersPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
+  const shell = shellFor(route, url, `Numbers — ${SITE_NAME}`,
+    `How many keys, spaces, posts and direct messages ${SITE_NAME} holds, and how many were made in the last 7 days.`);
+  const res = await apiGet<unknown>(env, "/v1/numbers", "none");
+  if (!res.ok) return unavailable(route, shell, res.code, res.message);
+  const numbers = readNumbers(res.data);
+  if (!numbers) return unavailable(route, shell, "BAD_JSON", "the service's answer was not the numbers this page reads");
+  return drawn(route, shell, numbers, { html: numbersHtml, md: numbersMarkdown, json: numbersJson });
 }
 
 /**

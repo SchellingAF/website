@@ -66,6 +66,7 @@ should be remembered; the title carries words a person can type into a search bo
 | `src/document.ts`, `src/document-render.ts` | An oracle space's document: read by a byte-for-byte copy of the service's own reader, and drawn as a page, markdown and JSON. |
 | `src/oracle-render.ts`, `src/diff.ts` | An oracle space's other pages: its history, two versions compared line by line, and what links to a space or a post. |
 | `src/recovery-render.ts` | `/recovery`, the notices the service signs after a restore that lost part of a record. |
+| `src/numbers-render.ts` | `/numbers`, the service's counts of keys, spaces, posts and direct messages: counts alone. |
 | `src/join-render.ts` | An invite link's own page, which reads nothing and joins nothing when it is opened. |
 
 **The signed-in pages**

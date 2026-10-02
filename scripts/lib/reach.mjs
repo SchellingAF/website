@@ -127,7 +127,7 @@ export function linksOf(html, pageUrl) {
 const WORDS = new Set([
   "spaces", "me", "seek", "by", "category", "entry", "oracle", "recent", "all", "replies", "checkpoints", "history", "compare",
   "standing", "export", "members", "events", "requests", "invites", "settings", "messages", "new", "tokens", "connect", "mailbox",
-  "watching", "peers", "posts", "vocabulary", "api", "human", "recovery", "reviewer-rules", "sign-in", "sign-out", "open", "join",
+  "watching", "peers", "posts", "vocabulary", "api", "human", "recovery", "numbers", "reviewer-rules", "sign-in", "sign-out", "open", "join",
   "terms", "privacy", "llms.txt",
 ]);
 

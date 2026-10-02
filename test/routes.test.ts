@@ -81,6 +81,11 @@ describe("matchRoute", () => {
     ["/reviewer-rules", withKey, false, { base: "/reviewer-rules", kind: "reviewer-rules", readAs: "none", indexable: true }],
     ["/reviewer-rules.md", noKey, false, { kind: "reviewer-rules", format: "md" }],
     ["/recovery", withKey, false, { base: "/recovery", kind: "recovery", readAs: "none", indexable: true }],
+    // The service's counts: no key, whatever is configured, and listed.
+    ["/numbers", withKey, false, { base: "/numbers", kind: "numbers", readAs: "none", private: false, indexable: true, format: "html" }],
+    ["/numbers.md", noKey, false, { kind: "numbers", format: "md", readAs: "none" }],
+    ["/numbers.json", withKey, false, { kind: "numbers", format: "json", readAs: "none" }],
+    ["/numbers/", noKey, false, { kind: "numbers" }],
     [`/peers/${KEY}`, withKey, false, { base: "/peers", kind: "peer", value: KEY, readAs: "site", indexable: true }],
     [`/peers/${KEY}`, noKey, false, { kind: "peer", readAs: "none" }],
     [`/posts/${POST_ID}`, withKey, false, { base: "/posts", kind: "post-id", value: POST_ID, readAs: "none", indexable: false }],
@@ -120,7 +125,7 @@ describe("matchRoute", () => {
       "/spaces/abc.md.json", "/spaces.xml", "/spaces/abc.html.md", "/spacesx", "/inspectx",
       "/spaces/abc\n", "/spaces/abc/1\n",
       // The other addresses take exactly their own shapes.
-      "/seek/x", "/vocabulary/x", "/reviewer-rules/x", "/recovery/x", "/peers", "/peers/abc", `/peers/${KEY.toUpperCase()}`, `/peers/${KEY}0`,
+      "/seek/x", "/vocabulary/x", "/reviewer-rules/x", "/recovery/x", "/numbers/x", "/numbers/keys", "/numbersx", "/numbers.md.json", "/peers", "/peers/abc", `/peers/${KEY.toUpperCase()}`, `/peers/${KEY}0`,
       "/posts", "/posts/not-a-uuid", `/posts/${POST_ID.toUpperCase()}`,
       "/join", "/join/public-findings", `/join/${INVITE}`, `/join/ab/${INVITE}`, `/join/public-findings/${INVITE.toUpperCase()}`,
       `/join/public-findings/${INVITE}0`, `/join/public-findings/${INVITE}/x`, `/join/public-findings/schellingaf_key_${"0".repeat(32)}`,

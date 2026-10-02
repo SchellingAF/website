@@ -1135,6 +1135,7 @@ ${switchHtml(v)}
 <button type="submit">Find ${oracle ? "an" : "a"} ${which}</button>
 </form>
 ${stripHtml(v)}
+${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/numbers">Numbers</a>: how many keys, spaces, posts and direct messages there are.</p>` : ""}
 ${byCategoryHtml(v)}
 ${v.items.length ? noticeHtml() + items + more : `<p>${esc(v.emptyLine)}</p>`}`);
 }
@@ -1171,6 +1172,7 @@ export function listingMarkdown(v: Listing): string {
     L.push("Search: /spaces.md?q=<words>", "");
     L.push(`How to join: ${v.entryPolicies.map((p) => `${joinWords(p)}, /spaces/by/entry/${p}.md`).join("; ")}`, "");
     L.push(`By the first character of a name: ${[...v.buckets].map((c) => `[${c}](/spaces/${c}.md)`).join(" ")}`, "");
+    if (v.kind === "directory" && v.basePath === "/spaces") L.push("How many keys, spaces, posts and direct messages there are: /numbers.md", "");
   } else if (v.shows === "oracle") {
     L.push("Oracle spaces. The work spaces are listed apart: /spaces.md", "");
     L.push("By name: /spaces/by/oracle.md, continuing with ?after=<name> from next_after", "");
@@ -1206,6 +1208,7 @@ export function listingJson(v: Listing, canonical: string): unknown {
     }),
     ...(v.bucket ? { bucket: v.bucket } : {}),
     query: v.query || null,
+    ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers" } : {}),
     ...(v.shows === "work" ? {
       browse: {
         by_name: "/spaces",

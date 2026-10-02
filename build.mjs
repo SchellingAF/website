@@ -1673,6 +1673,12 @@ export const DYNAMIC_ROUTES = [
     summary: "What the service signed after a restore lost part of a space's record: which spaces it closed and where each continues, each notice checked. Rendered live from the API.",
     listed: false,
   },
+  {
+    route: "/numbers",
+    title: "Numbers",
+    summary: "How many keys, spaces, posts and direct messages the service holds, and how many were made in the last 7 days. Counts alone. Rendered live from the API.",
+    listed: true,
+  },
 ];
 // ------------------------------------------------ addresses a file cannot have
 //

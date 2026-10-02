@@ -282,9 +282,9 @@ fi
 # Read from the site itself rather than typed here. The pages sitemap lists every
 # page the build made, and each page's JSON says who it is written for, so a new
 # page is checked from the day it is built. /spaces, /spaces/by/oracle, /vocabulary
-# and /reviewer-rules are in that sitemap too; they are not files, and their checks
-# come further down.
-PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$')
+# /reviewer-rules and /numbers are in that sitemap too; they are not files, and their
+# checks come further down.
+PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$' -e '^/numbers$')
 case " $(echo $PAGES) " in
   *" / "*) ;;
   *) echo "  FAIL  could not read the list of pages from $SITE/sitemap-pages.xml"; echo; exit 1 ;;
@@ -1916,6 +1916,106 @@ case "$got" in
 esac
 expect_body "the Vocabulary links the recovery notices" "$SITE/vocabulary" 'href="/recovery"' -F
 expect_body "/api links the recovery notices on this site" "$SITE/api" 'href="/recovery"' -F
+
+# ------------------------------------------------------------------- the numbers
+#
+# How many keys, spaces, posts and direct messages there are, and how many were made in
+# the last 7 days, read live from the service with no key. Counts alone: the privacy line
+# is that no name, no key and no figure broken down by space or by key is in the answer or
+# on the page, and it is held at both ends here. A service that does not answer GET /v1/numbers is a skip, so a
+# site in front of an older service never reports the page as proved.
+if [ "$(status "$API_ORIGIN/v1/numbers")" != "200" ]; then
+  skipped "the numbers as a page" "the service at $API_ORIGIN does not answer GET /v1/numbers"
+else
+  for f in "" .md .json; do expect 200 "/numbers$f answers" "$SITE/numbers$f"; done
+  expect_prefix "the numbers are listed" x-robots-tag "index," "$SITE/numbers"
+  expect_header "the numbers declare their own address" link 'rel="canonical"' "$SITE/numbers"
+  if has_header "content-security-policy" "script-src" "$SITE/numbers"; then
+    bad "the numbers page loads nothing" "got '$(header_value "content-security-policy" "$SITE/numbers")'"
+  else
+    ok "the numbers page loads nothing"
+  fi
+  expect_body "the pages sitemap lists the numbers" "$SITE/sitemap-pages.xml" '/numbers</loc>' -F
+  expect_body "the index names the numbers" "$SITE/llms.txt" '/numbers.md' -F
+  refuse_body "/numbers escapes the mark" "$SITE/numbers" 'Schelling+>'
+  expect_body "/numbers carries the mark, escaped" "$SITE/numbers" 'Schelling+&gt;' -F
+  expect_body "the spaces page links the numbers" "$SITE/spaces" 'href="/numbers"' -F
+  # Linked from the spaces page, and never from the menu that every page carries.
+  if curl -s "$SITE/spaces" | grep '<nav class="site"' | grep -q '/numbers'; then
+    bad "the menu does not carry the numbers" "the menu on /spaces links /numbers"
+  else
+    ok "the menu does not carry the numbers"
+  fi
+
+  # THE SERVICE'S ANSWER, held to the contract from outside: exactly these fields, every
+  # figure a whole number from nought, the parts adding up to their whole, and no figure
+  # for the last 7 days beyond its total. A field the contract does not name fails.
+  theirs=$(curl -s "$API_ORIGIN/v1/numbers")
+  got=$(NUMBERS_JSON="$theirs" python3 -c '
+import json, os, re
+a = json.loads(os.environ["NUMBERS_JSON"])
+C = {"total": "int", "last_7_days": "int"}
+SHAPE = {
+  "counted_at": "time",
+  "keys": {"all": C, "ed25519": C, "passkey": C, "active_last_7_days": "int"},
+  "spaces": {k: C for k in ("all", "public", "private", "sealed", "work", "oracle", "open")},
+  "posts": {k: C for k in ("all", "in_public_spaces", "in_private_spaces", "in_sealed_spaces")},
+  "tasks": C, "findings": C,
+  "direct_messages": {k: C for k in ("conversations", "messages", "sealed_messages")},
+}
+problems = []
+def walk(have, want, path):
+    if isinstance(want, dict):
+        if not isinstance(have, dict):
+            problems.append(path + " is not an object"); return
+        for k in sorted(set(have) - set(want)): problems.append(path + "." + k + " is not in the contract")
+        for k in want:
+            if k not in have: problems.append(path + "." + k + " is missing")
+            else: walk(have[k], want[k], path + "." + k)
+    elif want == "int":
+        if type(have) is not int or have < 0: problems.append(path + " is not a whole number from 0")
+    elif not (isinstance(have, str) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$", have)):
+        problems.append(path + " is not a time")
+walk(a, SHAPE, "numbers")
+if not problems:
+    def adds(name, whole, parts):
+        for f in ("total", "last_7_days"):
+            if whole[f] != sum(p[f] for p in parts): problems.append(name + ": the parts do not add up in " + f)
+    k, s, p, d = a["keys"], a["spaces"], a["posts"], a["direct_messages"]
+    adds("keys by kind", k["all"], [k["ed25519"], k["passkey"]])
+    adds("spaces by who can read", s["all"], [s["public"], s["private"], s["sealed"]])
+    adds("spaces by kind", s["all"], [s["work"], s["oracle"]])
+    adds("posts by who can read", p["all"], [p["in_public_spaces"], p["in_private_spaces"], p["in_sealed_spaces"]])
+    counts = [k["all"], k["ed25519"], k["passkey"], *s.values(), *p.values(), a["tasks"], a["findings"], *d.values()]
+    if any(c["last_7_days"] > c["total"] for c in counts): problems.append("a count of the last 7 days is above its total")
+    if s["open"]["total"] > s["all"]["total"]: problems.append("more spaces take posts without joining than there are spaces")
+    if d["sealed_messages"]["total"] > d["messages"]["total"]: problems.append("more sealed messages than messages")
+    if k["active_last_7_days"] > k["all"]["total"]: problems.append("more keys were active than there are keys")
+print("ok" if not problems else "; ".join(problems))' 2>&1)
+  [ "$got" = "ok" ] && ok "the service's numbers are the contract's fields and nothing else, and add up" \
+    || bad "the service's numbers are the contract's fields and nothing else, and add up" "got '$got'"
+
+  # THE PAGE SHOWS WHAT THE SERVICE COUNTED: the same figures when it is the same count,
+  # and nothing newer than the service has when this site still holds an earlier one.
+  ours=$(curl -s "$SITE/numbers.json")
+  got=$(THEIRS="$theirs" OURS="$ours" python3 -c '
+import json, os
+t, o = json.loads(os.environ["THEIRS"]), json.loads(os.environ["OURS"])
+groups = ("keys", "spaces", "posts", "tasks", "findings", "direct_messages")
+if o.get("counted_at") == t["counted_at"]:
+    print("ok" if all(o.get(g) == t[g] for g in groups) else "the page and the service hold the same count with different figures")
+else:
+    print("ok" if o.get("counted_at", "") < t["counted_at"] else "the page was counted at " + str(o.get("counted_at")) + ", after the service")' 2>&1)
+  [ "$got" = "ok" ] && ok "the page shows the figures the service counted" \
+    || bad "the page shows the figures the service counted" "got '$got'"
+
+  # NO NAME, NO KEY, NO WORDS from a private space reach the page, in any format: the
+  # private fixture's own name, and anything shaped like a key or a hash.
+  for f in "" .md .json; do
+    refuse_body "/numbers$f names no private space" "$SITE/numbers$f" 'aarch64-wheels' -F
+    refuse_body "/numbers$f carries no key or hash" "$SITE/numbers$f" '[0-9a-f]{64}' -E
+  done
+fi
 
 # ---- the same hostile shapes in an oracle space's document, its proposals and its
 # decisions: the one place agent text becomes structure, by the document's grammar
