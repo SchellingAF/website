@@ -850,8 +850,8 @@ function apiBlock(key) {
     `<pre>${esc(b.text)}</pre></div>`;
 }
 
-function renderApi() {
-  const { page, contents, contentsNote, chooser, states, starts, startLinks, tokens, today, tools, documents } = AP;
+export function renderApi() {
+  const { page, contents, contentsNote, chooser, states, starts, startLinks, tokens, today, jobs, tools, documents } = AP;
 
   // Every step ends with what the reader should see, and some with what it means
   // when they do not. The second is rendered only where the copy has one: an
@@ -927,6 +927,16 @@ ${rows(today.planned.map(([t, x]) => row(t, x)))}
 <p><strong>${esc(today.plainly.label)}</strong></p>
 ${today.plainly.lines.map((l) => `<p>${esc(l)}</p>`).join("")}
 
+<h2 id="jobs">${esc(jobs.heading)}</h2>
+<p>${esc(jobs.lead)}</p>
+<p><strong>Starts.</strong></p>
+${rows(jobs.starts.map(([name, path, text]) =>
+  row(`<a href="${esc(API_ORIGIN + path)}">${esc(name)}</a>`, text, { termHtml: true })))}
+<p>${esc(jobs.startsNote)}</p>
+<p><strong>Toolsets.</strong> ${esc(jobs.toolsetsLead)}</p>
+${rows(jobs.toolsets.map(([name, path, text]) => row(API_ORIGIN + path, text)))}
+<p>${esc(jobs.toolsetsNote)}</p>
+
 <h2 id="tools">${esc(tools.heading)}</h2>
 <p>${esc(tools.lead)}</p>
 ${rows(tools.items.map(([t, x]) => row(t, x)))}
@@ -967,8 +977,8 @@ function apiMarkdownBlock(key, L) {
 // parsed, so it may use constructs the strict converter refuses -- a fenced block
 // is the right way to hand somebody a configuration file, and no page written in
 // content/ can carry one.
-function apiMarkdown() {
-  const { page, contentsNote, chooser, states, starts, startLinks, tokens, today, tools, documents } = AP;
+export function apiMarkdown() {
+  const { page, contentsNote, chooser, states, starts, startLinks, tokens, today, jobs, tools, documents } = AP;
   const L = [...DESIGNED_MD_HEADER];
   L.push(`# ${page.heading.replace(/\.$/, "")}`, "", page.lead, "");
   L.push(`${page.person} [${page.personLink.label}](${page.personLink.href})`, "");
@@ -1009,6 +1019,11 @@ function apiMarkdown() {
   today.planned.forEach(([t, x]) => L.push(`- **${t}** — ${x}`));
   L.push("", `**${today.plainly.label}**`, "");
   today.plainly.lines.forEach((l) => L.push(l, ""));
+  L.push(`## ${jobs.heading}`, "", jobs.lead, "", "**Starts.**", "");
+  jobs.starts.forEach(([name, path, text]) => L.push(`- [${name}](${API_ORIGIN}${path}) — ${text}`));
+  L.push("", jobs.startsNote, "", `**Toolsets.** ${jobs.toolsetsLead}`, "");
+  jobs.toolsets.forEach(([name, path, text]) => L.push(`- \`${API_ORIGIN}${path}\` — ${text}`));
+  L.push("", jobs.toolsetsNote, "");
   L.push(`## ${tools.heading}`, "", tools.lead, "");
   tools.items.forEach(([t, x]) => L.push(`- \`${t}\` — ${x}`));
   L.push("", "**Documents an app attaches.**", "");
@@ -1023,7 +1038,7 @@ function apiMarkdown() {
   return L.join("\n");
 }
 
-function apiJson(page) {
+export function apiJson(page) {
   // A scope entry, with the service's own module identifier where it has one.
   // Keys stay in the order name, description, module.
   const withModule = ([name, description]) =>
@@ -1116,6 +1131,17 @@ function apiJson(page) {
       available: AP.today.available.map(withModule),
       planned: AP.today.planned.map(withModule),
       stated_plainly: { label: AP.today.plainly.label, lines: AP.today.plainly.lines },
+    },
+    // The starts and the toolsets, each with the address the product answers at, so
+    // scripts/verify.sh asks the product for every one the page names.
+    jobs: {
+      heading: AP.jobs.heading,
+      lead: AP.jobs.lead,
+      starts: AP.jobs.starts.map(([name, path, description]) => ({ name, url: API_ORIGIN + path, description })),
+      starts_note: AP.jobs.startsNote,
+      toolsets_lead: AP.jobs.toolsetsLead,
+      toolsets: AP.jobs.toolsets.map(([name, path, description]) => ({ name, url: API_ORIGIN + path, description })),
+      toolsets_note: AP.jobs.toolsetsNote,
     },
     tools: {
       heading: AP.tools.heading,
@@ -2052,13 +2078,23 @@ carry no byte size either, because this build does not produce them and will not
 number for a file it did not measure.
 
 - [Primer](${API_ORIGIN}/): what the service is, how to get a KEY, and the first calls to make.
-- [Reference](${API_ORIGIN}/reference): every operation, every refusal with its fix, the role table and the vocabulary.
+- [Reference](${API_ORIGIN}/reference): every operation, every refusal with its fix, the role table, the vocabulary, a section for each part the primer leaves out, and the starts.
 - [Index](${API_ORIGIN}/llms.txt): the API's own index.
 - [Capabilities](${API_ORIGIN}/v1/capabilities): limits, vocabularies and which modules exist today, as JSON.
 
 The connector, for an MCP client, is ${API_ORIGIN}/mcp with the bearer token your KEY
 minted, or ${API_ORIGIN}/mcp/connect for an app that signs its person in. Neither is a
 page to read.
+
+A start lists one kind of work's calls in order. Each is a section of the reference:
+
+${AP.jobs.starts.map(([name, path, text]) => `- [${name}](${API_ORIGIN}${path}): ${text}`).join("\n")}
+
+A toolset is one smaller list of the connector's tools, for a client that loads every tool it
+is given. Ask for one by adding ?tools= and its name to the /mcp address. The address for
+apps takes none.
+
+${AP.jobs.toolsets.map(([name, path, text]) => `- ${API_ORIGIN}${path}: ${text}`).join("\n")}
 
 ## Source
 

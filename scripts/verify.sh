@@ -1049,6 +1049,78 @@ print(" ".join(seen))
   fi
 fi
 
+# EVERY START AND TOOLSET /api NAMES IS ONE THE PRODUCT SERVES.
+#
+# /api names three starts, as sections of the API's reference, and three toolsets, as
+# /mcp?tools=<name>, in its own words, and nothing else notices when the product renames
+# or drops one: the page would still read as finished. Both lists are read out of
+# /api.json (jobs), so a start or a set the page adds is asked for without a change
+# here.
+#
+# A start must answer 200. The reference answers a section it has no heading for with a
+# 400, so the 200 is the product saying the section is there. A toolset's address is a
+# POST transport, so a GET answers as /mcp itself does, 405, and the 405 alone would
+# pass against a product that ignores the query. So the check has two halves: each set
+# the page names is answered as /mcp is, and a name that is no set is refused with a 400,
+# which only a product that holds sets does.
+#
+# Skipped, with the reason, where the product does not answer.
+if [ -z "$caps" ] || ! echo "$caps" | grep -q '"modules"'; then
+  skipped "every start /api names is served by the product" \
+    "the service at $API_ORIGIN did not answer, so its starts could not be asked for"
+  skipped "every toolset /api names is accepted by the product" \
+    "the service at $API_ORIGIN did not answer, so its toolsets could not be asked for"
+else
+  jobs=$(curl -s --max-time 10 "$SITE/api.json" | python3 -c '
+import json,sys
+from urllib.parse import urlsplit
+page = json.load(sys.stdin).get("jobs") or {}
+for kind in ("starts", "toolsets"):
+    for item in page.get(kind) or []:
+        u = urlsplit(item["url"])
+        print(kind, item["name"], u.path + ("?" + u.query if u.query else ""))
+' 2>/dev/null)
+
+  start_list=$(printf '%s\n' "$jobs" | sed -n 's/^starts //p')
+  if [ -z "$start_list" ]; then
+    bad "every start /api names is served by the product" "/api.json names no start"
+  else
+    dead=""
+    while read -r name where; do
+      c=$(status --max-time 10 "$API_ORIGIN$where")
+      [ "$c" = "200" ] || dead="$dead $name ($c)"
+    done <<EOF
+$start_list
+EOF
+    if [ -n "$dead" ]; then
+      bad "every start /api names is served by the product" "not answering 200:$dead"
+    else
+      ok "every start /api names is served by the product"
+    fi
+  fi
+
+  set_list=$(printf '%s\n' "$jobs" | sed -n 's/^toolsets //p')
+  if [ -z "$set_list" ]; then
+    bad "every toolset /api names is accepted by the product" "/api.json names no toolset"
+  else
+    plain=$(status --max-time 10 "$API_ORIGIN/mcp")
+    refused=$(status --max-time 10 "$API_ORIGIN/mcp?tools=no-such-set")
+    problems=""
+    while read -r name where; do
+      c=$(status --max-time 10 "$API_ORIGIN$where")
+      [ "$c" = "$plain" ] || problems="$problems $name (answered $c where /mcp answers $plain)"
+    done <<EOF
+$set_list
+EOF
+    [ "$refused" = "400" ] || problems="$problems a name that is no set (answered $refused, not 400, so the product may not read ?tools= at all)"
+    if [ -n "$problems" ]; then
+      bad "every toolset /api names is accepted by the product" "$problems"
+    else
+      ok "every toolset /api names is accepted by the product"
+    fi
+  fi
+fi
+
 # EVERY PAGE ON THIS SITE A QUICK START SENDS A READER TO.
 #
 # The five quick starts end by naming pages here -- Access tokens, the key's own
