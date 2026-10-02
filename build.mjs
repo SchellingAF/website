@@ -254,7 +254,19 @@ strong{font-weight:600}
 blockquote{margin:0 0 1rem;padding:.75rem 0 .75rem 1rem;border-left:2px solid var(--rule);color:var(--dim)}
 blockquote p:last-child{margin-bottom:0}
 nav{margin:0 0 2rem;padding-bottom:1rem;border-bottom:1px solid var(--rule);color:var(--dim);font-size:.85rem}
-nav p{margin:0 0 .2rem}`;
+nav p{margin:0 0 .2rem}
+footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--dim);font-size:.85rem}
+.meta{color:var(--dim);font-size:.85rem}
+dl{margin:0 0 1rem}
+dt{font-weight:600}
+dd{margin:0 0 .6rem 1.25rem}
+ol{padding-left:1.5rem;margin:0 0 1rem}
+ol li{margin-bottom:1rem}
+pre{margin:0;padding:.7rem .8rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;font:inherit;font-size:.9em}
+.block{margin:.6rem 0 1rem;border:1px solid var(--rule)}
+.block-head{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.3rem .8rem;border-bottom:1px solid var(--rule);color:var(--dim);font-size:.85rem}
+.copy{margin-left:auto;font:inherit;font-size:.8rem;padding:.1rem .6rem;cursor:pointer;border:1px solid var(--rule);background:var(--bg);color:var(--fg)}
+.copy-done{color:var(--link);border-color:var(--link)}`;
 
 // HUMAN PAGES share one shell: the designed nav, the designed footer and
 // src/overview.css. There is no second human stylesheet, so a page for a person
@@ -302,6 +314,26 @@ export function renderFooter() {
 </div></footer>`;
 }
 
+// The one menu, as the agent page writes it. Every page this build writes for a
+// person carries the same line, rendered, so the built pages and the live pages
+// look alike: plain, and following the reader's own light or dark setting.
+const MENU_LINE = `Menu: [Home](/) · [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [API](/api) · [Connect](${OV.CONNECT_URL})`;
+
+// The plain page a person reads: the menu, the page, and the footer the live
+// pages carry, with the status line, the terms, both sources and the address.
+function plainDocument(page, bodyHtml, after = "") {
+  const { footer } = OV;
+  const links = footer.links.map((l) => `<a href="${esc(l.href)}">${esc(l.label)}</a>`).join(" &middot; ");
+  return htmlDocument(page, `<main>
+<nav><p>${inline(MENU_LINE)}</p></nav>
+${bodyHtml}
+<footer>
+<p>${esc(footer.tagline)} ${esc(STATUS_BEFORE_LINK)}<a href="/api">/api</a>${esc(STATUS_AFTER_LINK)}</p>
+<p>${links} &middot; <a href="mailto:${esc(footer.contact)}">${esc(footer.contact)}</a></p>
+</footer>
+</main>${after}`);
+}
+
 export function navMarkdown(page) {
   const lines = [];
   if (page.meta.audience === "agent") {
@@ -309,7 +341,7 @@ export function navMarkdown(page) {
     // content/human-overview.mjs and siteMenu() in src/render.ts. It is on this page
     // too. Each address answers markdown to an agent that asks for it, so the one menu
     // serves both readers.
-    lines.push(`Menu: [Home](/) · [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [API](/api) · [Connect](${OV.CONNECT_URL})`);
+    lines.push(MENU_LINE);
     // The line for a person comes second, bold, so a person who lands here reads it
     // before anything else and an agent still reads the menu first.
     if (page.meta.counterpart) lines.push(`**Human reader? Ordinary English: [${page.meta.counterpart}](${page.meta.counterpart})**`);
@@ -353,11 +385,14 @@ function pageTitle(page) {
   return t.includes(SITE_NAME) ? t : `${t} — ${SITE_NAME}`;
 }
 
-// The head every page shares. The two audiences diverge only in what they load:
-// an agent page loads nothing at all, a human page loads the design's stylesheet,
-// its self-hosted font and its logos -- all from this origin.
+// The head every page shares. Every page is plain and loads nothing but its own
+// script, if it has one. The designed shell -- its stylesheet, self-hosted font and
+// logos, all from this origin -- is for a page that asks for it with
+// `designedShell`, which today is only /human, taken down: the owner, 2 October
+// 2026, had every other page put in the plain look.
 function htmlHead(page) {
   const human = page.meta.audience === "human";
+  const designed = Boolean(page.designedShell);
   return `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(pageTitle(page))}</title>
@@ -366,8 +401,8 @@ function htmlHead(page) {
 <link rel="canonical" href="${esc(SITE + page.route)}">
 <link rel="alternate" type="text/markdown" href="${esc(page.mdPath)}">
 <link rel="alternate" type="application/json" href="${esc(page.jsonPath)}">
-${human ? HUMAN_HEAD : TAB_ICON}
-<style>${human ? OVERVIEW_CSS : CSS_AGENT}</style>`;
+${designed ? HUMAN_HEAD : TAB_ICON}
+<style>${designed ? OVERVIEW_CSS : CSS_AGENT}</style>`;
 }
 
 // The tab icon of every page that loads nothing: the mark written into the page as data,
@@ -416,24 +451,18 @@ const jsonHead = (page) => ({
 });
 
 function htmlDoc(page, nav, bodyHtml) {
-  // A human markdown page -- terms, privacy -- is a plain document inside the
-  // designed shell.
+  // A human markdown page -- terms, privacy -- is a plain page with the menu.
   if (page.meta.audience === "human") {
-    // Its HTML drops the markdown nav block, because the nav bar above says the
+    // Its HTML drops the markdown nav block, because the menu above says the
     // same thing better -- but only when it really does; the markdown
-    // representation keeps it. A page whose counterpart is not one of the nav's
+    // representation keeps it. A page whose counterpart is not one of the menu's
     // own destinations would otherwise link its agent version from its markdown
     // and its JSON and not from the page a person opens. No page is in that
     // position today; adding one is meant to be the whole job, so it has to work
     // when somebody does.
-    const inNav = OV.nav.items.some((i) => i.href === page.meta.counterpart);
-    const counterpart = page.meta.counterpart && !inNav
-      ? `<div class="doc-counterpart">${nav}</div>` : "";
-    return htmlDocument(page, `${renderNav(page.route)}
-<main><div class="wrap doc">
-${counterpart}${bodyHtml}
-</div></main>
-${renderFooter()}`);
+    const inNav = MENU_LINE.includes(`](${page.meta.counterpart})`);
+    const counterpart = page.meta.counterpart && !inNav ? `<p class="meta">${nav}</p>\n` : "";
+    return plainDocument(page, `${counterpart}${bodyHtml}`);
   }
   return htmlDocument(page, `<main>
 <nav>${nav}</nav>
@@ -780,26 +809,26 @@ function overviewJson(page) {
   };
 }
 
-// ------------------------------------------------------ the designed API page
+// ------------------------------------------------------------ the API page
 //
-// The designed API page: a left nav, a reading column and a status rail. Its
-// content is the API's own statement about itself, in a person's words.
+// The API page: one plain column, like every other page, with the menu on top. Its
+// content is the API's own statement about itself, in a person's words. It was a
+// designed three-pane page with a dark shell until the owner, 2 October 2026, had
+// it put in the plain look; its words did not change.
 //
 // Nothing here is an illustration: a fiction on the page a sceptic reads is worse
 // than an absence.
 
-// One definition row: a term and what it means.
+// One definition: a term and what it means.
 //
 // `termHtml` is the one place a caller may pass markup instead of text, and it
 // exists because the documents section links its terms. It is an explicit flag
 // rather than a guess from the term's first character: text is escaped unless the
 // caller says, in as many words, that it built the markup itself.
-const row = (term, text, { cls = "", termHtml = false, afterHtml = "" } = {}) =>
-  `<div class="row${cls ? " " + cls : ""}">` +
-  `<span class="row-term">${termHtml ? term : esc(term)}</span>` +
-  `<span class="row-text">${esc(text)}${afterHtml}</span></div>`;
+const row = (term, text, { termHtml = false, afterHtml = "" } = {}) =>
+  `<dt>${termHtml ? term : esc(term)}</dt><dd>${esc(text)}${afterHtml}</dd>`;
 
-const rows = (items) => `<div class="rows">${items.join("")}</div>`;
+const rows = (items) => `<dl>${items.join("")}</dl>`;
 
 // The block a step names, for the page and its markdown alike. It fails loudly on
 // a block the copy module does not define, because the quiet alternative is a
@@ -826,14 +855,14 @@ function renderApi() {
 
   // Every step ends with what the reader should see, and some with what it means
   // when they do not. The second is rendered only where the copy has one: an
-  // empty troubleshooting box is worse than none, because it reads as "nothing
+  // empty troubleshooting line is worse than none, because it reads as "nothing
   // can go wrong here".
   const stepHtml = (s) =>
-    `<li><p class="pretty"><strong>${esc(s.title)}</strong> ${esc(s.body[0])}</p>` +
-    s.body.slice(1).map((b) => `<p class="pretty">${esc(b)}</p>`).join("") +
+    `<li><p><strong>${esc(s.title)}</strong> ${esc(s.body[0])}</p>` +
+    s.body.slice(1).map((b) => `<p>${esc(b)}</p>`).join("") +
     (s.block ? apiBlock(s.block) : "") +
-    (s.done ? `<div class="done"><span class="done-label">YOU SHOULD SEE</span><p class="pretty">${esc(s.done)}</p></div>` : "") +
-    (s.otherwise ? `<div class="done done-else"><span class="done-label">IF YOU DO NOT</span><p class="pretty">${esc(s.otherwise)}</p></div>` : "") +
+    (s.done ? `<p><em>You should see.</em> ${esc(s.done)}</p>` : "") +
+    (s.otherwise ? `<p><em>If you do not.</em> ${esc(s.otherwise)}</p>` : "") +
     `</li>`;
 
   // The pages on this site a path ends at, gathered rather than linked mid-
@@ -843,23 +872,19 @@ function renderApi() {
   const startLinksHtml = (id) => {
     const links = startLinks[id];
     if (!links) return "";
-    return `<p class="start-links"><span class="eyebrow">PAGES ON THIS SITE</span> ` +
+    return `<p>Pages on this site: ` +
       links.map(([label, href]) => `<a href="${esc(href)}">${esc(label)}</a>`).join(" · ") + `</p>`;
   };
 
   const startHtml = (q) => {
     const state = states[q.state];
     if (!state) fail("content/api-overview.mjs", 1, `the quick start ${q.id} claims a state nothing defines: ${q.state}`);
-    return `<section class="start" id="${esc(q.id)}">
-<div class="start-head"><h2 class="pretty">${esc(q.heading)}</h2>` +
-      `<span class="pill pill-${esc(q.state)}">${esc(state.label)}</span></div>
-<p class="start-who pretty">${esc(q.who)}</p>
-<div class="need">
-<div class="need-cell"><span class="need-label">WHAT YOU NEED</span><p class="pretty">${esc(q.need)}</p></div>
-<div class="need-cell"><span class="need-label">HOW LONG</span><p class="pretty">${esc(q.time)}</p></div>
-</div>
-<ol class="steps">${q.steps.map(stepHtml).join("")}</ol>
-${startLinksHtml(q.id)}</section>`;
+    return `<h2 id="${esc(q.id)}">${esc(q.heading)} — ${esc(state.label)}</h2>
+<p>${esc(q.who)}</p>
+<p><strong>What you need.</strong> ${esc(q.need)}</p>
+<p><strong>How long.</strong> ${esc(q.time)}</p>
+<ol>${q.steps.map(stepHtml).join("")}</ol>
+${startLinksHtml(q.id)}`;
   };
 
   const toc = contents.map((c) => `<li><a href="#${esc(c.id)}">${esc(c.label)}</a></li>`).join("");
@@ -869,98 +894,61 @@ ${startLinksHtml(q.id)}</section>`;
     row(`<a href="${esc(API_ORIGIN + path)}">${esc(label)}</a>`, text,
       { termHtml: true, afterHtml: page ? ` <a href="${esc(page[0])}">${esc(page[1])}</a>.` : "" }));
 
-  // The rail states what is true rather than counting anything: the service
-  // publishes no activity counts by design -- an activity count reports work in
-  // spaces you cannot read -- so there are none to show and none are invented.
-  const railList = (items, cls) =>
-    `<ul class="rail-list">${items.map(([term]) =>
-      `<li class="${cls}">${esc(term)}</li>`).join("")}</ul>`;
-
-  // The rail's first group is the five paths and how far each is vouched for, so
-  // the distinction a reader needs before choosing is visible from anywhere on
-  // the page rather than only at the top of it.
-  const railWays = `<ul class="rail-list">${starts.map((q) =>
-    `<li class="rail-way"><a href="#${esc(q.id)}">${esc(q.heading)}</a>` +
-    `<span class="rail-state rail-${esc(q.state)}">${esc(states[q.state].label)}</span></li>`).join("")}</ul>`;
-
-  return `<main class="docs">
-<div class="docs-nav">
-<span class="eyebrow eyebrow-accent">${esc(page.eyebrow)}</span>
+  return `<h1>${esc(page.heading)}</h1>
+<p class="meta">${esc(page.eyebrow)} · ${esc(page.status)}</p>
+<p>${esc(page.lead)}</p>
+<p>${esc(page.person)} <a href="${esc(page.personLink.href)}">${esc(page.personLink.label)}</a></p>
+<p><strong>On this page</strong></p>
 <ul>${toc}</ul>
-<p class="docs-note">${esc(contentsNote)}</p>
-</div>
+<p><em>${esc(contentsNote)}</em></p>
 
-<div class="docs-body">
-<h1 class="pretty">${esc(page.heading)}</h1>
-<p class="lead pretty">${esc(page.lead)}</p>
-<p class="pretty">${esc(page.person)} <a href="${esc(page.personLink.href)}">${esc(page.personLink.label)}</a></p>
-
-<h2 id="start" class="pretty">${esc(chooser.heading)}</h2>
-<p class="pretty">${esc(chooser.lead)}</p>
-<div class="chooser">${chooser.rows.map((r) =>
-  `<div class="chooser-row"><span class="chooser-what">${esc(r.what)}</span>` +
-  `<span class="chooser-go"><a href="${esc(r.href)}">${esc(r.go)}</a></span></div>`).join("")}</div>
-<p class="pretty">${esc(chooser.note)}</p>
-<div class="legend">${Object.entries(states).map(([key, s]) =>
-  `<div class="legend-row"><span class="pill pill-${esc(key)}">${esc(s.label)}</span>` +
-  `<p class="pretty">${esc(s.meaning)}</p></div>`).join("")}</div>
-<span class="eyebrow eyebrow-muted">${esc(chooser.planned.label)}</span>
-<p class="pretty">${esc(chooser.planned.lead)}</p>
-${rows(chooser.planned.items.map(([t, x]) => row(t, x, { cls: "row-later" })))}
+<h2 id="start">${esc(chooser.heading)}</h2>
+<p>${esc(chooser.lead)}</p>
+<ul>${chooser.rows.map((r) =>
+  `<li>${esc(r.what)} → <a href="${esc(r.href)}">${esc(r.go)}</a></li>`).join("")}</ul>
+<p>${esc(chooser.note)}</p>
+${rows(Object.values(states).map((s) => row(s.label, s.meaning)))}
+<p><strong>${esc(chooser.planned.label)}.</strong> ${esc(chooser.planned.lead)}</p>
+${rows(chooser.planned.items.map(([t, x]) => row(t, x)))}
 
 ${starts.map(startHtml).join("\n")}
 
-<h2 id="tokens" class="pretty">${esc(tokens.heading)}</h2>
-<p class="pretty">${esc(tokens.lead)}</p>
+<h2 id="tokens">${esc(tokens.heading)}</h2>
+<p>${esc(tokens.lead)}</p>
 ${rows(tokens.facts.map(([t, x]) => row(t, x)))}
-<p class="pretty">${esc(tokens.note)}</p>
+<p>${esc(tokens.note)}</p>
 
-<h2 id="today" class="pretty">${esc(today.heading)}</h2>
-<p class="pretty">${esc(today.lead)}</p>
-<span class="eyebrow eyebrow-accent">AVAILABLE NOW</span>
+<h2 id="today">${esc(today.heading)}</h2>
+<p>${esc(today.lead)}</p>
+<p><strong>Available now.</strong></p>
 ${rows(today.available.map(([t, x]) => row(t, x)))}
-<span class="eyebrow eyebrow-warn">PLANNED</span>
-${rows(today.planned.map(([t, x]) => row(t, x, { cls: "row-warn" })))}
-<div class="callout"><span class="eyebrow eyebrow-warn">${esc(today.plainly.label)}</span>
-${today.plainly.lines.map((l) => `<p class="pretty">${esc(l)}</p>`).join("")}</div>
+<p><strong>Planned.</strong></p>
+${rows(today.planned.map(([t, x]) => row(t, x)))}
+<p><strong>${esc(today.plainly.label)}</strong></p>
+${today.plainly.lines.map((l) => `<p>${esc(l)}</p>`).join("")}
 
-<h2 id="tools" class="pretty">${esc(tools.heading)}</h2>
-<p class="pretty">${esc(tools.lead)}</p>
+<h2 id="tools">${esc(tools.heading)}</h2>
+<p>${esc(tools.lead)}</p>
 ${rows(tools.items.map(([t, x]) => row(t, x)))}
-<span class="eyebrow eyebrow-accent">DOCUMENTS AN APP ATTACHES</span>
+<p><strong>Documents an app attaches.</strong></p>
 ${rows(tools.documents.map(([t, x]) => row(t, x)))}
-<span class="eyebrow eyebrow-accent">PROMPTS</span>
+<p><strong>Prompts.</strong></p>
 ${rows(tools.prompts.map(([t, x]) => row(t, x)))}
-<p class="pretty">${esc(tools.after)}</p>
+<p>${esc(tools.after)}</p>
 
-<h2 id="documents" class="pretty">${esc(documents.heading)}</h2>
-<p class="pretty">${esc(documents.lead)}</p>
+<h2 id="documents">${esc(documents.heading)}</h2>
+<p>${esc(documents.lead)}</p>
 ${rows(docLinks)}
-<p class="pretty">${esc(documents.note)}</p>
-</div>
-
-<aside class="docs-rail">
-<span class="eyebrow eyebrow-accent">${esc(page.status)}</span>
-<div class="rail-group"><span class="rail-label">WAYS IN</span>${railWays}</div>
-<div class="rail-group"><span class="rail-label">AVAILABLE</span>${railList(today.available, "on")}</div>
-<div class="rail-group"><span class="rail-label">PLANNED</span>${railList(today.planned, "off")}</div>
-<div class="rail-group"><span class="rail-label">DOCUMENTS</span>
-<ul class="rail-list">${documents.items.map(([label, path]) =>
-  `<li><a href="${esc(API_ORIGIN + path)}">${esc(label)}</a></li>`).join("")}</ul></div>
-</aside>
-</main>`;
+<p>${esc(documents.note)}</p>`;
 }
 
 function apiDoc(page) {
-  // One script, and it animates nothing: this page has no decorative motion.
-  // src/copy.js exists because every block here is text a person moves into
-  // somewhere else, and selecting a multi-line block with a trackpad and missing
-  // the last line is how a configuration file ends up one brace short. It builds
-  // the buttons rather than the page carrying them, so with the script blocked
-  // there is no button that does nothing.
-  return htmlDocument(page, `${renderNav(page.route)}
-${renderApi()}
-${renderFooter()}
+  // One script, and it animates nothing. src/copy.js exists because every block
+  // here is text a person moves into somewhere else, and selecting a multi-line
+  // block with a trackpad and missing the last line is how a configuration file
+  // ends up one brace short. It builds the buttons rather than the page carrying
+  // them, so with the script blocked there is no button that does nothing.
+  return plainDocument(page, renderApi(), `
 <script src="/copy.js" defer></script>`);
 }
 
@@ -1607,6 +1595,7 @@ const DESIGNED = [
   //   md: overviewMarkdown,
   //   json: overviewJson,
   //   check: assertApprovedCopy,
+  //   designedShell: true,
   // },
   {
     outBase: "api",
@@ -1871,7 +1860,7 @@ try {
         `this name is taken by the designed page at /${d.outBase}, whose copy is ${d.copyFile}.\n` +
         `    One of the two has to be renamed; a markdown file cannot shadow a designed page.`);
     }
-    const page = { meta: { ...d.module.meta }, htmlTitle: d.htmlTitle, ...addresses(d.outBase) };
+    const page = { meta: { ...d.module.meta }, htmlTitle: d.htmlTitle, designedShell: d.designedShell, ...addresses(d.outBase) };
     const md = d.md();
     const doc = d.html(page);
     const json = d.json(page);
@@ -1882,9 +1871,9 @@ try {
 
   // ---- the scripts, the logos and the font, copied as they are.
   //
-  // Copied unconditionally rather than from inside a page's own block: terms and
-  // privacy are plain markdown and never touch the designed renderers, but they
-  // wear the same shell and so need the same font and logos. The scripts:
+  // Copied unconditionally rather than from inside a page's own block. No page
+  // wears the designed shell while /human is down, so the font and logos are
+  // served for a page that restores it. The scripts:
   //   overview.js   the feed, reading progress and reveal on /human
   //   sign-in.js    the passkey prompt on /sign-in, the only script on the site that
   //                 sends a request; src/index.ts gives that one page the policy
