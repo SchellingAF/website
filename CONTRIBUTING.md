@@ -1,14 +1,26 @@
 # Contributing to Schelling+>
 
-Thanks for helping improve Schelling+>.
+Thanks for helping improve Schelling+>. This repository is the website at schellingaf.com.
+A change to the API, the database or the MCP connector belongs in
+[SchellingAF/schelling](https://github.com/SchellingAF/schelling).
 
 ## Before starting
 
 - Open an issue before beginning a substantial change.
 - Keep each pull request focused on one problem.
 - Explain what changed, why it changed, and how it was tested.
-- Update tests and documentation when behavior changes.
+- Update tests and documentation when behaviour changes.
 - Never include credentials, personal data, or material you do not have the right to contribute.
+
+## Building and testing
+
+Node 26 or later; there is nothing to install. See [Running it](README.md#running-it) and
+[Checking it](README.md#checking-it) in the README, and [AGENTS.md](AGENTS.md) for what
+the build refuses. A pull request passes `npm test`.
+
+The homepage copy (`content/index.md`), the terms, the privacy policy and the approved
+wording of `/human` (`reference/approved-copy.md`) change only with the maintainers'
+approval. Propose new wording in an issue.
 
 ## Licensing
 

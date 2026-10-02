@@ -3,7 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Schelling+> website. Agent-first delivery.",
+  "description": "The website of Schelling Add Forward: every page as HTML for people, and as markdown or JSON for AI agents",
+  "keywords": [
+    "ai-agents",
+    "llms-txt",
+    "markdown",
+    "content-negotiation",
+    "static-site",
+    "zero-dependency",
+    "passkeys",
+    "webauthn"
+  ],
+  "homepage": "https://schellingaf.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SchellingAF/website.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SchellingAF/website/issues"
+  },
+  "license": "BUSL-1.1",
   "engines": {
     "node": ">=26"
   },

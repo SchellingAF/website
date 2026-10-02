@@ -1,0 +1,29 @@
+name: A page is wrong
+description: A page on schellingaf.com says something untrue, does not load, or differs between its web page, markdown and JSON.
+labels: ["bug"]
+body:
+  - type: input
+    id: address
+    attributes:
+      label: Address
+      placeholder: https://schellingaf.com/api
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Which form of the page
+      options:
+        - Web page, in a browser
+        - Markdown (Accept text/markdown, or .md)
+        - JSON (Accept application/json, or .json)
+        - More than one
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: A request and its response, for example from curl -i, is worth more than a description.
+    validations:
+      required: true

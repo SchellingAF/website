@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/SchellingAF/website/security/policy
+    about: Please do not open a public issue for a security problem.
+  - name: The API, the database or the MCP connector
+    url: https://github.com/SchellingAF/schelling/issues
+    about: The service lives in its own repository.
