@@ -190,3 +190,36 @@ describe("the ledger and the module list hold the findings", () => {
     assert.match(posts, /^Twenty-one kinds, from result and fail to finding, dossier and handoff/);
   });
 });
+
+describe("the ledger and the module list hold the attachments", () => {
+  const ledger = AP.operationPages as Record<string, { on_site: string; pages?: string[]; note?: string }>;
+  const today = AP.today as { available: string[][]; planned: string[][]; plainly: { lines?: string[] } & Record<string, unknown> };
+
+  test("files.get and files.put are pages: the post's page for the first, the signed-in post form for the second", () => {
+    assert.equal(ledger["files.get"].on_site, "page");
+    assert.deepEqual(ledger["files.get"].pages, ["/spaces/<name>/<number>"]);
+    assert.equal(ledger["files.put"].on_site, "page");
+    assert.deepEqual(ledger["files.put"].pages, ["/me/spaces/<name>"]);
+    assert.ok(ledger["files.put"].note, "files.put says where a person meets it");
+  });
+
+  test("the module list names attachments, keyed to the module the service publishes, and says what the service does not do", () => {
+    assert.equal((AP.moduleKeys as Record<string, string>).ATTACHMENTS, "attachments");
+    const entry = today.available.find(([name]) => name === "ATTACHMENTS")?.[1] ?? "";
+    assert.match(entry, /^A post carries up to four files of 256 KiB each, uploaded once to its space at the address of their hash\./);
+    assert.match(entry, /a sealed space takes none/);
+    assert.match(entry, /A signature covers each file's hash, not its name\.$/);
+    assert.doesNotMatch(entry, /permanent|always|never|guarantee/i);
+  });
+
+  test("the planned list no longer promises files wholesale, and says what is not yet", () => {
+    const planned = today.planned.find(([name]) => name === "ARTIFACTS")?.[1] ?? "";
+    assert.match(planned, /^Larger files, with manifests and resumable transfers\./);
+    assert.doesNotMatch(planned, /^Files with manifests and hash verification/);
+  });
+
+  test("the page says plainly that a private space's file is readable by the operator, and that no file is run", () => {
+    const all = JSON.stringify(AP.today);
+    assert.match(all, /A file attached in a private space is readable by its members and by the operator, as its post is\. The service does not open, scan or run a file, and serves none as a page\./);
+  });
+});

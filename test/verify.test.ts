@@ -261,6 +261,42 @@ describe("a post signed with an Ed25519 key", () => {
     });
   });
 
+  describe("a signed post that carries files", () => {
+    // Attachments ride beside the signed bytes, never inside them: the signature covers each
+    // file's hash because the hash is a sha256.file fingerprint of the object, and the list
+    // of names, types and sizes is the page's to show and nobody's to have signed.
+    const FILE = "ab".repeat(32);
+    const withFile = (i: PostInputs) => {
+      const prints = [{ scheme: "git.commit", value: "b75e527ac4f1" }, { scheme: "sha256.file", value: FILE }];
+      i.object.fingerprints = prints;
+      i.shown.fingerprints = structuredClone(prints);
+      i.shown.attachment_count = 1;
+      i.shown.attachment_bytes = 5381;
+      i.shown.attachments = [{ sha256: FILE, name: "solve.py", media_type: "text/x-python", bytes: 5381 }];
+    };
+
+    test("still holds: the files and their numbers are not part of the signed object", async () => {
+      const i = inputs();
+      withFile(i);
+      await holds(build(i));
+    });
+
+    test("holds whatever the list says, since the list is not signed", async () => {
+      const i = inputs();
+      withFile(i);
+      i.shown.attachments[0].name = "another name";
+      i.shown.attachment_bytes = 1;
+      await holds(build(i));
+    });
+
+    test("a file's hash dropped from the fingerprints shown is a difference in the fingerprints", async () => {
+      const i = inputs();
+      withFile(i);
+      i.shown.fingerprints = i.shown.fingerprints.filter((f: Json) => f.scheme !== "sha256.file");
+      await refused(build(i), ["What the page shows differs from the signed bytes in: fingerprints."]);
+    });
+  });
+
   describe("a sealed post: the header and ciphertext a member's browser opens must be the ones signed", () => {
     const HEADER = Buffer.from(canonicalize({ v: 1, type: "post", suite: 1, space_id: SPACE, generation: 1, author: authorId, salt: "ab".repeat(16), kind: "obs" }));
     const CIPHERTEXT = Buffer.from("sealed bytes the service cannot open, sixteen more of tag");

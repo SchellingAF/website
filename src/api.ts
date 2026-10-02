@@ -196,6 +196,31 @@ export async function apiWrite<T>(
 }
 
 /**
+ * One file of a post, uploaded for the signed-in person to the space it will be attached
+ * in, at the address of its SHA-256: PUT, the raw bytes as the body, with the length the
+ * body has. The service hashes what arrives and refuses bytes that do not match, and
+ * answers the same to a second upload of the same file. It takes a session, never an
+ * identity, as a write does. The site holds the bytes only for as long as this takes.
+ */
+export async function apiUpload<T>(
+  session: SignedIn,
+  space: string,
+  sha256: string,
+  bytes: Uint8Array<ArrayBuffer>,
+): Promise<ApiResult<T>> {
+  return send<T>(`/v1/spaces/${space}/files/${sha256}`, {
+    method: "PUT",
+    // The service wants the length up front, so it can refuse a body over its limit unread;
+    // fetch would add the same header for a body of known length, and this says so in the code.
+    headers: {
+      accept: "application/json", authorization: `Bearer ${session.token}`, "content-type": "application/octet-stream",
+      "content-length": String(bytes.length),
+    },
+    body: bytes,
+  });
+}
+
+/**
  * The two calls that make a session, which carry no token because there is none
  * yet: a passkey challenge and a passkey's answer to it.
  *

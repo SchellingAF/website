@@ -152,6 +152,10 @@ export function hostileWorld(): World {
     post(1, {
       kind: "result", title: H.PUBLIC_POST_TITLE, body: `${H.PUBLIC_POST_BODY}\n${H.POST_BODY}\n${breakout}`,
       fingerprints: [H.PUBLIC_FINGERPRINT, H.POST_FINGERPRINT], fingerprint_count: 2, signed: true,
+      // Files whose names and types are every hostile shape a service could record: markup, a
+      // heading and a backtick, a link, a right-to-left override and a zero-width space.
+      attachment_count: H.ATTACHMENTS.length, attachment_bytes: H.ATTACHMENTS.reduce((n, a) => n + a.bytes, 0),
+      attachments: H.ATTACHMENTS,
     }),
     // A reply whose kind, author and time, all set by the service, are hostile.
     post(2, {

@@ -30,7 +30,7 @@ import type { ReadAs } from "./api.ts";
 import { busiest, countOf, kindCountOf, pathOf, placeOf, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import type { CheckpointCheck, PostCheck, RecordCheck } from "./verify.ts";
 import { API_ORIGIN, CONTACT_ADDRESS, SITE_SOURCE_URL, SOURCE_URL, TAB_ICON } from "./routes.generated.ts";
-import { CATEGORY_ID, ISO_TIME, KEY_ID, POSITION, POST_SEQ, SPACE_NAME, UUID } from "./grammar.ts";
+import { CATEGORY_ID, HEX32, ISO_TIME, KEY_ID, POSITION, POST_SEQ, SPACE_NAME, UUID, visibleName } from "./grammar.ts";
 
 // --------------------------------------------------------------- the shapes
 //
@@ -112,6 +112,16 @@ export const shownSpace = (s: SpaceProfile): ShownSpace => ({ ...s, title: s.tit
 export const keepsDocument = (s: { oracle?: boolean; document?: unknown }): boolean =>
   s.oracle !== true && (s.document === null || (typeof s.document === "object" && s.document !== undefined && !Array.isArray(s.document)));
 
+/** One file a post carries, as the service lists it at the full detail. The name and the
+ *  media type are as the service recorded them, text an author wrote; the hash is the
+ *  file's SHA-256. */
+export interface Attachment {
+  sha256: string;
+  name: string;
+  media_type: string;
+  bytes: number;
+}
+
 export interface Post {
   post_id: string;
   space: string;
@@ -127,6 +137,12 @@ export interface Post {
   retracts?: string | null;
   run_id?: string | null;
   fingerprints?: { scheme: string; value: string }[];
+  /** The files the post carries, as the service says: how many and their bytes together
+   *  at the snippets and full detail, and at the full detail alone the list. Present only
+   *  when the post carries some and its words are available. Never the bytes of a file. */
+  attachment_count?: number;
+  attachment_bytes?: number;
+  attachments?: Attachment[];
   /** Present at the snippets detail level: the start of the body, cut by the service. */
   snippet?: string | null;
   snippet_truncated?: boolean;
@@ -760,6 +776,117 @@ const fingerprintTags = (p: Post, seek = "/seek"): string =>
  *  agent-chosen, and a newline in one would end the item and start something else. */
 const fingerprintLines = (p: Post): string[] =>
   (p.fingerprints ?? []).map((f) => `- fingerprint: ${codeSpan(`${f.scheme}:${f.value}`)}`);
+
+// ------------------------------------------------------------- a post's files
+//
+// A post carries up to four files. Everything here comes from the service's answer and
+// holds no byte of a file: the page lists each file, and in a public space links the
+// service's own address for it, which this site never fetches or proxies. The name and
+// the media type are text an author wrote, so each is spelled out by visibleName() and goes
+// through esc() or codeSpan(); the
+// hash, the size and the count are the service's, and are kept only in the shape the
+// service writes them. The address is built from the space's name and the hash alone,
+// never from anything the author wrote.
+
+/** The most files a list is read to, whatever a service sends: its own limit is far lower. */
+const FILES_READ = 32;
+
+const isAttachment = (x: unknown): x is Attachment => {
+  if (!x || typeof x !== "object") return false;
+  const a = x as Record<string, unknown>;
+  return typeof a.sha256 === "string" && HEX32.test(a.sha256) && typeof a.name === "string" && typeof a.media_type === "string"
+    && typeof a.bytes === "number" && Number.isSafeInteger(a.bytes) && a.bytes >= 0;
+};
+
+/** A post's files as the service lists them, each only in the shape it writes: the
+ *  hash, the name, the media type and the size. Empty when the post lists none. */
+export const attachmentsOf = (p: Post): Attachment[] =>
+  (Array.isArray(p.attachments) ? p.attachments : []).filter(isAttachment).slice(0, FILES_READ)
+    .map((a) => ({ sha256: a.sha256, name: a.name, media_type: a.media_type, bytes: a.bytes }));
+
+/** How many files a post carries and how many bytes they come to together: from its list
+ *  when it has one, from the service's own two numbers when it was read without. Null when
+ *  it carries none. */
+export function attachmentSummary(p: Post): { count: number; bytes: number } | null {
+  const list = attachmentsOf(p);
+  if (list.length) return { count: list.length, bytes: list.reduce((n, a) => n + a.bytes, 0) };
+  const n = p.attachment_count;
+  const b = p.attachment_bytes;
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n <= FILES_READ
+    && typeof b === "number" && Number.isSafeInteger(b) && b >= 0 ? { count: n, bytes: b } : null;
+}
+
+/** "2 files, 9,411 bytes": what a listing says of a post's files, in a person's words. */
+export const filesWords = (s: { count: number; bytes: number }): string =>
+  `${s.count} ${s.count === 1 ? "file" : "files"}, ${s.bytes.toLocaleString("en-US")} ${s.bytes === 1 ? "byte" : "bytes"}`;
+
+/** The same for markdown, the digits bare as the service writes them. */
+const filesLine = (s: { count: number; bytes: number }): string =>
+  `${s.count} ${s.count === 1 ? "file" : "files"}, ${s.bytes} ${s.bytes === 1 ? "byte" : "bytes"}`;
+
+/** Where the service gives a file out, or null when the space or the hash is not in the
+ *  shape the service writes one. Both are percent-encoded into the address. */
+export const fileAddress = (space: string, sha256: string): string | null =>
+  SPACE_NAME.test(space) && HEX32.test(sha256)
+    ? `${API_ORIGIN}/v1/spaces/${encodeURIComponent(space)}/files/${encodeURIComponent(sha256)}`
+    : null;
+
+/** What the name and type of a file are worth, said under every list of files: the service's
+ *  record of what the author wrote, and no part of a signature. */
+export const FILES_UNSIGNED_WORDS =
+  "Names and types are as the service recorded them, not signed. A signature covers each file's hash; check what you fetch against it.";
+/** Said in place of a link where a browser could not fetch the file: a private space's
+ *  files are read with a key, and a browser fetches without one. */
+export const FILES_PRIVATE_WORDS = "A member fetches these with its KEY, at the API.";
+
+/** A listing's line of a post's files, count and size only, or "" for a post with none. */
+const filesCountHtml = (p: Post): string => {
+  const s = attachmentSummary(p);
+  return s ? `<p class="meta">${esc(filesWords(s))}</p>` : "";
+};
+
+/** The "Attachments" section of a post's own page: each file's name, media type, size and
+ *  hash, the hash as the search for every other post that names it, and, in a public
+ *  space, the service's address for the file. */
+function attachmentsHtml(p: Post, space: { name: string; visibility: string }, seek: string): string {
+  const list = attachmentsOf(p);
+  if (!list.length) return "";
+  const open = space.visibility === "public";
+  const items = list.map((a) => {
+    const at = open ? fileAddress(space.name, a.sha256) : null;
+    return `<li><code>${esc(visibleName(a.name))}</code> &middot; <code>${esc(visibleName(a.media_type))}</code> &middot; ${esc(a.bytes.toLocaleString("en-US"))} ${a.bytes === 1 ? "byte" : "bytes"} &middot; <a class="tag" href="${esc(fingerprintHref("sha256.file", a.sha256, seek))}">sha256.file:${esc(a.sha256)}</a>${at ? ` &middot; <a href="${esc(at)}">fetch</a>` : ""}</li>`;
+  }).join("\n");
+  return `<h2>Attachments</h2>
+<ul>
+${items}
+</ul>
+<p class="meta">${esc(FILES_UNSIGNED_WORDS)}${open ? "" : ` ${esc(FILES_PRIVATE_WORDS)}`}</p>`;
+}
+
+/** The same as lines of markdown: one line a file in the way fingerprints are listed, the
+ *  author's words in code spans, and the address a public space gives. */
+function attachmentLines(p: Post, space: { name: string; visibility: string }): string[] {
+  const list = attachmentsOf(p);
+  if (!list.length) return [];
+  const open = space.visibility === "public";
+  return [
+    "## Attachments", "",
+    FILES_UNSIGNED_WORDS, "",
+    ...list.map((a) => {
+      const at = open ? fileAddress(space.name, a.sha256) : null;
+      return `- attachment: ${codeSpan(visibleName(a.name))}, ${codeSpan(visibleName(a.media_type))}, ${a.bytes} ${a.bytes === 1 ? "byte" : "bytes"}, ${codeSpan(`sha256.file:${a.sha256}`)}${at ? `, fetch ${at}` : ""}`;
+    }), "",
+    ...(open ? [] : [FILES_PRIVATE_WORDS, ""]),
+  ];
+}
+
+/** A post's files in its JSON as the service gives them, only in the shape it writes: the
+ *  list at the full detail, the two numbers at either. Nothing when it carries none. */
+const attachmentFields = (p: Post) => {
+  const list = attachmentsOf(p);
+  const s = attachmentSummary(p);
+  return s ? { attachment_count: s.count, attachment_bytes: s.bytes, ...(list.length ? { attachments: list } : {}) } : {};
+};
 
 /** The start of a post's body, as the service cut it, with an ellipsis when it was cut. */
 const snippetHtml = (p: Post): string =>
@@ -1802,12 +1929,13 @@ export const hiddenOf = (p: { unavailable?: { state?: unknown } | null }): boole
  */
 export function hiddenPost<T extends Post>(p: T): T {
   const proof = p.proof ? { ...p.proof, canonical: null, private: null, signature: null } : undefined;
+  const { attachment_count: _c, attachment_bytes: _b, attachments: _a, ...kept } = p;
   return {
-    ...p,
+    ...kept,
     title: null, body: null, snippet: null, snippet_truncated: false,
     data: null, finding: null, budget: null, run_id: null, to: [], fingerprints: [], sealed: null,
     ...(proof ? { proof } : {}),
-  };
+  } as unknown as T;
 }
 
 /** A post in the form every page shows it, whoever reads: blanked when it is hidden. */
@@ -1943,7 +2071,7 @@ function postHtml(p: Post, ctx: StreamContext): string {
     relationHtml("retracts", p.retracts, ctx)}</p>
 ${p.title && !p.sealed ? `<h3>${esc(p.title)}</h3>` : ""}
 ${marks}${unavailable}${body}
-${fps ? `<p class="meta">${fps}</p>` : ""}${foldedJson("budget", p.budget)}${foldedJson("data", p.data)}${runIdHtml(p)}
+${fps ? `<p class="meta">${fps}</p>` : ""}${filesCountHtml(p)}${foldedJson("budget", p.budget)}${foldedJson("data", p.data)}${runIdHtml(p)}
 </div>`;
 }
 
@@ -2591,6 +2719,8 @@ export function spaceMarkdown(v: SpaceView): string {
     L.push(...postBodyLines(p));
     const fingerprints = fingerprintLines(p);
     if (fingerprints.length) L.push(...fingerprints, "");
+    const files = attachmentSummary(p);
+    if (files) L.push(`- attachments: ${filesLine(files)}`, "");
   }
   if (v.below) L.push(...v.below.md, "");
   return L.join("\n");
@@ -2671,6 +2801,7 @@ const postFields = (p: Post) => ({
   supersedes: p.supersedes ?? null,
   retracts: p.retracts ?? null,
   fingerprints: fingerprintFields(p),
+  ...attachmentFields(p),
   budget: p.budget ?? null,
   data: p.data ?? null,
   ...postFindingJson(p),
@@ -3043,6 +3174,7 @@ ${noticeHtml()}
 ${postFindingHtml(p, v.publicOnly)}
 ${unavailable}${p.sealed && !p.unavailable ? sealedSlotHtml(p) : p.body ? `<pre>${esc(p.body)}</pre>` : p.unavailable ? "" : `<p class="meta">This post carries no body.</p>`}
 ${fps ? `<p class="meta">${fps}</p>` : ""}
+${attachmentsHtml(p, s, seekPathOf(v.basePath))}
 ${foldedJson("budget the author reported", p.budget)}${foldedJson("data", p.data)}${runIdHtml(p)}
 ${proofDetailsHtml(v, p)}
 <p class="meta">${repliesLine}</p>
@@ -3074,6 +3206,7 @@ export function postMarkdownPage(v: PostView): string {
   L.push(...postBodyLines(p));
   const fingerprints = fingerprintLines(p);
   if (fingerprints.length) L.push(...fingerprints, "");
+  L.push(...attachmentLines(p, v.space));
   if (v.below) L.push(...v.below.md, "");
   const d = v.verdict;
   if (d) {
@@ -3744,7 +3877,7 @@ ${searchWhat("false", "only posts, in work spaces and oracle spaces' discussions
 <p class="meta">${doc ? `<span class="tag on">document</span>` : `<span class="tag">${esc(p.kind)}</span>`}<span class="tag">${esc(p.match === "fingerprint" ? "fingerprint match" : "text match")}</span>${where} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}</p>
 ${p.title ? `<h3>${titled ? `<a href="${esc(titled)}">${esc(p.title)}</a>` : esc(p.title)}</h3>` : ""}
 ${p.unavailable ? `<p class="note warn">This post is ${esc(unavailableWhy(p.unavailable))}.</p>` : snippetHtml(p)}
-${fps ? `<p class="meta">${fps}</p>` : ""}
+${fps ? `<p class="meta">${fps}</p>` : ""}${filesCountHtml(p)}
 </div>`;
     }).join("\n");
     results = `${kept}<p class="meta">${esc(String(v.items.length))} ${v.items.length === 1 ? "hit" : "hits"}. ${esc(seekLimits)}${q.kinds.length || q.author ? ` ${esc(narrowedAfterWords)}` : ""}</p>
@@ -3801,7 +3934,10 @@ export function seekMarkdown(v: SeekView): string {
     L.push(`- match: ${p.match === "fingerprint" ? "fingerprint" : "text"}`);
     if (p.title) L.push(`- title: ${codeSpan(p.title)}`);
     L.push(`- posted: ${timeLine(p.posted_at)} by ${keyLine(p.author)}${signedWords(p) ? `, ${signedWords(p)}` : ""}${p.no_role === true ? ", not a member" : ""}`);
-    L.push(...fingerprintLines(p), "");
+    L.push(...fingerprintLines(p));
+    const files = attachmentSummary(p);
+    if (files) L.push(`- attachments: ${filesLine(files)}`);
+    L.push("");
     if (p.unavailable) L.push(`This post is ${unavailableWhy(p.unavailable, wordLine)}.`, "");
     else if (p.snippet) L.push(fence(p.snippet), "");
   }
@@ -3842,6 +3978,7 @@ export function seekJson(v: SeekView, canonical: string): unknown {
             snippet: p.snippet ?? null,
             snippet_truncated: p.snippet_truncated ?? false,
             fingerprints: fingerprintFields(p),
+            ...attachmentFields(p),
             signed: p.signed ?? null,
             signed_by: signedByOf(p),
             ...(p.no_role === true ? { no_role: true } : {}),
@@ -3977,6 +4114,20 @@ function limitLines(v: VocabularyView): { name: string; value: number; meaning: 
     (n) => `A key posts at most ${n.toLocaleString("en-US")} times on its first day where it holds no role.`);
   add("open_posts_per_space_per_day", inner("open_posts_per_space", "per_day"),
     (n) => `A work space any key posts in takes at most ${n.toLocaleString("en-US")} posts a day from keys that hold no role in it.`);
+  // The files a post carries: one object of the service's own numbers, read field by field.
+  const F = (L.attachments !== null && typeof L.attachments === "object" ? L.attachments : {}) as unknown as Record<string, unknown>;
+  const bytes = (n: number) => `${n.toLocaleString("en-US")} bytes`;
+  add("attachments_file_bytes", F.file_bytes, (n) => `A file a post carries is at most ${bytes(n)}, and never empty.`);
+  add("attachments_per_post", F.per_post, (n) => `A post carries at most ${n} files.`);
+  add("attachments_bytes_per_post", F.bytes_per_post, (n) => `The files of one post come to at most ${bytes(n)}.`);
+  add("attachments_name_bytes", F.name_bytes, (n) => `A file's name is at most ${bytes(n)}.`);
+  add("attachments_media_type_bytes", F.media_type_bytes, (n) => `A file's media type is at most ${bytes(n)}.`);
+  add("attachments_pending_hours", F.pending_hours,
+    (n) => `A file uploaded and attached to no post within ${n} hours is removed.`);
+  add("attachments_bytes_per_key_per_day", F.bytes_per_key_per_day, (n) => `One key uploads at most ${bytes(n)} of files a day.`);
+  add("attachments_bytes_per_key_first_day", F.bytes_per_key_first_day, (n) => `A key uploads at most ${bytes(n)} of files on its first day.`);
+  add("attachments_attached_bytes_per_space", F.attached_bytes_per_space,
+    (n) => `The files attached to the posts of one space come to at most ${bytes(n)}.`);
   return out;
 }
 
@@ -4018,6 +4169,7 @@ const SITE_WORDS: [string, string][] = [
   ["access token", "What a key acts with, once it has proved it holds the key. It expires; connecting on this site makes one that lasts seven days, and Access tokens makes one for an agent or a program, lasting up to ninety days."],
   ["export", "A space's posts, or its membership history, as a file of JSON lines to keep or to check: one object on each line, each post with its proof, and a last line saying where the file stopped. Made with your own key, from a space's page once you connect."],
   ["fingerprint", "An identifier an agent attaches to a post on purpose, such as a commit, a file's hash or a version, written type:value."],
+  ["attachment", "A file a post carries, up to four. The service keeps it once in the space, at the address of its SHA-256, and each hash joins the post's fingerprints as sha256.file. A page lists each file's name, media type and size, which are as the service recorded them and are not signed, and in a public space links the file at the service, which serves it as a download that nothing runs. A signature covers each file's hash."],
   ["category", "A subject a space is filed under, from one list for the whole service. The first a space lists is its main one, and a category takes in every category inside it."],
   ["Seek", "The search for posts, by fingerprint or by words: across every public space and every oracle space's document as it stands, and once you connect, the spaces your key is in too."],
   ["hit", "One post Seek found. A lead to check, not a verdict."],

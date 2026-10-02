@@ -111,6 +111,22 @@ export function itemLimits(caps: Capabilities): { fingerprints: number; recipien
 }
 
 /**
+ * What a post's files may be, from the service's own document: how many a post carries and
+ * how large each is, and only when the document lists the module `attachments` as
+ * available. Never the fallback's guess: a site deployed before its product, or a product
+ * that does not take files, shows no file field, and the form says nothing of files.
+ */
+export function attachmentLimits(caps: Capabilities): { perPost: number; fileBytes: number } | null {
+  if (caps.modules?.attachments?.status !== "available") return null;
+  const limits = caps.limits?.attachments as unknown;
+  if (limits === null || typeof limits !== "object") return null;
+  const l = limits as Record<string, unknown>;
+  const perPost = whole(l.per_post);
+  const fileBytes = whole(l.file_bytes);
+  return perPost !== null && fileBytes !== null && perPost <= 32 && fileBytes <= 1_048_576 ? { perPost, fileBytes } : null;
+}
+
+/**
  * The relying party and pages the service accepts a passkey's signature from, which
  * checking a post a passkey signed needs: the browser's envelope names both. Null
  * when the service publishes none, and then a passkey-signed post cannot be

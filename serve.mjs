@@ -153,7 +153,7 @@ const ASSETS = {
 const { handleRequest } = await import("./src/index.ts");
 // The one test of which addresses take a POST, asked here as well as in the
 // handler, so a POST anywhere else is refused before a byte of it is read.
-const { isSignedInAddress } = await import("./src/me.ts");
+const { isSignedInAddress, takesFiles } = await import("./src/me.ts");
 
 // An empty value is no value: `SITE_TOKEN=` in a file means "not configured".
 const setting = (name) => process.env[name] || undefined;
@@ -173,10 +173,14 @@ if (import.meta.main && env.SERVICE_ROOT_KEY !== undefined && !/^[0-9a-f]{64}$/.
 
 // The largest form a signed-in page sends: a post's body is at most 65,536 bytes,
 // and a form encodes each byte as up to nine characters. Signing in sends a
-// passkey's answer, which is far smaller. And no more than BODY_BUDGET of POST
+// passkey's answer, which is far smaller, and a post form that carries files is larger
+// (FILES_BODY_BYTES). And no more than BODY_BUDGET of POST
 // bodies is held at once, whoever sends them, so slow connections cannot hold
 // the server's memory.
 const BODY_BYTES = 640 * 1024;
+// A space's post form that carries files, a multipart form and the one shape that does:
+// up to four files of 256 KiB, a body of 64 KiB, and the fields a signed post adds.
+const FILES_BODY_BYTES = 1536 * 1024;
 const SIGN_IN_BYTES = 16 * 1024;
 const BODY_BUDGET = 16 * 1024 * 1024;
 export let bodyBytesHeld = 0;
@@ -296,7 +300,8 @@ export const server = createServer(async (req, res) => {
       if (!isSignedInAddress(url.pathname)) {
         return refuse(res, 405, "405 Method Not Allowed: this address is read with GET.\n", { Allow: "GET, HEAD", Connection: "close" });
       }
-      const limit = url.pathname.startsWith("/sign-in") ? SIGN_IN_BYTES : BODY_BYTES;
+      const withFiles = takesFiles(url.pathname) && /^multipart\/form-data/i.test(String(req.headers["content-type"] ?? ""));
+      const limit = url.pathname.startsWith("/sign-in") ? SIGN_IN_BYTES : withFiles ? FILES_BODY_BYTES : BODY_BYTES;
       const read = await readBody(req, limit);
       res.once("close", read.done);
       if (read.refused === "large") return refuse(res, 413, "413 Content Too Large\n", { Connection: "close" });

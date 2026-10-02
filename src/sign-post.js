@@ -20,9 +20,16 @@
 // A post's data, budget and run id, when the form carries any, go in a private part the
 // object names only by its digest, with 32 random bytes of salt beside them, drawn once
 // for the page so that a press sent twice signs the same object twice.
+//
+// A post's files are in the object as one sha256.file fingerprint each, because that is
+// what the product requires of a signed post that names files: it reads each file's hash
+// from the signed bytes. Reading a file is asynchronous, so each is read and hashed when it
+// is chosen, long before the press, and the press itself stays synchronous; one pressed
+// before its files were read is held and says so, and is never sent unsigned in their
+// place. The files themselves go with the form, which the browser then submits.
 
 import { canonicalBytes } from "/jcs.js";
-import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem } from "/post-object.js";
+import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256 } from "/post-object.js";
 
 // ── the post as the product's object ─────────────────────────────────────────
 
@@ -79,7 +86,7 @@ function privateFieldsOf(form) {
  * three that is wrong is `{ problem }`, said here and never sent unsigned, because a
  * reading of JSON or of a time can differ between this browser and the server.
  */
-function objectOf(form, salt) {
+function objectOf(form, salt, fileHashes = []) {
   const value = (name) => {
     const el = form.elements.namedItem(name);
     return el && typeof el.value === "string" ? el.value : "";
@@ -115,6 +122,8 @@ function objectOf(form, salt) {
     const f = { scheme: line.slice(0, at).trim(), value: line.slice(at + 1).trim() };
     seen.set(JSON.stringify([f.scheme, f.value]), f);
   }
+  // Each file's hash, as the fingerprint the product requires beside a signed post's files.
+  for (const sha of fileHashes) seen.set(JSON.stringify(["sha256.file", sha]), { scheme: "sha256.file", value: sha });
   if (seen.size) o.fingerprints = [...seen.values()].sort((a, b) => codePoints(a.scheme, b.scheme) || codePoints(a.value, b.value));
   const read = privateFieldsOf(form);
   if (read.problem) return { problem: read.problem };
@@ -149,7 +158,41 @@ function tooMany(form, o) {
 
 const SIGNATURE_FIELDS = ["sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"];
 
+/** A file name as the page says it: a control, a direction override or a zero-width character
+ *  written out as its code point, so a name reads as it is spelled and reorders nothing
+ *  around it. The same as visibleName() in src/grammar.ts, which the server uses. */
+const shown = (text) => text.replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu,
+  (ch) => `<U+${(ch.codePointAt(0) ?? 0xfffd).toString(16).toUpperCase().padStart(4, "0")}>`);
+
+/**
+ * The files chosen on a form, each read and hashed as it is chosen: one entry for each file
+ * field that holds a file, with its hash once it is read, or `problem`, a sentence saying
+ * why it cannot be sent. Held to the file size the page names, before the passkey is asked.
+ */
+function watchFiles(form) {
+  const entries = new Map();
+  const max = /^[1-9][0-9]{0,8}$/.test(form.dataset.maxFileBytes || "") ? Number(form.dataset.maxFileBytes) : Infinity;
+  const inputs = typeof form.querySelectorAll === "function" ? Array.from(form.querySelectorAll("input[type=file]")) : [];
+  for (const input of inputs) {
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (!file) { entries.delete(input); return; }
+      const entry = { name: file.name, sha: null, problem: "" };
+      entries.set(input, entry);
+      if (file.size === 0) { entry.problem = `The file ${shown(file.name)} is empty, and the service takes no empty file.`; return; }
+      if (file.size > max) { entry.problem = `The file ${shown(file.name)} is ${file.size.toLocaleString("en-US")} bytes, and a file is at most ${max.toLocaleString("en-US")}.`; return; }
+      file.arrayBuffer().then((buffer) => {
+        if (entries.get(input) === entry) entry.sha = hex(sha256(new Uint8Array(buffer)));
+      }, () => {
+        if (entries.get(input) === entry) entry.problem = `The file ${shown(file.name)} could not be read.`;
+      });
+    });
+  }
+  return entries;
+}
+
 function setup(form) {
+  const files = watchFiles(form);
   // Once for the page: a press sent twice then signs the same private part twice.
   const salt = hex(crypto.getRandomValues(new Uint8Array(32)));
   const status = form.querySelector("[data-sign-status]");
@@ -182,9 +225,23 @@ function setup(form) {
     // form's own submit() below sends without coming back through here.
     clear();
     if (!required && choice && !choice.checked) return;
+    // The files, before the form is read: a file that cannot be sent, or is not read yet, is
+    // said here and the press is held, never sent unsigned in the signed post's place.
+    const chosen = Array.from(files.values());
+    const trouble = chosen.find((f) => f.problem);
+    if (trouble) {
+      event.preventDefault();
+      say(`${trouble.problem} Nothing was sent. Choose another file, or none, and press Post again.`);
+      return;
+    }
+    if (chosen.some((f) => f.sha === null)) {
+      event.preventDefault();
+      say("Your files are still being read. Nothing was sent: press Post again in a moment.");
+      return;
+    }
     let made;
     try {
-      made = objectOf(form, salt);
+      made = objectOf(form, salt, chosen.map((f) => f.sha));
     } catch {
       made = { problem: "The data or the budget holds text a signature cannot cover, such as half of an emoji." };
     }

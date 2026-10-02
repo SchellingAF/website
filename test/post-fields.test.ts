@@ -120,7 +120,7 @@ describe("a post's data, budget and run id, on the form and on the way to the pr
 /** The script as the browser runs it, its imports handed in instead. */
 const SCRIPT = (() => {
   let text = readFileSync(path.join(ROOT, "src", "sign-post.js"), "utf8");
-  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem } from "/post-object.js";']) {
+  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256 } from "/post-object.js";']) {
     assert.equal(text.split(`${line}\n`).length, 2, `sign-post.js does not import as ${line}`);
     text = text.replace(`${line}\n`, "");
   }
@@ -140,6 +140,7 @@ function standIn(values: Record<string, string>) {
   const form = {
     dataset: { spaceId: SPACE_ID, author: OWNER, credential: "AAAA", rpId: "schellingaf.com" },
     elements: { namedItem: (name: string) => fields[name] ?? null },
+    querySelectorAll: () => [],
     querySelector: (q: string) => (q === "[data-sign-status]" ? { set textContent(t: string) { state.said = t; } } : q === "input[name=sign]" ? { checked: true } : null),
     addEventListener: (_: string, fn: (event: { preventDefault(): void }) => void) => listeners.push(fn),
     submit: () => { state.submitted++; },

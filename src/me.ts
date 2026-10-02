@@ -27,8 +27,8 @@
 //      connected passes through /sign-in?next= with it. Like every page here it is
 //      kept by no cache and listed by no search engine; see src/grammar.ts.
 
-import { apiGet, apiSignIn, apiWrite, classifyRefusal, type ApiEnv, type ApiResult, type Refusal } from "./api.ts";
-import { capabilities, itemLimits, kindGroups, knownKinds, linkRules, signInUnavailable } from "./capabilities.ts";
+import { apiGet, apiSignIn, apiUpload, apiWrite, classifyRefusal, type ApiEnv, type ApiResult, type Refusal } from "./api.ts";
+import { attachmentLimits, capabilities, itemLimits, kindGroups, knownKinds, linkRules, signInUnavailable } from "./capabilities.ts";
 import {
   EVENTS_PAGE, MAILBOX_PAGE, MEMBER_ROLES, rolesBelow, eventsHtml, formShell, invitesHtml, joinLinkHtml, joinRequestsHtml, mailboxHtml, meHtml, sealingPanelHtml,
   membersHref, membersHtml, newSpaceHtml, postAgainHtml, removalHtml, resultHtml, settingsHtml, signInHtml, tokensHtml, watchingHtml,
@@ -45,8 +45,8 @@ import {
 import { forgetSpacePages, handle, matchSignedInRoute } from "./spaces.ts";
 import { actOnMessages, readMessages, revokeUnheld, waitingOf } from "./messages.ts";
 import {
-  badForm, filled, forbidden, html, idempotencyOf, joinCodeOf, json, lines, notAllowed, page, pick, postLimitWords, readForm,
-  refusalText, see, siteLink, statusFor, tooMany, withheldPage, words, type SignedInContext,
+  attachmentsOf, badForm, fileRefusalWords, filled, forbidden, html, idempotencyOf, joinCodeOf, json, lines, notAllowed, page, pick, postLimitWords,
+  prepareFiles, readForm, readFormWithFiles, refusalText, see, siteLink, statusFor, tooMany, withheldPage, words, type PreparedFile, type SignedInContext,
 } from "./signed-in.ts";
 import {
   GENERATION, HAND_OVER_CODE, HEX32, INVITE_CODE, ISO_TIME, KEY_ID, LINK_CODE, NAME, POSITION, POST_SEQ, SPACE_NAME, TIME_ID_CURSOR, UUID,
@@ -78,6 +78,11 @@ const ACTING = new RegExp(`^/me/spaces/(${NAME})/(posts|join|stamp|leave|setting
  *  /join/<space>/<code>, and like it an address carrying a credential by the one
  *  exception to that rule. */
 const JOINING = new RegExp(`^/me/join/(${NAME})/(${LINK_CODE})/*$`);
+
+/** The one address that takes a form carrying files: a space's posts. serve.mjs allows it a
+ *  larger body than any other form, and only when the form is multipart. */
+const POSTING = new RegExp(`^/me/spaces/${NAME}/posts$`);
+export const takesFiles = (path: string): boolean => POSTING.test(path);
 
 /** Whether an address belongs to this family. Asked by src/index.ts before any
  *  other route, so a POST anywhere else can be refused outright. */
@@ -131,11 +136,13 @@ export async function handleSignedIn(
 
   if (method === "POST") {
     if (!sameOrigin(request, url)) return forbidden(viewer, "That request did not come from a page of this site, so nothing was changed.");
-    const form = await readForm(request);
-    if (!form || !csrfMatches(session, form.get("csrf"))) {
+    // Only a space's posts take a multipart form, the one shape that carries a file; any
+    // other address reads a URL-encoded form alone, and answers a multipart one as expired.
+    const sent = takesFiles(path) ? await readFormWithFiles(request) : { form: await readForm(request), files: [] as File[] };
+    if (!sent?.form || !csrfMatches(session, sent.form.get("csrf"))) {
       return forbidden(viewer, "That form has expired, so nothing was changed. Go back, reload the page and try again.");
     }
-    return act(here, session, viewer, path, form);
+    return act(here, session, viewer, path, sent.form, sent.files);
   }
   if (method !== "GET") return notAllowed("GET, HEAD, POST");
   // What waits in this key's messages, for the bar every signed-in page carries. A
@@ -789,7 +796,7 @@ function readableLook(raw: unknown, kind: LinkKind): LinkLook | null {
 
 // ------------------------------------------------------------------ acting
 
-async function act(h: Here, session: Session, viewer: Viewer, path: string, form: URLSearchParams): Promise<Response> {
+async function act(h: Here, session: Session, viewer: Viewer, path: string, form: URLSearchParams, files: File[] = []): Promise<Response> {
   if (path.startsWith("/me/messages/")) {
     const out = await actOnMessages(contextOf(h, session, viewer), path, form);
     if (out) return out;
@@ -815,7 +822,7 @@ async function act(h: Here, session: Session, viewer: Viewer, path: string, form
   }
 
   const inSpace = path.match(ACTING);
-  if (inSpace) return spaceAction(h, session, viewer, inSpace[1]!, inSpace[2]!, form);
+  if (inSpace) return spaceAction(h, session, viewer, inSpace[1]!, inSpace[2]!, form, files);
 
   const onRequest = path.match(/^\/me\/requests\/([0-9a-f-]{36})\/(approve|decline|withdraw)$/);
   if (onRequest && UUID.test(onRequest[1]!)) {
@@ -1070,6 +1077,31 @@ async function keeperAction(h: Here, session: Session, viewer: Viewer, name: str
   }
 }
 
+/** Each file to the space it will be attached in, one at a time, stopping at the first the
+ *  service refuses, which is returned; null when every file is there. An upload that is
+ *  sent again after a lost answer is answered the same, so a form pressed twice is safe. */
+async function uploadFiles(session: Session, name: string, files: PreparedFile[]): Promise<Refusal | null> {
+  for (const f of files) {
+    const res = await apiUpload(session, name, f.sha256, f.bytes);
+    if (!res.ok) return res;
+  }
+  return null;
+}
+
+/** The hashes a signed post's object names as files: the `sha256.file` fingerprints in the
+ *  canonical bytes its passkey signed. Empty for anything that is not such an object. */
+function signedFingerprints(canonical: string | null): Set<string> {
+  try {
+    const object: unknown = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob((canonical ?? "").replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))));
+    const prints = object !== null && typeof object === "object" ? (object as { fingerprints?: unknown }).fingerprints : undefined;
+    return new Set(Array.isArray(prints)
+      ? prints.flatMap((f: unknown) => (f && typeof f === "object" && (f as { scheme?: unknown }).scheme === "sha256.file" && typeof (f as { value?: unknown }).value === "string" ? [(f as { value: string }).value] : []))
+      : []);
+  } catch {
+    return new Set();
+  }
+}
+
 /** Where a post sent from a form goes next: a proposal, a decision on one and an undo
  *  land on the history, which says what became of them; any other post on its own page. */
 function afterPost(spaceHref: string, posted: Posted, form: URLSearchParams, base: "posted" | "posted-signed"): Response {
@@ -1085,7 +1117,7 @@ const reviewerSetting = (form: URLSearchParams): { service_reviewer?: boolean } 
   form.get("reviewer_shown") === "1" ? { service_reviewer: form.get("service_reviewer") === "1" } : {};
 
 async function spaceAction(
-  h: Here, session: Session, viewer: Viewer, name: string, what: string, form: URLSearchParams,
+  h: Here, session: Session, viewer: Viewer, name: string, what: string, form: URLSearchParams, files: File[] = [],
 ): Promise<Response> {
   const spaceHref = `/me/spaces/${name}`;
   switch (what) {
@@ -1102,6 +1134,7 @@ async function spaceAction(
       // ciphertext, and nothing the person typed, which had no named field to be sent in.
       // Signed, it carries the object the passkey signed as well, which commits to both.
       if (form.get("sealed_header") || form.get("sealed_ciphertext")) {
+        if (files.length) return badForm(viewer, "A sealed space takes no files, so nothing was posted.");
         const header = sealedPart(form.get("sealed_header"), 2800);
         const ciphertext = sealedPart(form.get("sealed_ciphertext"), 245_760);
         if (!header || !ciphertext) return badForm(viewer, "That sealed post was not in the shape this page seals one, so nothing was posted. Reload the page and try again.");
@@ -1130,8 +1163,29 @@ async function spaceAction(
             "The signature on that post was not in the shape a passkey prompt writes, so nothing was posted. Reload the page and try again.",
             [[spaceHref, "Back to the space"]], true), 400);
         }
-        const res = await apiWrite<Posted>(session, "POST", `/v1/spaces/${name}/posts`, signed);
-        if (!res.ok) return refused(h, viewer, res, name, undefined, await postRefusalWords(res, form));
+        // The files a signed post names: each one's hash must be a sha256.file fingerprint
+        // in the object the passkey signed, which the page's script put there from the file
+        // chosen, so a file that is not in it would be refused by the service after it was
+        // sent. They are checked here, then uploaded, then named beside the signed bytes.
+        const body: Record<string, unknown> = signed;
+        if (files.length) {
+          const caps = await capabilities();
+          const notPostedWhy = (why: string): Response =>
+            page(resultHtml(formShell("Not posted", viewer), "Not posted", why, [[spaceHref, "Back to the space"]], true), 400);
+          const rules = attachmentLimits(caps);
+          if (!rules) return notPostedWhy("The service takes no files right now, so nothing was posted. Post it again without them, or try again later.");
+          const made = await prepareFiles(files, rules);
+          if (!made.ok) return notPostedWhy(`${made.why} Reload the page and try again.`);
+          const covered = signedFingerprints(form.get("sig_canonical"));
+          if (made.files.some((f) => !covered.has(f.sha256))) {
+            return notPostedWhy("A file you chose is not one your passkey signed for, so nothing was posted. Reload the page, choose the files again and press Post.");
+          }
+          const up = await uploadFiles(session, name, made.files);
+          if (up) return refused(h, viewer, up, name, undefined, fileRefusalWords(up, caps));
+          body.attachments = attachmentsOf(made.files);
+        }
+        const res = await apiWrite<Posted>(session, "POST", `/v1/spaces/${name}/posts`, body);
+        if (!res.ok) return refused(h, viewer, res, name, undefined, (files.length ? fileRefusalWords(res, await capabilities()) : undefined) ?? await postRefusalWords(res, form));
         return afterPost(spaceHref, res.data, form, "posted-signed");
       }
       const body: Record<string, unknown> = {
@@ -1166,7 +1220,7 @@ async function spaceAction(
           data: typedData, budget: typedBudget, runId: typedRun,
         };
         const kinds = Object.values(kindGroups(caps)).flat().filter((k) => k !== "version" || typed.kind === "version");
-        return page(postAgainHtml(formShell("Not posted", viewer), viewer, name, kinds, typed, why), 400);
+        return page(postAgainHtml(formShell("Not posted", viewer), viewer, name, kinds, typed, why, files.length ? attachmentLimits(caps) : null), 400);
       };
       const limits = itemLimits(caps);
       const fingerprints = lines(form.get("fingerprints")).map((line) => {
@@ -1178,8 +1232,20 @@ async function spaceAction(
       }
       // The same fingerprint twice is one, as the service keeps it and a signed post names it.
       const distinct = [...new Map(fingerprints.map((f) => [JSON.stringify([f!.scheme, f!.value]), f!])).values()];
-      const printsOver = tooMany("fingerprints", distinct.length, limits.fingerprints);
-      if (printsOver) return notPosted(printsOver);
+      // The files, held to the service's own limits and hashed before anything is sent: the
+      // service adds each file's hash to the post's fingerprints, and counts them in the 32.
+      let prepared: PreparedFile[] = [];
+      if (files.length) {
+        const rules = attachmentLimits(caps);
+        if (!rules) return notPosted("The service takes no files right now, so nothing was posted. Send the post without them, or try again later.");
+        const made = await prepareFiles(files, rules);
+        if (!made.ok) return notPosted(`${made.why} The files you chose are not kept: choose them again.`);
+        prepared = made.files;
+      }
+      const named = new Set(distinct.map((f) => JSON.stringify([f!.scheme, f!.value])));
+      for (const f of prepared) named.add(JSON.stringify(["sha256.file", f.sha256]));
+      const printsOver = tooMany("fingerprints", named.size, limits.fingerprints);
+      if (printsOver) return notPosted(prepared.length ? printsOver.replace("fingerprints, and", "fingerprints, each file's hash among them, and") : printsOver);
       if (distinct.length) body.fingerprints = distinct;
       const to = [...new Set(lines(form.get("to")))];
       if (to.some((id) => !KEY_ID.test(id))) {
@@ -1207,8 +1273,19 @@ async function spaceAction(
         return notPosted("This post was to be signed with your passkey, and no signature came with it, because the page's script did not run. Nothing was posted. Send it from here unsigned, or post it again from the space's page to sign it.");
       }
 
+      // The files go first, each to this space at the address of its hash, and then the post
+      // names them: the service adds their hashes to its fingerprints. A refusal of a file
+      // shows the form again as typed, as the checks above do.
+      if (prepared.length) {
+        const up = await uploadFiles(session, name, prepared);
+        if (up) {
+          const said = fileRefusalWords(up, caps);
+          return said && classifyRefusal(up.code, up.status) !== "credential" ? notPosted(said) : refused(h, viewer, up, name, undefined, said);
+        }
+        body.attachments = attachmentsOf(prepared);
+      }
       const res = await apiWrite<Posted>(session, "POST", `/v1/spaces/${name}/posts`, body);
-      if (!res.ok) return refused(h, viewer, res, name, undefined, await postRefusalWords(res, form));
+      if (!res.ok) return refused(h, viewer, res, name, undefined, (prepared.length ? fileRefusalWords(res, caps) : undefined) ?? await postRefusalWords(res, form));
       return afterPost(spaceHref, res.data, form, "posted");
     }
     case "stamp": {

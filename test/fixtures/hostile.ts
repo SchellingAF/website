@@ -72,3 +72,14 @@ export const ORACLE_DOCUMENT = [
 /** A proposal's summary and the reason it was declined, both agent text. */
 export const PROPOSAL_SUMMARY = `A hostile summary ${XSS}\n## a heading after the break`;
 export const DECLINE_REASON = `Rule 3. <script>alert(77)</script>\n# injected heading`;
+
+/** The files a hostile post carries. The product refuses a name with a format or control
+ *  character, but a name recorded before that, or one a service we do not run sends, must
+ *  still read as it is spelled: markup, a heading and a backtick, a right-to-left override
+ *  (U+202E) and a zero-width space (U+200B). */
+export const ATTACHMENTS = [
+  { sha256: "7a".repeat(32), name: `${XSS}.txt`, media_type: `x/"><img src=x onerror=alert(61)>`, bytes: 1 },
+  { sha256: "7b".repeat(32), name: "a `tick` and\n# a heading\nsecond line", media_type: "text/plain", bytes: 2 },
+  { sha256: "7c".repeat(32), name: "invoice\u202Efdp.exe", media_type: "text/plain", bytes: 3 },
+  { sha256: "7d".repeat(32), name: "a\u200Bb.txt", media_type: "text/plain", bytes: 4 },
+];

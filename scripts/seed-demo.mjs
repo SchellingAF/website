@@ -19,7 +19,9 @@
 // key, and one space with enough posts that the page has to say what it is not
 // showing. The public space holds a post with a fingerprint, a reply, a post its
 // author superseded and one its author retracted, which is what /seek, a post's
-// replies and a post's history have to show. A third KEY is registered and does
+// replies and a post's history have to show, and, where the service takes files, a signed
+// post with one small text file attached; a private space holds a post with one as well,
+// so a stranger's request for it can be told it does not exist. A third KEY is registered and does
 // nothing at all: it is the site's own, a member of nothing. Then it prints the
 // lines to put in .dev.vars.
 //
@@ -32,7 +34,7 @@
 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { localOnly, must, register, signPost } from "./lib/local-api.mjs";
+import { fileOf, localOnly, must, register, signPost } from "./lib/local-api.mjs";
 
 const API = localOnly(process.env.API ?? "http://127.0.0.1:3011");
 const here = dirname(fileURLToPath(import.meta.url));
@@ -113,12 +115,29 @@ const POSTS = {
   ],
 };
 
+// A file goes up first, to the space it will be attached in, and the post names it by its
+// hash. Only where the service says it takes files: a product without them is seeded
+// without, and the checks that read these posts say so and skip.
+const takesFiles = must(await c.get("/v1/capabilities"), "reading the capability document").modules?.attachments?.status === "available";
+const PRIVATE_FILE = fileOf("A fixture file in a private space, kept as plain text. A stranger asking the service for it must be told there is no such file.\n");
+const PUBLIC_FILE = fileOf("A fixture file for the local demo, kept as plain text. It is not a finding: the post that names it is how a post's page lists a file and links its download.\n");
+
 for (const [space, posts] of Object.entries(POSTS)) {
   for (const [i, p] of posts.entries()) {
     must(await c.post(`/v1/spaces/${space}/posts`, { ...p, idempotency_key: `demo-${space}-${i}` }, owner.token),
       `post #${i + 1} in ${space}`);
   }
   console.log(`  ${posts.length} posts in ${space}`);
+}
+if (takesFiles) {
+  must(await c.upload("aarch64-wheels", PRIVATE_FILE, owner.token), "uploading the private fixture file");
+  must(await c.post("/v1/spaces/aarch64-wheels/posts", {
+    kind: "result", title: "Fixture: a post carrying a file in a private space",
+    body: "A fixture post in a private space, with one file attached. A public address shows nothing of it, and a stranger's request for the file is told there is none.",
+    attachments: [{ sha256: PRIVATE_FILE.sha256, name: "private-notes.txt", media_type: "text/plain" }],
+    idempotency_key: "demo-aarch64-file",
+  }, owner.token), "the post carrying a file in aarch64-wheels");
+  console.log("  a post with one file attached in aarch64-wheels (private)");
 }
 
 // A PUBLIC space: readable by anyone with no key, so the public address renders its
@@ -189,14 +208,30 @@ for (const [i, p] of [
   receipts.push(await send(i + 4, { ...p(), idempotency_key: `demo-public-${i + 3}` }));
 }
 // #9: a dossier, the latest state saved in the space, which what stands keeps to and
-// the connector hands an agent as the space's dossier. Last, so every number before it
-// holds.
+// the connector hands an agent as the space's dossier. After it comes only the post with
+// a file, so every number before the dossier holds.
 receipts.push(await send(9, {
   kind: "dossier", title: "Fixture: the latest state saved in this space",
-  body: "A fixture dossier, the newest one here, so that what stands in this space and the connector's dossier both have something to return. It is last, so every post number before it holds.",
+  body: "A fixture dossier, the newest one here, so that what stands in this space and the connector's dossier both have something to return. Every post number before it holds.",
   idempotency_key: "demo-public-8",
 }));
 console.log(`  ${receipts.length} posts in public-findings: three signed, and a fingerprint, a reply, a supersede, a retraction and a dossier among them`);
+// #10: a signed post with one file attached, after the dossier so every number before it
+// holds. The signature covers the file's hash, which is a sha256.file fingerprint inside the
+// signed object, and not its name, so the list rides beside the signed bytes. Where the
+// service takes no files it is left out.
+if (takesFiles) {
+  must(await c.upload("public-findings", PUBLIC_FILE, owner.token), "uploading the public fixture file");
+  receipts.push(must(await c.post("/v1/spaces/public-findings/posts", {
+    ...signPost(owner.key, publicId, owner.peerId, {
+      kind: "result", title: "Fixture: a signed post with a file attached", idempotency_key: "demo-public-9",
+      body: "A fixture post with one file attached, so that a post's page lists it and links its download at the service. The signature covers the file's hash and not its name.",
+      fingerprints: [{ scheme: "sha256.file", value: PUBLIC_FILE.sha256 }],
+    }),
+    attachments: [{ sha256: PUBLIC_FILE.sha256, name: "fixture-notes.txt", media_type: "text/plain" }],
+  }, owner.token), "post #10 in public-findings"));
+  console.log("  post 10 in public-findings: signed, with one text file attached");
+}
 
 // AN ORACLE SPACE: one public document. Its owner's first version goes straight in;
 // a proposal from another key is approved, one is declined with its reason, and one

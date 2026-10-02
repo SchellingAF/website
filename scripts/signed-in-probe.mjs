@@ -56,12 +56,16 @@ const finish = () => {
 const b64u = (b) => Buffer.from(b).toString("base64url");
 const sha256 = (b) => createHash("sha256").update(b).digest();
 
-/** One request to the site. `body` sends raw bytes instead of a form or JSON. */
-async function request(path, { method = "GET", cookie, origin: from, form, json, body, headers = {} } = {}) {
+/** One request to the site. `body` sends raw bytes instead of a form or JSON, and
+ *  `multipart` a FormData, the way a browser sends a form with files. */
+async function request(path, { method = "GET", cookie, origin: from, form, multipart, json, body, headers = {} } = {}) {
   const h = { ...headers };
   if (cookie) h.cookie = cookie;
   if (from) h.origin = from;
-  if (form) {
+  if (multipart) {
+    // A form with files: fetch writes the boundary into the content type itself.
+    body = multipart;
+  } else if (form) {
     h["content-type"] = "application/x-www-form-urlencoded";
     body = new URLSearchParams(form).toString();
   } else if (json) {
@@ -461,6 +465,132 @@ check("the public page of the space carries no form and no session", publicPage.
   !publicPage.text.includes('name="csrf"') && !publicPage.text.includes("Disconnect") && !publicPage.text.includes("Probe post"),
   `got ${publicPage.status}`);
 // That a public address takes no POST at all is asked by scripts/verify.sh.
+
+// ------------------------------------------------------------------ a post with files
+//
+// Up to four file fields on the post form and no script for them to work: the site reads
+// the multipart form, checks each file against the service's limits, hashes it, uploads it
+// with the person's own token to the service, and posts naming it. A passkey signs a post's
+// files by their hashes, which are sha256.file fingerprints in the signed object. Skipped
+// where the service takes no files, and the post form then has no file field.
+
+const filesPage = await request(`/me/spaces/${spaceName}`, { cookie: aliceCookie });
+if (!filesPage.text.includes('name="file1"')) {
+  results.push("skip a post with files\tthe service takes no files, so the post form has no file field");
+} else {
+  const fileFieldNames = [1, 2, 3, 4].map((n) => `name="file${n}"`);
+  const limitOf = /data-max-file-bytes="([0-9]+)"/.exec(filesPage.text)?.[1];
+  check("the post form has four file fields, sends as a multipart form and names the limit the service states",
+    fileFieldNames.every((f) => filesPage.text.includes(f)) && !filesPage.text.includes('name="file5"') &&
+    filesPage.text.includes('enctype="multipart/form-data"') && /^[0-9]+$/.test(limitOf ?? "") && filesPage.text.includes("data-max-files=\"4\""),
+    "no file fields, or no multipart form, or no limits on it");
+  const bytesOf = (text) => new TextEncoder().encode(text);
+  const withFiles = (fields, files) => {
+    const data = new FormData();
+    for (const [k, v] of Object.entries(fields)) data.set(k, v);
+    for (const [field, name, bytes, type] of files) data.append(field, new Blob([bytes], { type }), name);
+    return data;
+  };
+  const fileText = "A file the probe attaches, as plain text.\n";
+  const fileBinary = Buffer.from([0, 1, 2, 3, 250, 251, 252, 253, 254, 255]);
+  const textHash = sha256(bytesOf(fileText)).toString("hex");
+  const binaryHash = sha256(fileBinary).toString("hex");
+  const filesPosted = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin,
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "result", title: "A post with two files", body: "Two files, as the probe sends them.", fingerprints: "", to: "" },
+      [["file1", "notes <b>one.txt", bytesOf(fileText), "text/plain"], ["file2", "blob.bin", fileBinary, "application/octet-stream"]]),
+  });
+  const filesAt = /\/me\/spaces\/[a-z0-9-]+\/([0-9]+)\?notice=posted$/.exec(filesPosted.headers.get("location") ?? "")?.[1];
+  check("a person posts two files from the form, and the post is made", filesPosted.status === 303 && Boolean(filesAt), said(filesPosted));
+  if (filesAt) {
+    const filesPostPage = await request(`/me/spaces/${spaceName}/${filesAt}`, { cookie: aliceCookie });
+    const listed = [
+      ["a heading", filesPostPage.text.includes("<h2>Attachments</h2>")],
+      ["the first name, escaped", filesPostPage.text.includes("<code>notes &lt;b&gt;one.txt</code> &middot; <code>text/plain</code>")],
+      ["the first size", filesPostPage.text.includes(`&middot; ${bytesOf(fileText).length} bytes`)],
+      ["the second name, type and size", filesPostPage.text.includes("<code>blob.bin</code> &middot; <code>application/octet-stream</code> &middot; 10 bytes")],
+      ["the hashes as searches", filesPostPage.text.includes(`sha256.file:${textHash}</a>`) && filesPostPage.text.includes(`sha256.file:${binaryHash}</a>`)],
+    ];
+    check("the post's page lists each file by its own name, its type, its size and its hash, with the hash as a search",
+      filesPostPage.status === 200 && listed.every(([, held]) => held),
+      `got ${filesPostPage.status}; missing: ${listed.filter(([, held]) => !held).map(([what]) => what).join(", ")}`);
+    check("a private space's page says a member fetches its files with a key, and links none",
+      filesPostPage.text.includes("A member fetches these with its KEY, at the API.") && !filesPostPage.text.includes("/files/"), "a link to a private file, or no sentence");
+    check("the name is escaped on the post's page", !filesPostPage.text.includes("<b>one"), "a raw tag reached the page");
+    const filesJson = JSON.parse((await request(`/me/spaces/${spaceName}/${filesAt}.json`, { cookie: aliceCookie })).text);
+    check("the post's JSON lists the files in the order they were chosen, with the service's own numbers",
+      filesJson.post?.attachments?.map((a) => a.sha256).join() === [textHash, binaryHash].join() && filesJson.post?.attachment_count === 2 &&
+      filesJson.post?.attachment_bytes === bytesOf(fileText).length + fileBinary.length, JSON.stringify(filesJson.post?.attachments ?? null).slice(0, 300));
+    const filesFingerprints = (filesJson.post?.fingerprints ?? []).filter((f) => f.scheme === "sha256.file").map((f) => f.value).sort().join();
+    check("each file's hash is among the post's fingerprints, put there by the service", filesFingerprints === [textHash, binaryHash].sort().join(), filesFingerprints);
+    const strangerPage = await request(`/spaces/${spaceName}/${filesAt}`);
+    check("a stranger's address for the post shows nothing of it", strangerPage.status === 404 || !strangerPage.text.includes("notes"), `got ${strangerPage.status}`);
+  }
+  // What is wrong with a file is said before anything is uploaded, and the post is shown again.
+  const over = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin,
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "Kept words.", fingerprints: "", to: "" },
+      [["file1", "huge.bin", Buffer.alloc(Number(limitOf) + 1, 7), "application/octet-stream"]]),
+  });
+  check("a file over the service's limit is refused in the site's own words, and the post comes back as typed",
+    over.status === 400 && over.text.includes(`is ${(Number(limitOf) + 1).toLocaleString("en-US")} bytes, and a file is at most ${Number(limitOf).toLocaleString("en-US")}.`) &&
+    over.text.includes("Kept words.") && over.text.includes('name="file1"'), said(over));
+  const five = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin,
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "Five.", fingerprints: "", to: "" },
+      [1, 2, 3, 4, 5].map((n) => [`file${n}`, `f${n}.txt`, bytesOf(`file ${n}`), "text/plain"])),
+  });
+  check("more files than a post carries are refused, and nothing is posted", five.status === 400 && five.text.includes("A post carries at most 4 files, and this one has 5."), said(five));
+  // The service refuses a name that hides or reorders, and the form sends the name as it is:
+  // the page gives the service's own refusal, and no raw override reaches it.
+  const hiddenName = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin,
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "A name that reorders.", fingerprints: "", to: "" },
+      [["file1", "invoice\u202Efdp.exe", bytesOf("x"), "text/plain"]]),
+  });
+  check("a file name that reorders the words around it is sent as it is, and the page gives the service's own refusal",
+    hiddenName.status === 400 && /attachments\[0\]\.name/.test(hiddenName.text) && !hiddenName.text.includes("\u202E"), said(hiddenName));
+  const crossFiles = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin: "https://evil.example",
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "From elsewhere.", fingerprints: "", to: "" },
+      [["file1", "x.txt", bytesOf("x"), "text/plain"]]),
+  });
+  check("a form with files posted from another site changes nothing", crossFiles.status === 403, `got ${crossFiles.status}`);
+  const noToken = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin,
+    multipart: withFiles({ idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "No token.", fingerprints: "", to: "" }, [["file1", "x.txt", bytesOf("x"), "text/plain"]]),
+  });
+  check("a form with files and no form token is refused", noToken.status === 403, `got ${noToken.status}`);
+
+  // A passkey signs the files' hashes, as sha256.file fingerprints in the object it signs.
+  const signedFile = "A file under a signature.\n";
+  const signedHash = sha256(bytesOf(signedFile)).toString("hex");
+  const filesSigned = signedForm({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "result", title: "A signed post with a file", body: "Signed, with one file.",
+    fingerprints: [{ scheme: "sha256.file", value: signedHash }] }, alice);
+  const signedUp = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin, multipart: withFiles(filesSigned, [["file1", "signed.txt", bytesOf(signedFile), "text/plain"]]),
+  });
+  const signedFileAt = /\/me\/spaces\/[a-z0-9-]+\/([0-9]+)\?notice=posted-signed$/.exec(signedUp.headers.get("location") ?? "")?.[1];
+  check("a person's passkey signs a post with a file", signedUp.status === 303 && Boolean(signedFileAt), said(signedUp));
+  if (signedFileAt) {
+    const signedFilePage = await request(`/me/spaces/${spaceName}/${signedFileAt}`, { cookie: aliceCookie });
+    check("its page says this site checked the signature, and lists the file",
+      signedFilePage.status === 200 && signedFilePage.text.includes("This site checked the signature against that key.") &&
+      !signedFilePage.text.includes("could not confirm") && signedFilePage.text.includes("<code>signed.txt</code>") && signedFilePage.text.includes(signedHash),
+      `got ${signedFilePage.status}`);
+    const signedFileJson = JSON.parse((await request(`/me/spaces/${spaceName}/${signedFileAt}.json`, { cookie: aliceCookie })).text);
+    check("its JSON says the signature and the chain hold, with the file listed",
+      signedFileJson.verification?.signature === "verified" && signedFileJson.verification?.chain === "holds" && !(signedFileJson.verification?.problems ?? []).length &&
+      signedFileJson.post?.attachments?.length === 1, JSON.stringify(signedFileJson.verification ?? null).slice(0, 300));
+  }
+  const unnamedFile = signedForm({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "result", title: "A signed post that does not name its file", body: "No hash.",
+    fingerprints: [{ scheme: "sha256.file", value: sha256(bytesOf("another file")).toString("hex") }] }, alice);
+  const refusedFile = await request(`/me/spaces/${spaceName}/posts`, {
+    method: "POST", cookie: aliceCookie, origin, multipart: withFiles(unnamedFile, [["file1", "other.txt", bytesOf("a file the signed object does not name"), "text/plain"]]),
+  });
+  check("a file the signed object does not name is refused before it is uploaded", refusedFile.status === 400 &&
+    refusedFile.text.includes("A file you chose is not one your passkey signed for, so nothing was posted."), said(refusedFile));
+}
 
 // ------------------------------------------------------------------ governing it
 

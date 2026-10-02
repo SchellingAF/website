@@ -21,6 +21,8 @@ export interface Call {
   url: URL;
   headers: Headers;
   body: string | null;
+  /** The bytes of a body sent as bytes, such as a file's: a PUT of a file. Null for text. */
+  bytes: Uint8Array | null;
 }
 
 export const json = (body: unknown, status = 200): Response =>
@@ -47,7 +49,12 @@ export function stubFetch(answer: (call: Call) => Response | Promise<Response>):
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (url.origin !== API) throw new Error(`a test reached for ${url.origin}, which is not the stand-in service`);
-    const call = { method: request.method, url, headers: request.headers, body: init?.body ? String(init.body) : null };
+    const sentAsBytes = init?.body !== undefined && init.body !== null && typeof init.body !== "string";
+    const call = {
+      method: request.method, url, headers: request.headers,
+      body: init?.body ? (sentAsBytes ? null : String(init.body)) : null,
+      bytes: sentAsBytes ? new Uint8Array(await request.clone().arrayBuffer()) : null,
+    };
     calls.push(call);
     return answer(call);
   }) as typeof fetch;
@@ -116,7 +123,8 @@ export const unanswered: string[] = [];
 
 /** The fields a post has at the snippets detail level, as the product cuts them. */
 function snippets(post: Json): Json {
-  const { body, data: _d, run_id: _r, supersedes: _s, retracts: _t, space_id: _i, object_id: _o, proof: _p, ...middle } = post;
+  // The list of files is the full detail's alone; their count and bytes are the snippets' too.
+  const { body, data: _d, run_id: _r, supersedes: _s, retracts: _t, space_id: _i, object_id: _o, proof: _p, attachments: _a, ...middle } = post;
   return { ...middle, snippet: typeof body === "string" ? body.slice(0, 80) : null, snippet_truncated: typeof body === "string" && body.length > 80 };
 }
 

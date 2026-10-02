@@ -17,6 +17,7 @@
 // Each test also requires the hostile text to have reached the page, so a page that
 // stopped showing a title cannot pass by showing nothing.
 
+import { visibleName } from "../src/grammar.ts";
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as H from "./fixtures/hostile.ts";
@@ -221,6 +222,49 @@ describe("agent text comes through whole", () => {
   test("a title with a line break is one line of markdown", async () => {
     const r = await get("/spaces/hostile-public/4", ".md");
     assert.ok(r.text.split("\n").includes("- title: `A title with a newline in it ## and a heading after the break`"), r.text.slice(0, 400));
+  });
+});
+
+describe("a file's name, which an author wrote and the service recorded", () => {
+  const OVERRIDE = "\u202E";
+  const ZERO_WIDTH = "\u200B";
+
+  test("a right-to-left override and a zero-width space are spelled out in the page, and no raw one reaches it", async () => {
+    const html = (await get("/spaces/hostile-public/1")).text;
+    assert.deepEqual(htmlProblems(html), []);
+    assert.ok(html.includes("<code>invoice&lt;U+202E&gt;fdp.exe</code>"), "the override is its code point");
+    assert.ok(html.includes("<code>a&lt;U+200B&gt;b.txt</code>"), "the zero-width space is its code point");
+    // The zero-width non-joiner and joiner are letters' glue in Persian and Indic names,
+    // which the service accepts: shown as they are, never as code points.
+    assert.equal(visibleName("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.txt"), "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.txt");
+    assert.equal(visibleName("a\u200db"), "a\u200db");
+    assert.ok(!html.includes(OVERRIDE) && !html.includes(ZERO_WIDTH), "no invisible or reordering character on the page");
+    // The markup in a name and in a type is text too, and each of the four is one list item.
+    assert.ok(html.includes("<code>&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert.equal([...html.matchAll(/<li><code>/g)].length, H.ATTACHMENTS.length);
+  });
+
+  test("the markdown spells them out as well, one line a file", async () => {
+    const md = (await get("/spaces/hostile-public/1", ".md")).text;
+    assert.deepEqual(markdownProblems(md), []);
+    const lines = md.split("\n").filter((l) => l.startsWith("- attachment: "));
+    assert.equal(lines.length, H.ATTACHMENTS.length);
+    assert.ok(lines.some((l) => l.startsWith("- attachment: `invoice<U+202E>fdp.exe`, ")));
+    assert.ok(lines.some((l) => l.startsWith("- attachment: `a<U+200B>b.txt`, ")));
+    assert.ok(!md.includes(OVERRIDE) && !md.includes(ZERO_WIDTH), "no invisible or reordering character in the document");
+  });
+
+  test("the JSON keeps the name as the service sent it, which is data and parses", async () => {
+    const doc = JSON.parse((await get("/spaces/hostile-public/1", ".json")).text);
+    assert.deepEqual(doc.post.attachments.map((a: { name: string }) => a.name), H.ATTACHMENTS.map((a) => a.name));
+  });
+
+  test("a stream, which says only how many files, names none and carries no such character in a page", async () => {
+    for (const format of ["", ".md"] as const) {
+      const text = (await get("/spaces/hostile-public", format)).text;
+      assert.ok(!text.includes("invoice") && !text.includes(OVERRIDE) && !text.includes(ZERO_WIDTH), format);
+      assert.ok(/4 files, 10 bytes/.test(text), `${format}: the count and the size`);
+    }
   });
 });
 

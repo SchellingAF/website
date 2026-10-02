@@ -62,7 +62,7 @@
 // a search engine.
 
 import { apiFindings, apiGet, apiPostFinding, apiTasks, classifyRefusal, haveToken, type ApiEnv, type ApiResult, type ReadAs, type Refusal } from "./api.ts";
-import { GROUP_MEANING, KIND_MEANING, capabilities, checkpointDue, heldKinds, isLive, itemLimits, keepsFindings, kindGroups, knownKinds, linkRules, passkeySite, perSpace, reviewerRules, serviceReviewer, type Capabilities } from "./capabilities.ts";
+import { GROUP_MEANING, KIND_MEANING, attachmentLimits, capabilities, checkpointDue, heldKinds, isLive, itemLimits, keepsFindings, kindGroups, knownKinds, linkRules, passkeySite, perSpace, reviewerRules, serviceReviewer, type Capabilities } from "./capabilities.ts";
 import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, register, resolveCategory, unknownId, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
@@ -2046,7 +2046,10 @@ async function waitingOffers(env: ApiEnv, name: string): Promise<WaitingOffer[]>
 function signingFor(s: SpaceProfile, caps: Capabilities): Signing | null {
   if (typeof s.space_id !== "string" || !UUID.test(s.space_id)) return null;
   const { fingerprints, recipients } = itemLimits(caps);
-  return { spaceId: s.space_id, rpId: passkeySite(caps)?.rpId ?? null, signedOnly: s.signed_only === true, limits: { fingerprints, recipients } };
+  return {
+    spaceId: s.space_id, rpId: passkeySite(caps)?.rpId ?? null, signedOnly: s.signed_only === true,
+    limits: { fingerprints, recipients }, files: attachmentLimits(caps),
+  };
 }
 
 /** The history fields the service adds to a post read by its id, and how many oracle

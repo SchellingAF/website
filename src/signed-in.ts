@@ -10,7 +10,7 @@ import type { ApiEnv, Refusal } from "./api.ts";
 import { formShell, resultHtml } from "./me-render.ts";
 import type { Shell, Viewer } from "./render.ts";
 import type { Session } from "./session.ts";
-import { HAND_OVER_CODE, INVITE_CODE, LINK_CODE, NAME, SPACE_NAME } from "./grammar.ts";
+import { HAND_OVER_CODE, INVITE_CODE, LINK_CODE, MEDIA_TYPE, NAME, SPACE_NAME, visibleName } from "./grammar.ts";
 
 /** What src/messages.ts, src/export.ts and src/connect.ts need from src/me.ts: the
  *  session's reads, and a refusal that can end the session behind a dead token. */
@@ -212,6 +212,113 @@ export async function readForm(request: Request): Promise<URLSearchParams | null
     return new URLSearchParams(await request.text());
   } catch {
     return null;
+  }
+}
+
+/**
+ * A post form that may carry files: read as a multipart form when it is one, which is the
+ * one shape of form that carries a file, and as a URL-encoded form otherwise. Its text
+ * fields come back as a form read by readForm() is, and each file a person chose beside
+ * them, in the order the form sent them. A file field left empty sends a part with no name
+ * and no bytes, which is no file. Null when it is neither shape, or a multipart body the
+ * runtime cannot read: the caller says the form expired, as it does for any other.
+ */
+export async function readFormWithFiles(request: Request): Promise<{ form: URLSearchParams; files: File[] } | null> {
+  if (!(request.headers.get("Content-Type") ?? "").toLowerCase().startsWith("multipart/form-data")) {
+    const form = await readForm(request);
+    return form ? { form, files: [] } : null;
+  }
+  try {
+    const sent = await request.formData();
+    const form = new URLSearchParams();
+    const files: File[] = [];
+    for (const [field, value] of sent.entries()) {
+      if (typeof value === "string") form.append(field, value);
+      else if (value.name !== "" || value.size > 0) files.push(value);
+    }
+    return { form, files };
+  } catch {
+    return null;
+  }
+}
+
+/** The name a file is attached under: the file's own name, exactly as the browser sent it.
+ *  The service holds a name to its own rules (no control or format character, no slash or
+ *  backslash, no leading dot, at most 255 bytes) and says which one a name breaks, and the
+ *  form shows that refusal, so nothing is changed here and a person never finds a file
+ *  attached under a name other than the one it has. A part with no name at all is "file". */
+export const attachmentName = (raw: string): string => (raw === "" ? "file" : raw);
+
+/** The media type a file is attached with: the type its part came with, without any
+ *  parameter, when it is a lowercase type and subtype the service takes, else a file of no
+ *  stated type. The service serves every file the same way whatever this says. */
+export function attachmentType(raw: string): string {
+  const type = raw.split(";")[0]!.trim().toLowerCase();
+  return type.length >= 3 && type.length <= 127 && MEDIA_TYPE.test(type) ? type : "application/octet-stream";
+}
+
+/** A file ready to go: what it is attached as, and its bytes, which the site holds for as
+ *  long as one request takes. */
+export interface PreparedFile { sha256: string; name: string; media_type: string; bytes: Uint8Array<ArrayBuffer> }
+
+const hexOf = (bytes: ArrayBuffer): string => Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * The files of a form, held to the service's own limits, hashed and named: or a sentence
+ * saying what is wrong, said before anything is uploaded or posted. More files than a post
+ * carries, one empty or too large, two with one name, and the same bytes twice are each
+ * refused here, because the service would refuse them after the files had been sent.
+ */
+export async function prepareFiles(
+  files: File[], rules: { perPost: number; fileBytes: number },
+): Promise<{ ok: true; files: PreparedFile[] } | { ok: false; why: string }> {
+  if (files.length > rules.perPost) {
+    return { ok: false, why: `A post carries at most ${rules.perPost} files, and this one has ${files.length}. Nothing was posted.` };
+  }
+  const out: PreparedFile[] = [];
+  for (const file of files) {
+    const name = attachmentName(file.name);
+    const shown = visibleName(name);
+    if (file.size === 0) return { ok: false, why: `The file ${shown} is empty, and the service takes no empty file. Nothing was posted.` };
+    if (file.size > rules.fileBytes) {
+      return { ok: false, why: `The file ${shown} is ${file.size.toLocaleString("en-US")} bytes, and a file is at most ${rules.fileBytes.toLocaleString("en-US")}. Nothing was posted.` };
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (out.some((f) => f.name === name)) {
+      return { ok: false, why: `Two of the files are named ${shown}. Rename one, and choose the files again. Nothing was posted.` };
+    }
+    const sha256 = hexOf(await crypto.subtle.digest("SHA-256", bytes));
+    if (out.some((f) => f.sha256 === sha256)) {
+      return { ok: false, why: `The same file was chosen twice (${shown}). Choose it once. Nothing was posted.` };
+    }
+    out.push({ sha256, name, media_type: attachmentType(file.type), bytes });
+  }
+  return { ok: true, files: out };
+}
+
+/** The files a post names, as the service takes them: the hash, the name and the type. */
+export const attachmentsOf = (files: PreparedFile[]): { sha256: string; name: string; media_type: string }[] =>
+  files.map(({ sha256, name, media_type }) => ({ sha256, name, media_type }));
+
+/**
+ * A refusal of a file or of a post that names files, in a person's words, or undefined
+ * for a refusal that reads the same as any other. Each number is the service's own, read
+ * from its capability document: none is typed here.
+ */
+export function fileRefusalWords(res: Refusal, caps: { limits?: Record<string, unknown> }): string | undefined {
+  switch (res.code) {
+    case "SEALED_NO_FILES": return "A sealed space takes no files, because the service would hold their bytes as sent. Nothing was uploaded or posted. Post the text, and keep the file where this space's members can reach it.";
+    case "FILE_LIMIT": return "This space holds as many bytes of attached files as it may. Nothing was posted. Attach the file in another space, or keep it elsewhere and name its hash in a fingerprint.";
+    case "ATTACHMENT_NOT_FOUND": return "A file's upload was no longer there when the post was made, so nothing was posted. Choose the files again and press Post.";
+    case "TOO_LARGE": return "A file is larger than the service takes, so nothing was posted.";
+    case "RATE_LIMITED": {
+      const a = (caps.limits?.attachments ?? {}) as Record<string, unknown>;
+      const n = (v: unknown): string | null => (Number.isSafeInteger(v) && (v as number) > 0 ? (v as number).toLocaleString("en-US") : null);
+      const day = n(a.bytes_per_key_per_day);
+      const first = n(a.bytes_per_key_first_day);
+      return `Too many files or too many bytes in a short time, so nothing was posted.${day ? ` A key uploads at most ${day} bytes of files a day${first ? `, and ${first} on its first day` : ""}.` : ""} Wait, and try again later.`;
+    }
+    default: return undefined;
   }
 }
 

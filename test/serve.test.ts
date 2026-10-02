@@ -310,6 +310,24 @@ describe("the server", () => {
     }
   });
 
+  test("a space's post form that carries files is allowed a larger body, as a multipart form and at that address alone", { timeout: 5000 }, async () => {
+    const posts = "/me/spaces/some-space/posts";
+    const multipart = { "Content-Type": "multipart/form-data; boundary=x" };
+    // Four files of 256 KiB and the fields beside them go through to the handler...
+    const within = await send({ method: "POST", path: posts, headers: multipart, body: "x".repeat(1536 * KIB) });
+    assert.equal(within.status, 303, "1.5 MiB of files and fields is read, and the handler sends a visitor with no session to connect");
+    // ...and not a byte more, nor the same body to any other address, nor as any other kind of form.
+    for (const [pathname, headers, bytes] of [
+      [posts, multipart, 1536 * KIB + 1],
+      ["/me/new", multipart, 640 * KIB + 1],
+      [posts, { "Content-Type": "application/x-www-form-urlencoded" }, 640 * KIB + 1],
+    ] as const) {
+      const r = await send({ method: "POST", path: pathname, headers: { ...headers, "Content-Length": String(bytes) }, withhold: true });
+      assert.equal(r.status, 413, `${pathname} ${headers["Content-Type"]}`);
+      assert.equal(r.headers.connection, "close");
+    }
+  });
+
   test("hands a form within its limit to the handler", async () => {
     const r = await send({ method: "POST", path: "/me/new", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "csrf=x" });
     assert.equal(r.status, 303);

@@ -25,6 +25,24 @@ export const KEY_ID = /^[0-9a-f]{64}$/;
  *  a token's id. KEY_ID has the same shape and means a key. */
 export const HEX32 = /^[0-9a-f]{64}$/;
 
+/** The media type an attachment names: a lowercase type and subtype and no parameters,
+ *  3 to 127 bytes, as the service holds one (its limits.attachments.media_type_bytes). */
+export const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
+
+/** What makes a name read as another, or not at all: a control, a format character (a
+ *  direction override, a zero-width space, a byte order mark), a line or paragraph
+ *  separator, and a lone surrogate. The service refuses a file name that carries one,
+ *  except the zero-width non-joiner and joiner (U+200C, U+200D), which Persian and Indic
+ *  names need and which are shown as they are. */
+const HIDDEN_IN_A_NAME = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/gu;
+
+/** A file name or type as a page shows it: every character above written out as its code
+ *  point, such as <U+202E>, so a name reads as it is spelled and nothing in it reorders the
+ *  words around it. The service's own refusal of such a name is the rule; this is for a
+ *  name it recorded before that, or one a service we do not control sends. */
+export const visibleName = (text: string): string =>
+  text.replace(HIDDEN_IN_A_NAME, (ch) => `<U+${(ch.codePointAt(0) ?? 0xfffd).toString(16).toUpperCase().padStart(4, "0")}>`);
+
 /** A generation of a sealed space's key: from 1, no leading zero, at most 18 digits. */
 export const GENERATION = /^[1-9]\d{0,17}$/;
 

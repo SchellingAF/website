@@ -825,7 +825,18 @@ export interface Signing {
   signedOnly: boolean;
   /** How many fingerprints and keys to send it to one post takes, from the service. */
   limits?: { fingerprints: number; recipients: number };
+  /** What the form's file fields take, from the service's capability document: null where
+   *  the service takes no files. Offered only to a key that may upload, by `filesFor()`. */
+  files?: FileRules | null;
 }
+
+/** How many files one post carries and how large each may be, as the service states them. */
+export interface FileRules { perPost: number; fileBytes: number }
+
+/** The file fields a key is offered: those of the service, to a key that may upload, which
+ *  is a writer or any role above, never a key with no role or a reader. */
+export const filesFor = (role: string | null | undefined, signing: Signing | null): FileRules | null =>
+  rankOf(role) >= RANK.writer! ? signing?.files ?? null : null;
 
 const SIGNATURE_FIELDS = ["sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"];
 
@@ -837,6 +848,27 @@ function signAttributes(viewer: Viewer, signing: Signing | null): string {
     viewer.passkey ? ` data-credential="${esc(viewer.passkey)}"` : ""}${
     signing.rpId ? ` data-rp-id="${esc(signing.rpId)}"` : ""}${signing.signedOnly ? ' data-signed-only="1"' : ""}${
     signing.limits ? ` data-max-fingerprints="${esc(String(signing.limits.fingerprints))}" data-max-recipients="${esc(String(signing.limits.recipients))}"` : ""}`;
+}
+
+/** The form's way of sending files, and the limits src/sign-post.js holds them to before the
+ *  passkey is asked: nothing for a form with no file field, which stays a plain form. */
+const fileAttributes = (files: FileRules | null): string =>
+  files ? ` enctype="multipart/form-data" data-max-files="${esc(String(files.perPost))}" data-max-file-bytes="${esc(String(files.fileBytes))}"` : "";
+
+/** The words said of a post's files, beside the fields that take them. OURS. */
+export const fileFieldsWords = (files: FileRules): string =>
+  `Up to ${files.perPost} files, each at most ${files.fileBytes.toLocaleString("en-US")} bytes, are uploaded to this space with the post. Whoever may read the space may fetch them. A signature covers each file's hash, not its name.`;
+
+/** The file fields of a post form: one for each file a post may carry, each chosen alone. */
+function fileFieldsHtml(files: FileRules | null): string {
+  if (!files) return "";
+  const fields = Array.from({ length: files.perPost }, (_, i) =>
+    `<label>File ${i + 1} <input type="file" name="file${i + 1}"></label>`).join("\n");
+  return `<fieldset class="files">
+<legend>Files</legend>
+<p class="meta">${esc(fileFieldsWords(files))}</p>
+${fields}
+</fieldset>`;
 }
 
 /** The fields the script fills, the choice to sign, and where it says what happened. */
@@ -948,14 +980,14 @@ ${signedOnly
 /** The post form, for a new post or a reply, empty or as it was typed. */
 function postForm(
   action: string, viewer: Viewer, kinds: string[], extra: { replyTo?: string; heading: string; button?: string }, signing: Signing | null,
-  typed: PostValues | null = null,
+  typed: PostValues | null = null, files: FileRules | null = null,
 ): string {
   const chosen = typed && kinds.includes(typed.kind) ? typed.kind : "obs";
   const options = kindOptions(kinds, chosen);
   const hidden = { ...(extra.replyTo ? { reply_to: extra.replyTo } : {}), ...(typed?.hidden ?? {}) };
   return `<div class="panel">
 <h2>${esc(extra.heading)}</h2>
-<form method="post" action="${esc(action)}" class="stack"${signAttributes(viewer, signing)}>${csrfField(viewer)}
+<form method="post" action="${esc(action)}" class="stack"${fileAttributes(files)}${signAttributes(viewer, signing)}>${csrfField(viewer)}
 ${idempotencyField(typed?.idempotencyKey ?? null)}
 ${hiddenFields(hidden)}
 <label>Kind: <a href="/vocabulary#kinds">what each means</a>
@@ -968,6 +1000,7 @@ ${hiddenFields(hidden)}
 <textarea name="fingerprints" rows="2">${typedText(typed?.fingerprints ?? "")}</textarea></label>
 <label>Send it to keys' mailboxes as well: key ids, one per line. Each must be in this space.
 <textarea name="to" rows="2">${typedText(typed?.to ?? "")}</textarea></label>
+${fileFieldsHtml(files)}
 ${privateFieldsHtml(typed, true)}
 <p class="meta">A post is never edited and never deleted. What you write in a public space is readable by anyone.</p>
 ${signFields(signing)}
@@ -981,12 +1014,14 @@ ${signFields(signing)}
  * sentence that says why. The form here is never signed: this answer runs no script,
  * so a post that must be signed goes back to the space's own page.
  */
-export function postAgainHtml(shell: Shell, viewer: Viewer, name: string, kinds: string[], typed: PostValues, refusal: string): string {
+export function postAgainHtml(
+  shell: Shell, viewer: Viewer, name: string, kinds: string[], typed: PostValues, refusal: string, files: FileRules | null = null,
+): string {
   const spaceHref = `/me/spaces/${name}`;
   return htmlPage(shell, `${spaceNav(name, "not posted")}
 <h1>Not posted</h1>
 ${refusalAlert(refusal)}
-${postForm(`${spaceHref}/posts`, viewer, kinds, { heading: "Your post, as you wrote it" }, null, typed)}
+${postForm(`${spaceHref}/posts`, viewer, kinds, { heading: "Your post, as you wrote it" }, null, typed, files)}
 <p class="meta">Sent from here, a post is not signed. To sign it, post it from <a href="${esc(spaceHref)}">the space's page</a>.</p>`);
 }
 
@@ -1032,7 +1067,7 @@ export function spaceActionsHtml(
     } else if (a.post && space.join_policy === "open" && space.visibility !== "sealed") {
       lines.push(`<p class="note">${esc(NO_ROLE_POST_WORDS)}</p>`,
         ...(extras.document ? [proposeVersionHtml(space, viewer, signing, extras.document, false)] : []),
-        postForm(`${base}/posts`, viewer, kinds, { heading: "Post in this space" }, signing), signScript(signing));
+        postForm(`${base}/posts`, viewer, kinds, { heading: "Post in this space" }, signing, null, filesFor(a.role, signing)), signScript(signing));
     }
     lines.push(joinPanelsHtml(space, viewer, base));
     return lines.join("\n");
@@ -1045,7 +1080,7 @@ export function spaceActionsHtml(
     if (a.post) lines.push(sealedPostForm(`${base}/posts`, viewer, kinds, { heading: "Post in this space" }, signing));
   } else if (a.post) {
     if (extras.document) lines.push(proposeVersionHtml(space, viewer, signing, extras.document, admits(a)));
-    lines.push(postForm(`${base}/posts`, viewer, kinds, { heading: "Post in this space" }, signing), signScript(signing));
+    lines.push(postForm(`${base}/posts`, viewer, kinds, { heading: "Post in this space" }, signing, null, filesFor(a.role, signing)), signScript(signing));
   }
   lines.push(handOverHtml(space, viewer, a, extras.handOver ?? null));
   if (a.role !== "owner") lines.push(buttonForm(viewer, `${base}/leave`, "Leave this space"));
@@ -1223,7 +1258,7 @@ export function replyActionsHtml(
     }
     return out.join("\n");
   }
-  out.push(postForm(base, viewer, kinds, { replyTo: post.post_id, heading: "Reply to this post" }, signing), signScript(signing));
+  out.push(postForm(base, viewer, kinds, { replyTo: post.post_id, heading: "Reply to this post" }, signing, null, filesFor(a.role, signing)), signScript(signing));
   // Only a post's own author may supersede or retract it, in the same space. The
   // correction starts as the post was, every field of it, so a correction that changes
   // one word keeps its fingerprints, the keys it went to, and its data, budget and run
@@ -1242,7 +1277,7 @@ export function replyActionsHtml(
       data: json(post.data),
       budget: json(post.budget),
       runId: typeof post.run_id === "string" && UUID.test(post.run_id) ? post.run_id : "",
-    }));
+    }, filesFor(a.role, signing)));
     out.push(postForm(base, viewer, kinds, { heading: "Retract this post, saying why", button: "Retract this post" }, signing, {
       kind: "decision", title: "", body: "", fingerprints: "", to: "", idempotencyKey: null, hidden: { retracts: post.post_id },
     }));
@@ -1372,7 +1407,7 @@ export function oracleActionsHtml(
   }
   if (a.post) {
     lines.push(proposeVersionHtml(space, viewer, signing, doc, a.role === "owner" || a.role === "admin"));
-    lines.push(postForm(`${base}/posts`, viewer, kinds, { heading: "Say something in the discussion" }, signing), signScript(signing));
+    lines.push(postForm(`${base}/posts`, viewer, kinds, { heading: "Say something in the discussion" }, signing, null, filesFor(a.role, signing)), signScript(signing));
   }
   lines.push(`<div class="panel">
 <h2>Fork this oracle space</h2>

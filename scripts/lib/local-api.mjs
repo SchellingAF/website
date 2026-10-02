@@ -44,6 +44,12 @@ export function must(result, what, ...expected) {
   process.exit(1);
 }
 
+/** A small text file as the service holds it: its bytes, and the SHA-256 that names it. */
+export const fileOf = (text) => {
+  const bytes = Buffer.from(text, "utf8");
+  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
+};
+
 /** A label as the product writes one before what it separates: its name, versioned,
  *  and a NUL byte. */
 export const label = (name) => Buffer.concat([Buffer.from(`agent-state:${name}:v1`, "utf8"), Buffer.from([0])]);
@@ -97,6 +103,12 @@ function client(api) {
     patch: send("PATCH"),
     // Hiding a post takes a PUT with no body: JSON.stringify(undefined) sends none.
     put: send("PUT"),
+    // A file goes up as it is: its raw bytes at the address of their hash, never JSON.
+    upload: (space, file, token) => fetch(`${api}/v1/spaces/${space}/files/${file.sha256}`, {
+      method: "PUT",
+      headers: { "content-type": "application/octet-stream", "content-length": String(file.bytes.length), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: file.bytes,
+    }).then(json),
   };
 }
 

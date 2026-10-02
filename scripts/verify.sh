@@ -1571,8 +1571,11 @@ print("ok" if items and all(i.get(field) == want for i in items) else "got {}".f
   else
     seqs='import json,sys; print(" ".join(p["seq"] for p in json.load(sys.stdin)["posts"]))'
     got=$(curl -s "$SITE/spaces/public-findings/standing.json" | python3 -c "$seqs" 2>&1)
-    [ "$got" = "9 6 5 4 3 1" ] && ok "what stands leaves out what was replaced or retracted, newest first" \
-      || bad "what stands leaves out what was replaced or retracted, newest first" "got '$got'"
+    # #10, the post with a file, follows the dossier where the demo seed attaches files.
+    case "$got" in
+      "9 6 5 4 3 1"|"10 9 6 5 4 3 1") ok "what stands leaves out what was replaced or retracted, newest first" ;;
+      *) bad "what stands leaves out what was replaced or retracted, newest first" "got '$got'" ;;
+    esac
     got=$(curl -s "$SITE/spaces/public-findings/standing.json?kind=dossier" | python3 -c "$seqs" 2>&1)
     [ "$got" = "9" ] && ok "the latest saved state is the newest dossier" || bad "the latest saved state is the newest dossier" "got '$got'"
     expect_body "a space's page links its latest saved state" "$SITE/spaces/public-findings" 'href="/spaces/public-findings/standing?kind=dossier"' -F
@@ -1668,6 +1671,87 @@ print("ok" if items and all(i.get(field) == want for i in items) else "got {}".f
 
   # ---- the words, from a space page
   expect_body "a space page links what its kinds mean" "$SITE/spaces/public-findings" 'href="/vocabulary#kinds"'
+fi
+
+# ---- a post's files. From the demo seed, which attaches one small text file to a signed
+# post of the public fixture (#10) and one to a post of a private space, where the service
+# takes files. A page links a file at the service's public name, so this asks for the bytes at
+# the address this run asks the product at, by the path the page's own link carries.
+FILE_POST="$SITE/spaces/public-findings/10"
+file_info=$(curl -s "$FILE_POST.json" | python3 -c '
+import json,sys
+try:
+    a = (json.load(sys.stdin).get("post") or {}).get("attachments") or []
+except ValueError:
+    a = []
+print("{} {}".format(a[0]["sha256"], a[0]["name"]) if a else "")' 2>/dev/null)
+if [ -z "$file_info" ]; then
+  skipped "a post's files are listed on its page, fetched at the service, and a private space's are not" \
+    "the demo's post with a file (public-findings #10) is not in the database: the service takes no files, or it was seeded before it did. Start the product on a fresh database and run: npm run seed"
+else
+  file_hash=${file_info%% *}
+  file_name=${file_info#* }
+  expect_body "a post's page lists its file: name and media type" "$FILE_POST" "<code>$file_name</code> &middot; <code>text/plain</code>" -F
+  expect_body "its hash is a sha256.file tag that links the search for it" "$FILE_POST" \
+    "<a class=\"tag\" href=\"/seek?fingerprint=sha256.file%3A$file_hash\">sha256.file:$file_hash</a> &middot; <a href=" -F
+  expect_body "its markdown lists the file as fingerprints are listed" "$FILE_POST.md" \
+    "^- attachment: \`$file_name\`, \`text/plain\`, [0-9]* bytes, \`sha256.file:$file_hash\`, fetch $NAMED_API/v1/spaces/public-findings/files/$file_hash\$"
+  expect_body "its page says the names and types are as the service recorded them, not signed" "$FILE_POST" "Names and types are as the service recorded them, not signed" -F
+  got=$(curl -s "$FILE_POST.json" | python3 -c '
+import json,sys
+p = json.load(sys.stdin)["post"]
+a = p.get("attachments") or []
+print("ok" if p.get("attachment_count") == len(a) == 1 and p.get("attachment_bytes") == a[0]["bytes"] and set(a[0]) == {"sha256", "name", "media_type", "bytes"} else p)' 2>&1)
+  [ "$got" = "ok" ] && ok "its JSON carries the count, the size and each file as the service gives them" \
+    || bad "its JSON carries the count, the size and each file as the service gives them" "got $got"
+  expect_body "the space's stream says how many files a post carries" "$SITE/spaces/public-findings" "1 file, [0-9,]* bytes" -E
+  verdict=$(curl -s "$FILE_POST.json" | python3 -c '
+import json,sys
+v = json.load(sys.stdin).get("verification") or {}
+print("ok" if v.get("signature") == "verified" and v.get("chain") == "holds" and not v.get("problems") else v)' 2>&1)
+  [ "$verdict" = "ok" ] && ok "a signed post with a file still verifies, in its chain" \
+    || bad "a signed post with a file still verifies, in its chain" "got $verdict"
+  refuse_body "a public page's file is never proxied: no link on it goes to this site's own address" "$FILE_POST" "href=\"/[a-z0-9/]*/files/" -E
+  for f in "" .md .json; do
+    refuse_body "the post's page$f offers no file by an address at this site" "$FILE_POST$f" "$SITE/[a-z0-9/]*/files/" -E
+  done
+
+  # The link on the page, then the service's own answer to it.
+  link=$(curl -s "$FILE_POST" | sed -n 's/.*<a href="\([^"]*\/files\/[0-9a-f]*\)">fetch<\/a>.*/\1/p' | head -1)
+  want="$NAMED_API/v1/spaces/public-findings/files/$file_hash"
+  [ "$link" = "$want" ] && ok "a public post's page links its file at the service's public name" \
+    || bad "a public post's page links its file at the service's public name" "wanted $want, got '$link'"
+  fetch="$API_ORIGIN/v1/spaces/public-findings/files/$file_hash"
+  expect 200 "the service gives the file to a caller with no key" "$fetch"
+  expect_header "the file is a download" content-disposition "attachment" "$fetch"
+  expect_header "nothing sniffs its type" x-content-type-options "nosniff" "$fetch"
+  expect_header "nothing runs or loads if a browser renders it" content-security-policy "default-src 'none'; sandbox" "$fetch"
+  expect_header "no search engine lists it" x-robots-tag "noindex" "$fetch"
+  expect_header "no page on another site embeds it" cross-origin-resource-policy "same-origin" "$fetch"
+  refuse_header "its name is the hash, never the name recorded for it" content-disposition "$file_name" "$fetch"
+  got=$(curl -s "$fetch" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>&1)
+  [ "$got" = "$file_hash" ] && ok "the bytes the service gives hash to the name they were asked for" \
+    || bad "the bytes the service gives hash to the name they were asked for" "got $got"
+  expect 404 "a hash no post of the space attaches is no file" "$API_ORIGIN/v1/spaces/public-findings/files/0000000000000000000000000000000000000000000000000000000000000000"
+
+  # A private space's file is a member's: no link a browser can follow, and a stranger's
+  # request is told there is no such file, as for a hash nobody uploaded.
+  private_info=$(curl -s "$SITE/inspect/aarch64-wheels/4.json" | python3 -c '
+import json,sys
+try:
+    a = (json.load(sys.stdin).get("post") or {}).get("attachments") or []
+except ValueError:
+    a = []
+print(a[0]["sha256"] if a else "")' 2>/dev/null)
+  if [ -z "$private_info" ]; then
+    skipped "a private space's file is told to a stranger as no file" \
+      "/inspect could not read the private fixture's post with a file (aarch64-wheels #4). Is READER_TOKEN set, and was the database seeded after the service took files?"
+  else
+    expect 404 "a stranger's request for a private space's file is told there is none" "$API_ORIGIN/v1/spaces/aarch64-wheels/files/$private_info"
+    expect_body "a private post's page says a member fetches its files with a key" "$SITE/inspect/aarch64-wheels/4" "A member fetches these with its KEY, at the API." -F
+    refuse_body "and links none" "$SITE/inspect/aarch64-wheels/4" "/v1/spaces/aarch64-wheels/files/" -F
+    expect 404 "a private space's post has no public page, so its file has no public link" "$SITE/spaces/aarch64-wheels/4"
+  fi
 fi
 
 # ---- the same shapes of hostile text, on the pages only a public space reaches
