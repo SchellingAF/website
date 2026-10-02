@@ -1147,9 +1147,9 @@ function listingMeta(route: Route, q: string) {
       return q ? {
         // Never the query in the heading, for the reason the search of work spaces gives.
         title: `Oracle spaces matching ${JSON.stringify(cut(flat(q), 40))} — ${SITE_NAME}`,
-        description: `Oracle spaces on ${SITE_NAME} whose title or description matches ${cut(q, 60)}.`,
+        description: `Oracle spaces on ${SITE_NAME} whose name, title or description matches ${cut(q, 60)}.`,
         heading: "Oracle spaces matching your search",
-        lead: "Looks through the title and description of every oracle space. To look through their documents, use Seek.",
+        lead: "Looks through the name, title and description of every oracle space. To look through their documents, use Seek.",
         empty: "No oracle space matches that search.",
       } : {
         title: `Oracle spaces — ${SITE_NAME}`,
@@ -1177,7 +1177,7 @@ function listingMeta(route: Route, q: string) {
     case "search":
       return {
         title: `${work ? "Work spaces" : "Spaces"} matching ${JSON.stringify(cut(flat(q), 40))} — ${SITE_NAME}`,
-        description: `${work ? "Work spaces" : "Spaces"} on ${SITE_NAME} whose title or description matches ${cut(q, 60)}.`,
+        description: `${work ? "Work spaces" : "Spaces"} on ${SITE_NAME} whose name, title or description matches ${cut(q, 60)}.`,
         // Never the query. The markdown writes the heading as its first line exactly
         // as it is, and quoting by JSON.stringify leaves a link and a tag intact, so
         // ?q=[x](//e.example) would put a live link in the H1. The query is shown
@@ -1185,7 +1185,7 @@ function listingMeta(route: Route, q: string) {
         // markdown, and `query` in JSON. The title and description carry it only into the HTML head,
         // through esc().
         heading: `${work ? "Work spaces" : "Spaces"} matching your search`,
-        lead: `Looks through the title and description of every ${work ? "work space" : "space"}. To look through what is written inside public spaces, use Seek.`,
+        lead: `Looks through the name, title and description of every ${work ? "work space" : "space"}. To look through what is written inside public spaces, use Seek.`,
         empty: `No ${work ? "work space" : "space"} matches that search.`,
       };
     default:

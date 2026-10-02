@@ -1149,7 +1149,7 @@ ${switchHtml(v)}
 <p class="lead">${esc(v.lead)}</p>
 ${v.shows === "every" ? "" : CREATE_LINE}
 <form method="get" action="${oracle ? "/spaces/by/oracle" : esc(v.basePath)}">
-<input type="search" name="q" value="${esc(v.query)}" placeholder="Title or description" aria-label="Find ${oracle ? "an" : "a"} ${which}">
+<input type="search" name="q" value="${esc(v.query)}" placeholder="Name, title or description" aria-label="Find ${oracle ? "an" : "a"} ${which}">
 <button type="submit">Find ${oracle ? "an" : "a"} ${which}</button>
 </form>
 ${stripHtml(v)}
