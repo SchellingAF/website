@@ -67,7 +67,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
-import { NO_DOCUMENT, UNREAD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, vouched, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
+import { NO_DOCUMENT, UNREAD, WITHHELD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, vouched, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -2791,10 +2791,18 @@ const PROPOSALS_SHOWN = 100;
 const PROPOSAL_LIST_PAGES = 10;
 /** Documents read at once: the most a caller with no key may have open, which is two. */
 const PROPOSAL_READS_AT_ONCE = 2;
-/** How long one build may go on reading documents; those it did not reach are said so. */
+/** How long one build may go on starting reads, the list's pages, the owner and the documents
+ *  together; what it did not reach is said so. A read already open when it runs out may take
+ *  as long as the site waits for any (six seconds), so a visitor who holds a build waits
+ *  twenty-six seconds at the very most. */
 const PROPOSAL_READ_BUDGET_MS = 20_000;
 
 type ProposalsRead = { ok: true; view: ProposalsView } | { ok: false; why: Pick<Refusal, "code" | "message"> };
+
+/** Whether the service said to slow down: the product answers a read over its window or its
+ *  share BUSY, with a 503, and may answer RATE_LIMITED or a 429. */
+const toldToSlowDown = (res: Pick<Refusal, "code" | "status">): boolean =>
+  res.code === "BUSY" || res.code === "RATE_LIMITED" || res.status === 429;
 
 /** A space found by the list, before its document is read. */
 type Found = Omit<ProposalRow, "status">;
@@ -2812,9 +2820,14 @@ type Found = Omit<ProposalRow, "status">;
  * Each document is then read for its status, and that is what makes the page dear: the
  * service rations reads per key, or per address with none, and a caller with no key may
  * have two open at once. So they are read two at a time, no more than PROPOSALS_SHOWN of
- * them within PROPOSAL_READ_BUDGET_MS, and none after the service says to slow down. A
- * proposal whose document was not read says so and the page is held for a minute only. A
- * space that keeps no document answers NOT_AN_ORACLE, which is "no document yet".
+ * them, and none after the service says to slow down. A proposal whose document was not
+ * read says so and the page is held for a minute only. A space that keeps no document
+ * answers NOT_AN_ORACLE, which is "no document yet"; one whose current version is
+ * withheld or hidden has a version and no text, which is not that, and is said as unread.
+ *
+ * ONE DEADLINE for the whole build, PROPOSAL_READ_BUDGET_MS from its start: no read is
+ * started after it, whether the list's next page, the owner or a document. A list it cut
+ * short says there are more, and a document it did not reach says it was not read.
  *
  * WHO SET A STATUS. Any key may open a proposal and write its document, so a decision counts
  * only in a version posted by the owner of the space proposals, whom the build reads once
@@ -2822,13 +2835,15 @@ type Found = Omit<ProposalRow, "status">;
  * vouched() compares the two. When the owner cannot be read, a decision is not shown at all.
  */
 async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
+  const until = Date.now() + PROPOSAL_READ_BUDGET_MS;
+  const late = (): boolean => Date.now() > until;
   const found = new Map<string, Found>();
   // The cursor is exclusive: the name just below "proposal-" is "proposal", which no
   // proposal can be called, so the first page starts at the first proposal.
   let cursor: string | null = "proposal";
   let cut = false;
   for (let pages = 0; cursor !== null; pages++) {
-    if (pages === PROPOSAL_LIST_PAGES) { cut = true; break; }
+    if (pages === PROPOSAL_LIST_PAGES || (pages > 0 && late())) { cut = true; break; }
     const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT), category: PROPOSAL_CATEGORY, oracle: "false", after: cursor });
     const res = await apiGet<unknown>(env, `/v1/spaces?${params}`, as);
     if (!res.ok) return { ok: false, why: res };
@@ -2856,19 +2871,26 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   const listed = all.slice(0, PROPOSALS_SHOWN);
 
   const statuses: Status[] = listed.map(() => UNREAD);
-  const owner = listed.length ? await proposalsOwner(env, as) : null;
-  const until = Date.now() + PROPOSAL_READ_BUDGET_MS;
-  let taken = 0;
   let slowDown = false;
+  let owner: string | null = null;
+  if (listed.length && !late()) {
+    const asked = await proposalsOwner(env, as);
+    owner = asked.owner;
+    slowDown = asked.slow;
+  }
+  let taken = 0;
   const worker = async (): Promise<void> => {
     for (let i = taken++; i < listed.length; i = taken++) {
-      if (slowDown || Date.now() > until) return;
+      if (slowDown || late()) return;
       const res = await apiGet<unknown>(env, `/v1/spaces/${listed[i]!.name}/document`, as);
       if (res.ok) {
         const current = readableDocument(res.data);
-        statuses[i] = vouched(readStatus(current.text), current.version?.author ?? "", owner);
+        // A current version with no text is withheld or hidden, which is not no document.
+        statuses[i] = current.version !== null && current.text === null
+          ? WITHHELD
+          : vouched(readStatus(current.text), current.version?.author ?? "", owner);
       } else if (res.code === "NOT_AN_ORACLE") statuses[i] = NO_DOCUMENT;
-      else if (res.status === 429) slowDown = true;
+      else if (toldToSlowDown(res)) slowDown = true;
     }
   };
   await Promise.all(Array.from({ length: PROPOSAL_READS_AT_ONCE }, worker));
@@ -2877,27 +2899,61 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
 }
 
 /** The owner of the space proposals, as the service gives it, or null when it cannot be read
- *  or is not a key's id: one read for the whole build. */
-async function proposalsOwner(env: ApiEnv, as: ReadAs): Promise<string | null> {
+ *  or is not a key's id: one read for the whole build. `slow` says the service told it to
+ *  slow down, which stops the documents' reads too. */
+async function proposalsOwner(env: ApiEnv, as: ReadAs): Promise<{ owner: string | null; slow: boolean }> {
   const res = await apiGet<unknown>(env, `/v1/spaces/${PROPOSALS_SPACE}`, as);
-  const owner = res.ok ? textOrNull(record(res.data).owner) : null;
-  return owner !== null && KEY_ID.test(owner) ? owner : null;
+  if (!res.ok) return { owner: null, slow: toldToSlowDown(res) };
+  const owner = textOrNull(record(res.data).owner);
+  return { owner: owner !== null && KEY_ID.test(owner) ? owner : null, slow: false };
+}
+
+/** What a build left, as the page cache holds it: the view, and for how many seconds. */
+interface HeldReads { view: ProposalsView; seconds: number }
+/** A build, and how many seconds of its hold are left. */
+type Built = { ok: true; view: ProposalsView; left: number } | { ok: false; why: Pick<Refusal, "code" | "message"> };
+
+/** Where the reads of one address are held, beside the pages drawn from them and never
+ *  under a key that is a page's. */
+const heldKey = (origin: string): string => `${origin}/proposals#reads`;
+
+/** The reads held for this address, with what is left of their hold, or null. */
+async function heldProposals(origin: string): Promise<Built | null> {
+  const hit = cacheGet(heldKey(origin));
+  if (!hit) return null;
+  const held = (await hit.json()) as HeldReads;
+  const left = held.seconds - Number(hit.headers.get("Age") ?? 0);
+  return left > 0 ? { ok: true, view: held.view, left } : null;
 }
 
 /** The build under way, if one is: a visitor who comes while it is being made waits for it
- *  rather than starting another, so a crowd of readers, or the page's three formats asked at
- *  once, cost the service one build and not one each. What it reads does not depend on the
- *  address asked, so every address shares it. */
-let buildingProposals: Promise<ProposalsRead> | null = null;
+ *  rather than starting another. What it reads does not depend on the address asked, so
+ *  every address shares it. */
+let buildingProposals: Promise<Built> | null = null;
+
+/**
+ * A build, held. What it read is kept for as long as a page drawn from it is, ten minutes, or
+ * the minute a page is held that lacks a document it could not read, so the page, its
+ * markdown and its JSON share one set of reads, and a crowd costs the service one build.
+ * A page drawn from reads held for some time is held only for what is left of it, so no page
+ * outlives the reads it was drawn from. A build that failed is never held.
+ */
+function buildProposals(origin: string, env: ApiEnv, as: ReadAs): Promise<Built> {
+  return (buildingProposals ??= (async (): Promise<Built> => {
+    const read = await readProposals(env, as);
+    if (!read.ok) return read;
+    const seconds = read.view.rows.some((r) => r.status.kind === "unread") ? PARTIAL_SECONDS : TTL.proposals;
+    const held: HeldReads = { view: read.view, seconds };
+    await cachePut(heldKey(origin), new Response(JSON.stringify(held)), seconds);
+    return { ok: true, view: read.view, left: seconds };
+  })().finally(() => { buildingProposals = null; }));
+}
 
 async function proposalsPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
   const shell = shellFor(route, url, `Proposals — ${SITE_NAME}`, `Every request to change ${SITE_NAME}, newest first, with its status.`);
-  const going = buildingProposals ?? (buildingProposals = readProposals(env, route.readAs).finally(() => { buildingProposals = null; }));
-  const read = await going;
+  const read = (await heldProposals(url.origin)) ?? (await buildProposals(url.origin, env, route.readAs));
   if (!read.ok) return unavailable(route, shell, read.why.code, read.why.message);
-  return partial(
-    drawn(route, shell, read.view, { html: proposalsHtml, md: proposalsMarkdown, json: proposalsJson }),
-    read.view.rows.some((r) => r.status.kind === "unread"));
+  return holdFor(drawn(route, shell, read.view, { html: proposalsHtml, md: proposalsMarkdown, json: proposalsJson }), read.left);
 }
 
 /**

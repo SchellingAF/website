@@ -26,6 +26,10 @@ export interface Proposal {
   /** The key that posted the document's version: the owner of the space proposals, unless
    *  given. */
   author?: string;
+  /** What the service says of the current version's words: withheld by the operator, hidden by
+   *  the owner or an admin, or only that its text is not there. The version is, and its text is
+   *  not. Needs a document. */
+  unavailable?: "withheld" | "hidden" | "no-text";
   /** Fields of the space's listing over the stand-in's own: a hostile service's, or a space
    *  that is not public. */
   fields?: Json;
@@ -48,6 +52,7 @@ export function proposalWorld(proposals: Proposal[], others: Json[] = []): World
   const spaces: Json[] = [];
   const posts: Record<string, Json[]> = {};
   const versions: Record<string, Json[]> = {};
+  const documentFields: Record<string, Json> = {};
   proposals.forEach((p, n) => {
     const created = p.created ?? "2026-10-01T12:00:00.000Z";
     const author = p.author ?? OWNER;
@@ -68,6 +73,17 @@ export function proposalWorld(proposals: Proposal[], others: Json[] = []): World
         post_id: uuid(n, 1), seq: "1", author, posted_at: created, summary: null, signed: false, state: "current",
         edits: null, same_text_as: null, decision: null,
       }];
+      if (p.unavailable) {
+        // As the product answers a current version whose words it does not give: the version,
+        // marked, and no text.
+        documentFields[p.name] = p.unavailable === "no-text" ? { text: null } : {
+          text: null,
+          version: {
+            post_id: uuid(n, 1), seq: "1", author, posted_at: created, summary: null, signed: false, state: "current",
+            edits: null, same_text_as: null, decided_by: null, unavailable: { state: p.unavailable },
+          },
+        };
+      }
     } else if (p.document === null) {
       space.document = { version: null, pending: 0 };
     }
@@ -76,7 +92,7 @@ export function proposalWorld(proposals: Proposal[], others: Json[] = []): World
   return {
     capabilities: CAPABILITIES, categories: [...CATEGORIES, THIS_SERVICE],
     spaces: [...spaces, ...(others.some((s) => s.name === "proposals") ? [] : [otherSpace("proposals")]), ...others], posts, versions,
-    proofs: {}, checkpoints: {}, peers: {},
+    documentFields, proofs: {}, checkpoints: {}, peers: {},
   };
 }
 

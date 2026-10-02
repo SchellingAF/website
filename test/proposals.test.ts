@@ -9,7 +9,7 @@
 // does not give, a page does not guess: a space with no document says so, and a document read
 // that failed says so on its own row and holds the page for a minute only.
 
-import { describe, test } from "node:test";
+import { describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { json, refusal, service, type Call, type Json } from "./lib/service.ts";
 import { OWNER, STRANGER, otherSpace, proposalText, proposalWorld, type Proposal } from "./lib/proposals.ts";
@@ -443,13 +443,45 @@ describe("a document that could not be read", () => {
     assert.equal(statusOf(rowFor(text, "proposal-b")), "no document yet");
   });
 
-  test("a refusal to slow down stops the reads: the rest are not asked for, and each says so", async () => {
+  // How the product says to slow down: a read over its window or its share is answered BUSY with
+  // a 503; a rate limit may come as RATE_LIMITED or as a bare 429.
+  const SLOW_DOWN: [string, () => Response][] = [
+    ["BUSY with a 503, as the product answers", () => refusal(503, "BUSY")],
+    ["RATE_LIMITED with a 429", () => refusal(429, "RATE_LIMITED")],
+    ["a 429 under any other code", () => refusal(429, "TOO_MANY_READS")],
+  ];
+  for (const [what, make] of SLOW_DOWN) {
+    test(`a refusal to slow down, ${what}, stops the reads: the rest are not asked for, and each says so`, async () => {
+      const calls: string[] = [];
+      answer = failing((name) => { calls.push(name); return make(); });
+      const { res, text } = await ask(`${host()}/proposals`);
+      assert.equal(res.status, 200);
+      assert.ok(calls.length <= 2, `${calls.length} documents were asked for after the service said to slow down`);
+      for (const name of ["proposal-a", "proposal-b", "proposal-c", "proposal-d"]) assert.equal(statusOf(rowFor(text, name)), "status could not be read just now", name);
+    });
+  }
+
+  test("a failure that is not a refusal to slow down stops nothing: the other documents are read", async () => {
     const calls: string[] = [];
-    answer = failing((name) => { calls.push(name); return refusal(429, "RATE_LIMITED"); });
-    const { res, text } = await ask(`${host()}/proposals`);
+    answer = failing((name) => { calls.push(name); return name === "proposal-a" ? refusal(503, "UNAVAILABLE") : null; });
+    const { text } = await ask(`${host()}/proposals`);
+    assert.equal(calls.length, 4, "every document was asked for");
+    assert.equal(statusOf(rowFor(text, "proposal-a")), "status could not be read just now");
+    assert.equal(statusOf(rowFor(text, "proposal-d")), "declined");
+  });
+
+  test("the owner's read told to slow down stops the documents' reads too", async () => {
+    const base = service(proposalWorld(set));
+    const calls: string[] = [];
+    answer = (call) => {
+      if (/\/document$/.test(call.url.pathname)) calls.push(call.url.pathname);
+      return call.url.pathname === "/v1/spaces/proposals" ? refusal(503, "BUSY") : base(call);
+    };
+    const { res, text, h } = await ask(`${host()}/proposals`);
     assert.equal(res.status, 200);
-    assert.ok(calls.length <= 2, `${calls.length} documents were asked for after the service said to slow down`);
+    assert.deepEqual(calls, [], "no document was asked for");
     for (const name of ["proposal-a", "proposal-b", "proposal-c", "proposal-d"]) assert.equal(statusOf(rowFor(text, name)), "status could not be read just now", name);
+    assert.ok(Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]) <= 60);
   });
 
   test("every row is still there, and the next reader is not given the failure for ten minutes", async () => {
@@ -665,13 +697,18 @@ describe("the reads", () => {
     assert.ok(together[0]!.text.includes("proposal-b") && together[2]!.text.includes("proposal-b") && together[3]!.text.includes("proposal-b"));
   });
 
-  test("once a build has ended it is not remembered: another format is its own build", async () => {
+  test("once a build has ended its reads are held: the other formats are drawn from them and cost none", async () => {
     const origin = host();
     answer = service(proposalWorld(set));
-    await ask(`${origin}/proposals.json`);
     const before = fake.calls.length;
-    await ask(`${origin}/proposals.md`);
-    assert.equal(documentsSince(before).length, 4, "each format is its own page, built once");
+    const json = await ask(`${origin}/proposals.json`);
+    const read = fake.calls.length - before;
+    assert.equal(read, 6, "the list, the owner and four documents");
+    const md = await ask(`${origin}/proposals.md`);
+    const html = await ask(`${origin}/proposals`);
+    assert.equal(fake.calls.length - before, read, "the markdown and the page cost no read at all");
+    assert.deepEqual(rows(html.text).map(nameOf), JSON.parse(json.text).items.map((i: Json) => i.name));
+    assert.equal(md.text.match(/^## /gm)?.length, 4);
   });
 });
 
@@ -716,7 +753,7 @@ describe("when the service does not answer", () => {
 describe("how long the page is held", () => {
   const set = [withStatus("proposal-a", "merged", at(3)), withStatus("proposal-b", "proposed", at(2)), withStatus("proposal-c", "declined: no", at(1))];
 
-  test("for ten minutes, so many readers cost one build, and each format is read once", async () => {
+  test("for ten minutes, so many readers cost one build, whatever format each asks for", async () => {
     answer = service(proposalWorld(set));
     const origin = host();
     const before = fake.calls.length;
@@ -725,7 +762,8 @@ describe("how long the page is held", () => {
     assert.equal(fake.calls.length - before, 5, "five readers: one read of the list, one of the owner and one of each document");
     await ask(`${origin}/proposals.json`);
     await ask(`${origin}/proposals.json`);
-    assert.equal(fake.calls.length - before, 10, "the JSON is its own page, built once");
+    await ask(`${origin}/proposals.md`);
+    assert.equal(fake.calls.length - before, 5, "the JSON and the markdown are drawn from the same reads");
     const maxAge = Number(/max-age=(\d+)/.exec(first.h("Cache-Control") ?? "")?.[1]);
     assert.ok(maxAge > 0 && maxAge <= 600, `max-age ${maxAge}`);
     assert.match(first.h("Cache-Control") ?? "", /^public, max-age=\d+, stale-while-revalidate=60$/);
@@ -830,6 +868,209 @@ describe("the link from the spaces page", () => {
     answer = service(proposalWorld([]));
     const page = (await ask(`${host()}/spaces`)).text;
     assert.match(page, /<p class="meta"><a href="\/numbers">Numbers<\/a>: how many keys, spaces, posts and direct messages there are\.<\/p>/);
+  });
+});
+
+describe("a version whose words the service does not give", () => {
+  const set: Proposal[] = [
+    { ...withStatus("proposal-withheld", "merged", at(9)), unavailable: "withheld" },
+    { ...withStatus("proposal-hidden", "merged", at(8)), unavailable: "hidden" },
+    { ...withStatus("proposal-no-text", "merged", at(7)), unavailable: "no-text" },
+    { name: "proposal-none", created: at(6) },
+    { name: "proposal-unversioned", created: at(5), document: null },
+    withStatus("proposal-fine", "merged", at(4)),
+  ];
+
+  test("is said as a status that could not be read, never as no document", async () => {
+    answer = service(proposalWorld(set));
+    const { res, text } = await ask(`${host()}/proposals`);
+    assert.equal(res.status, 200);
+    for (const n of ["withheld", "hidden", "no-text"]) assert.equal(statusOf(rowFor(text, `proposal-${n}`)), "status could not be read just now", n);
+    assert.equal(statusOf(rowFor(text, "proposal-none")), "no document yet");
+    assert.equal(statusOf(rowFor(text, "proposal-unversioned")), "no document yet");
+    assert.equal(statusOf(rowFor(text, "proposal-fine")), "merged");
+    const doc = JSON.parse((await ask(`${host()}/proposals.json`)).text);
+    for (const n of ["withheld", "hidden", "no-text"]) {
+      const item = doc.items.find((i: Json) => i.name === `proposal-${n}`);
+      assert.equal(item.status, null, n);
+      assert.equal(item.status_note, "status could not be read just now", n);
+    }
+    assert.match((await ask(`${host()}/proposals.md`)).text.split(/^## /m).find((p) => p.startsWith("proposal-hidden\n"))!, /^- status: status could not be read just now$/m);
+  });
+
+  test("shows no word of the version, whatever the answer still carries", async () => {
+    // A withheld version, and a text the service should not have sent with it, saying what it said.
+    const base = service(proposalWorld([{ ...withStatus("proposal-leaky", "declined: SECRET-REASON", at(9)), unavailable: "withheld" }]));
+    answer = async (call) => {
+      const res = base(call);
+      if (!/\/document$/.test(call.url.pathname)) return res;
+      return json({ ...(await res.json()), text: proposalText("x", "declined: SECRET-REASON") });
+    };
+    const { text } = await ask(`${host()}/proposals`);
+    assert.equal(statusOf(rowFor(text, "proposal-leaky")), "status could not be read just now");
+    assert.ok(!text.includes("SECRET-REASON"));
+  });
+
+  test("does not shorten how long the page is held, which a document that could not be read does", async () => {
+    answer = service(proposalWorld(set));
+    const withheld = await ask(`${host()}/proposals`);
+    const age = (h: string | null) => Number(/max-age=(\d+)/.exec(h ?? "")?.[1]);
+    assert.ok(age(withheld.h("Cache-Control")) > 60, `held ${age(withheld.h("Cache-Control"))} seconds`);
+    const base = service(proposalWorld(set));
+    answer = (call) => (call.url.pathname === "/v1/spaces/proposal-fine/document" ? new Response("down", { status: 500 }) : base(call));
+    const failed = await ask(`${host()}/proposals`);
+    assert.ok(age(failed.h("Cache-Control")) <= 60);
+  });
+});
+
+/** Runs `body` with the clock under the test's own control, starting at the real time: `tick(ms)`
+ *  moves it on, and nothing else does. What the site reads the time for, the page cache and the
+ *  build's deadline among it, reads this one. */
+async function withClock<T>(body: (tick: (ms: number) => void) => Promise<T>): Promise<T> {
+  mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  try {
+    return await body((ms) => mock.timers.tick(ms));
+  } finally {
+    mock.timers.reset();
+  }
+}
+
+describe("the deadline of a build", () => {
+  const many = (count: number): Proposal[] => Array.from({ length: count }, (_, i) =>
+    withStatus(`proposal-p${String(i).padStart(3, "0")}`, "proposed", new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString()));
+  const after = [otherSpace("proposals"), otherSpace("quiet-notes")];
+  const unreadWords = "status could not be read just now";
+  const maxAgeOf = (h: string | null) => Number(/max-age=(\d+)/.exec(h ?? "")?.[1]);
+
+  test("is twenty seconds for the documents: no read is started after it, and the rest say they were not read", async () => {
+    await withClock(async (tick) => {
+      const base = service(proposalWorld(many(20)));
+      const started: number[] = [];
+      const t0 = Date.now();
+      // Each document takes six seconds to come.
+      answer = (call) => {
+        if (/\/document$/.test(call.url.pathname)) { started.push(Date.now() - t0); tick(6_000); }
+        return base(call);
+      };
+      const { res, text, h } = await ask(`${host()}/proposals`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(started, [0, 6_000, 12_000, 18_000], "four reads, the last started inside the twenty seconds");
+      const said = rows(text).map(statusOf);
+      assert.equal(said.filter((s) => s === "proposed").length, 4);
+      assert.equal(said.filter((s) => s === unreadWords).length, 16);
+      assert.ok(maxAgeOf(h("Cache-Control")) <= 60, "the page is held a minute only");
+    });
+  });
+
+  test("is the same twenty seconds for the list, the owner and the documents together: a list that took them leaves nothing to read", async () => {
+    await withClock(async (tick) => {
+      const base = service(proposalWorld(many(450), after));
+      const reads: string[] = [];
+      // Each page of the list takes twelve seconds.
+      answer = (call) => {
+        if (call.url.pathname === "/v1/spaces" || call.url.pathname === "/v1/spaces/proposals" || /\/document$/.test(call.url.pathname)) reads.push(call.url.pathname);
+        if (call.url.pathname === "/v1/spaces") tick(12_000);
+        return base(call);
+      };
+      const { res, text } = await ask(`${host()}/proposals`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(reads, ["/v1/spaces", "/v1/spaces"], "two pages, and then no page, no owner and no document");
+      // What it had read, newest first, each said not to be read, and the page says there are more.
+      assert.equal(rows(text).length, 100);
+      assert.equal(nameOf(rows(text)[0]!), "proposal-p399", "the third page, p400 on, was never read");
+      assert.ok(rows(text).every((r) => statusOf(r) === unreadWords));
+      assert.ok(text.includes(MORE));
+    });
+  });
+
+  test("takes in the owner's read: one that used it up leaves no document to read", async () => {
+    await withClock(async (tick) => {
+      const base = service(proposalWorld(many(5)));
+      const reads: string[] = [];
+      answer = (call) => {
+        if (call.url.pathname === "/v1/spaces/proposals") tick(25_000);
+        if (/\/document$/.test(call.url.pathname)) reads.push(call.url.pathname);
+        return base(call);
+      };
+      const { res, text } = await ask(`${host()}/proposals`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(reads, [], "no document was asked for");
+      assert.ok(rows(text).every((r) => statusOf(r) === unreadWords));
+    });
+  });
+
+  test("leaves a build that is quick alone: every read is made and nothing says it was not", async () => {
+    await withClock(async (tick) => {
+      const base = service(proposalWorld(many(20)));
+      answer = (call) => { if (/\/document$/.test(call.url.pathname)) tick(500); return base(call); };
+      const { text } = await ask(`${host()}/proposals`);
+      assert.ok(rows(text).every((r) => statusOf(r) === "proposed"));
+      assert.ok(!text.includes(MORE));
+    });
+  });
+});
+
+describe("how long a build's reads are held", () => {
+  const set = [withStatus("proposal-a", "merged", at(4)), withStatus("proposal-b", "proposed", at(3)), withStatus("proposal-c", "accepted", at(2))];
+  const maxAgeOf = (h: string | null) => Number(/max-age=(\d+)/.exec(h ?? "")?.[1]);
+
+  test("for ten minutes, and no page drawn from them is held past the end of them", async () => {
+    await withClock(async (tick) => {
+      const origin = host();
+      answer = service(proposalWorld(set));
+      const first = await ask(`${origin}/proposals.json`);
+      assert.equal(first.res.status, 200);
+      const before = fake.calls.length;
+      // Nine minutes and fifty-nine seconds on, the markdown is drawn from the reads of the JSON, and held for the second left.
+      tick(599_000);
+      const md = await ask(`${origin}/proposals.md`);
+      assert.equal(fake.calls.length, before, "no read");
+      assert.ok(maxAgeOf(md.h("Cache-Control")) <= 2, `held ${maxAgeOf(md.h("Cache-Control"))} seconds`);
+      // Two seconds later they are gone, and the next page reads again.
+      tick(2_000);
+      const html = await ask(`${origin}/proposals`);
+      assert.equal(html.res.status, 200);
+      assert.equal(fake.calls.length - before, 5, "the list, the owner and three documents");
+    });
+  });
+
+  test("for a minute when a document could not be read, in every format", async () => {
+    await withClock(async (tick) => {
+      const origin = host();
+      const base = service(proposalWorld(set));
+      let down = true;
+      answer = (call) => (down && call.url.pathname === "/v1/spaces/proposal-b/document" ? new Response("down", { status: 500 }) : base(call));
+      const html = await ask(`${origin}/proposals`);
+      assert.equal(statusOf(rowFor(html.text, "proposal-b")), "status could not be read just now");
+      const before = fake.calls.length;
+      tick(59_000);
+      down = false;
+      const md = await ask(`${origin}/proposals.md`);
+      assert.equal(fake.calls.length, before, "the markdown is drawn from the same reads");
+      assert.match(md.text, /^- status: status could not be read just now$/m);
+      assert.ok(maxAgeOf(md.h("Cache-Control")) <= 1);
+      tick(2_000);
+      const json = JSON.parse((await ask(`${origin}/proposals.json`)).text);
+      assert.equal(json.items.find((i: Json) => i.name === "proposal-b").status, "proposed", "past the minute it is read again");
+    });
+  });
+
+  test("a build that failed is not held: the next page reads again", async () => {
+    const origin = host();
+    answer = () => new Response("down", { status: 500 });
+    assert.equal((await ask(`${origin}/proposals.json`)).res.status, 503);
+    answer = service(proposalWorld(set));
+    const before = fake.calls.length;
+    assert.equal((await ask(`${origin}/proposals.md`)).res.status, 200);
+    assert.ok(fake.calls.length > before);
+  });
+
+  test("each address holds its own: another address is read for itself", async () => {
+    answer = service(proposalWorld(set));
+    await ask(`${host()}/proposals.json`);
+    const before = fake.calls.length;
+    await ask(`${host()}/proposals.json`);
+    assert.equal(fake.calls.length - before, 5);
   });
 });
 

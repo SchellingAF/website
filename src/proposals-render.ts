@@ -42,11 +42,17 @@ export type Status =
   | { kind: "no-document" }
   /** A Status section that does not begin with one of the six words. */
   | { kind: "no-status" }
-  /** The document could not be read just now. */
-  | { kind: "unread" };
+  /** The document could not be read just now: a read that failed, was not made in time or
+   *  was told to wait. Reading it again later may work, so the page is held a minute only. */
+  | { kind: "unread" }
+  /** The document's current version is there and its text is not: the operator withheld it or
+   *  the owner or an admin hid it. Said as unread is, but it will not change in a minute, so
+   *  it does not shorten how long the page is held. */
+  | { kind: "withheld" };
 
 export const NO_DOCUMENT: Status = { kind: "no-document" };
 export const UNREAD: Status = { kind: "unread" };
+export const WITHHELD: Status = { kind: "withheld" };
 
 /**
  * What a document's text says its status is: the six words, from the first words of the
@@ -135,6 +141,7 @@ const STATUS_TEXT = {
   "no-document": "no document yet",
   "no-status": "no status yet",
   unread: "status could not be read just now",
+  withheld: "status could not be read just now",
 } as const;
 
 /** A status as the page says it: one of the six words, or why there is none. */
