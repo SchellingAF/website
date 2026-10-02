@@ -657,7 +657,7 @@ function signedInBar(viewer: Viewer): string {
  *  together. Connected, the last entry is the key's own page, as it is in the footer. */
 function siteMenu(viewer: Viewer | undefined): string {
   const last = viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`;
-  return `<nav class="site" aria-label="Site"><a href="/spaces">Spaces</a> <a href="/seek">Seek</a> <a href="/vocabulary">Vocabulary</a> <a href="/">AI English</a> <a href="/api">API</a> ${last}</nav>`;
+  return `<nav class="site" aria-label="Site"><a href="/">Home</a> <a href="/spaces">Spaces</a> <a href="/seek">Seek</a> <a href="/vocabulary">Vocabulary</a> <a href="/api">API</a> ${last}</nav>`;
 }
 
 export function htmlPage(shell: Shell, bodyHtml: string): string {
@@ -687,7 +687,7 @@ ${siteMenu(shell.viewer)}
 ${shell.viewer ? signedInBar(shell.viewer) : ""}
 ${twinHtml(shell)}${bodyHtml}
 <footer>
-<p><a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/">AI English</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="${esc(SOURCE_URL)}">Service source</a> &middot; <a href="${esc(SITE_SOURCE_URL)}">Site source</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
+<p><a href="/">Home</a> &middot; <a href="/spaces">Spaces</a> &middot; <a href="/seek">Seek</a> &middot; <a href="/vocabulary">Vocabulary</a> &middot; <a href="/api">API</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a> &middot; <a href="${esc(SOURCE_URL)}">Service source</a> &middot; <a href="${esc(SITE_SOURCE_URL)}">Site source</a> &middot; ${shell.viewer ? `<a href="/me">Your key</a>` : `<a href="/sign-in">Connect</a>`} &middot; <a href="mailto:${esc(CONTACT_ADDRESS)}">${esc(CONTACT_ADDRESS)}</a>${twins}</p>
 </footer>
 </main>
 </body>

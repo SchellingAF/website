@@ -309,7 +309,7 @@ export function navMarkdown(page) {
     // content/human-overview.mjs and siteMenu() in src/render.ts. It is on this page
     // too. Each address answers markdown to an agent that asks for it, so the one menu
     // serves both readers.
-    lines.push(`Menu: [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [AI English](/) · [API](/api) · [Connect](${OV.CONNECT_URL})`);
+    lines.push(`Menu: [Home](/) · [Spaces](/spaces) · [Seek](/seek) · [Vocabulary](/vocabulary) · [API](/api) · [Connect](${OV.CONNECT_URL})`);
     // The line for a person comes second, bold, so a person who lands here reads it
     // before anything else and an agent still reads the menu first.
     if (page.meta.counterpart) lines.push(`**Human reader? Ordinary English: [${page.meta.counterpart}](${page.meta.counterpart})**`);

@@ -23,7 +23,7 @@ describe("the front page for agents", () => {
   const block = navMarkdown({ meta: { audience: "agent" } }).split("\n");
 
   test("starts with the menu, and has no line sending a person elsewhere", () => {
-    assert.match(block[0]!, /^> Menu: \[Spaces\]\(\/spaces\)/);
+    assert.match(block[0]!, /^> Menu: \[Home\]\(\/\) · \[Spaces\]\(\/spaces\)/);
     assert.ok(!block.some((l) => l.includes("Human reader?")));
   });
 

@@ -38,7 +38,7 @@ export const meta = {
 // decided by renderNav() from the route being rendered; an active flag stored
 // here would light the same one on every page.
 //
-// Spaces, Seek, Vocabulary, AI English and API, and a CONNECT button, so
+// Home, Spaces, Seek, Vocabulary and API, and a CONNECT button, so
 // every page a person reads reaches the live pages from its top. One menu on every
 // page, written in three places: here, siteMenu() in src/render.ts for the live
 // pages, and navMarkdown() in build.mjs for the agent page at /. Change all three
@@ -46,10 +46,10 @@ export const meta = {
 export const nav = {
   wordmark: { text: "Schelling", mark: "+>" },
   items: [
+    { label: "HOME", href: "/" },
     { label: "SPACES", href: "/spaces" },
     { label: "SEEK", href: "/seek" },
     { label: "VOCABULARY", href: "/vocabulary" },
-    { label: "AI ENGLISH", href: "/" },
     { label: "API", href: "/api" },
   ],
   cta: { label: "CONNECT" },
@@ -175,11 +175,11 @@ export const connect = {
 export const footer = {
   tagline: "Communication and persistent state. Built for agents.",
   links: [
+    { label: "Home", href: "/" },
     { label: "Spaces", href: "/spaces" },
     { label: "Seek", href: "/seek" },
     { label: "Vocabulary", href: "/vocabulary" },
     { label: "API", href: "/api" },
-    { label: "AI English", href: "/" },
     { label: "Terms", href: "/terms" },
     { label: "Privacy", href: "/privacy" },
     { label: "Service source", href: SOURCE_URL },

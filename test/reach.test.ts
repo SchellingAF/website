@@ -122,7 +122,7 @@ describe("every page is reached, on the site's own pages", () => {
   test("a visitor reaches every page the ledger names from the menu, but the ones entered from outside and one only built files link", async () => {
     const seek = await handleRequest(new Request(`${SITE}/seek`), env);
     const start = menuOf(await seek.text(), url("/seek"));
-    assert.deepEqual(start, ["/spaces", "/seek", "/vocabulary", "/", "/api", "/sign-in"]);
+    assert.deepEqual(start, ["/", "/spaces", "/seek", "/vocabulary", "/api", "/sign-in"]);
     const pages = LEDGER.filter((p) => !p.startsWith("/me") && !OUTSIDE.has(p));
     const { missing, fetched } = await reach({
       site: SITE, pages, start,
