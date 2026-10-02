@@ -322,10 +322,11 @@ export function navMarkdown(page) {
     lines.push(`Terms and privacy, which apply to an agent as well: [/terms](/terms) · [/privacy](/privacy)`);
     lines.push(`Every space on the service, live: [/spaces.md](/spaces.md)`);
     lines.push(`All pages and formats: [/llms.txt](/llms.txt)`);
-    // The site's own source, for an agent reading the page it is built from. One
-    // address, written once in content/human-overview.mjs, where the footer every
-    // page for people carries takes it too.
+    // Both repositories, for an agent reading the page it is built from. Each address
+    // is written once in content/human-overview.mjs, where the footer every page for
+    // people takes it too.
     lines.push(`The source of this service: [${OV.SOURCE_URL}](${OV.SOURCE_URL})`);
+    lines.push(`The source of this site: [${OV.SITE_SOURCE_URL}](${OV.SITE_SOURCE_URL})`);
     lines.push(`${STATUS_BEFORE_LINK}[/api](/api)${STATUS_AFTER_LINK}`);
   } else {
     // Humans get one link, not a directory listing. /llms.txt is for agents.
@@ -405,8 +406,13 @@ const jsonHead = (page) => ({
   url: SITE + page.route,
   formats: { html: page.route, markdown: page.mdPath, json: page.jsonPath },
   // terms and privacy are named on every page, in the machine-readable rendering too,
-  // so an agent that holds one page's JSON never has to look for either.
-  navigation: { index: "/llms.txt", terms: "/terms", privacy: "/privacy", ...(page.meta.counterpart ? { counterpart: page.meta.counterpart } : {}) },
+  // so an agent that holds one page's JSON never has to look for either; so are both
+  // repositories.
+  navigation: {
+    index: "/llms.txt", terms: "/terms", privacy: "/privacy",
+    source: { service: OV.SOURCE_URL, site: OV.SITE_SOURCE_URL },
+    ...(page.meta.counterpart ? { counterpart: page.meta.counterpart } : {}),
+  },
 });
 
 function htmlDoc(page, nav, bodyHtml) {
@@ -1936,6 +1942,11 @@ export const SITE_NAME = ${JSON.stringify(SITE_NAME)};
  *  as footer.contact in content/human-overview.mjs, where the designed footer takes it. */
 export const CONTACT_ADDRESS = ${JSON.stringify(OV.footer.contact)};
 
+/** The service's repository and this site's, for the same footer. Set once, as
+ *  SOURCE_URL and SITE_SOURCE_URL in content/human-overview.mjs. */
+export const SOURCE_URL = ${JSON.stringify(OV.SOURCE_URL)};
+export const SITE_SOURCE_URL = ${JSON.stringify(OV.SITE_SOURCE_URL)};
+
 /** Where the product answers. Written once, in content/api-overview.mjs, and
  *  carried here so the handler does not repeat it. A local API is pointed at
  *  with API_ORIGIN in .dev.vars, which overrides this at runtime. */
@@ -2035,6 +2046,13 @@ number for a file it did not measure.
 The connector, for an MCP client, is ${API_ORIGIN}/mcp with the bearer token your KEY
 minted, or ${API_ORIGIN}/mcp/connect for an app that signs its person in. Neither is a
 page to read.
+
+## Source
+
+Both repositories are public.
+
+- [Service](${OV.SOURCE_URL}): the API, its database, the MCP connector and the reviewer.
+- [Site](${OV.SITE_SOURCE_URL}): this site, its pages for agents and for people.
 `;
   // The terms and the privacy policy are listed on their own, ahead of the pages that
   // are a human rendering of something an agent can read elsewhere. Both address an

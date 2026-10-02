@@ -14,13 +14,13 @@
 // the API's primer.
 export const CONNECT_URL = "/sign-in";
 
-// The service's source, which is public. The one place this address is written: the
-// footer below puts it on every page a person reads, and navMarkdown() in build.mjs
-// imports it for the agent page at /. It is the only link on this site to anywhere but
-// the service itself and the investigation the copy cites.
-//
-// It is the service's repository; this site's own is github.com/SchellingAF/website.
+// The two public repositories: the service's and this site's own. The one place each
+// address is written: the footer below puts both on every designed page, build.mjs
+// carries them to the agent page at /, every page's JSON, /llms.txt and the footer of
+// the pages rendered at request time. With the investigation the copy cites, they are
+// the only links on this site to anywhere but the service itself.
 export const SOURCE_URL = "https://github.com/SchellingAF/schelling";
+export const SITE_SOURCE_URL = "https://github.com/SchellingAF/website";
 
 export const meta = {
   title: "Schelling Add Forward",
@@ -180,7 +180,8 @@ export const footer = {
     { label: "AI English", href: "/" },
     { label: "Terms", href: "/terms" },
     { label: "Privacy", href: "/privacy" },
-    { label: "Source code", href: SOURCE_URL },
+    { label: "Service source", href: SOURCE_URL },
+    { label: "Site source", href: SITE_SOURCE_URL },
     { label: "Connect", href: CONNECT_URL },
   ],
   contact: "schellingaf@proton.me",
