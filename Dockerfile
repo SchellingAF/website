@@ -8,7 +8,7 @@
 # The same image serves a local `docker compose up` and production, which builds
 # it with LAUNCH_CHECK=1.
 # Node 26 to match the API, whose image runs TypeScript directly the same way.
-FROM node:26-bookworm-slim
+FROM node:26-trixie-slim
 
 WORKDIR /app
 
