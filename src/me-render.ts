@@ -479,15 +479,20 @@ export interface MailboxItem {
   conversation?: { conversation_id: string; kind: string; state: string };
   /** A role offered to this key, which it accepts or declines. */
   offer?: { offer_id: string; space: string; from: string; role: string; expires_at: string | null; state: string };
+  /** What became of a task this key claimed or confirmed: `by` is the key that acted, and
+   *  a reject carries what it said in `reason`. */
+  task?: { space: string; number: number | string; state: string; by: string; reason?: string };
   unavailable?: boolean;
 }
 
 /** Why something is in a mailbox, in words. The service's reasons are to, reply,
  *  request, decision, message and message_request, and "decision" is also a kind
- *  of post. */
+ *  of post. A citation carries the post that cites one of this key's, as a reply
+ *  carries the reply; the four reasons of a task carry the task. */
 const MAILBOX_REASON: Record<string, string> = {
   to: "sent to you",
   reply: "a reply to your post",
+  cited: "a post that cites yours",
   request: "a join request",
   decision: "a decision on your join request",
   message: "a message",
@@ -496,7 +501,38 @@ const MAILBOX_REASON: Record<string, string> = {
   out_of_date: "your proposal went out of date",
   changed: "a new version of a document you watch",
   hand_over: "a role offered to you",
+  task_confirmed: "a confirmation of your task",
+  task_accepted: "an accepted task",
+  task_rejected: "a rejected task",
+  task_reopened: "a reopened task",
 };
+
+/** What the key that acted did to a task, by the reason the service gives, and what
+ *  followed. A reason of a task this table does not know is said as acting on it. */
+const TASK_DONE: Record<string, { did: string; then: string }> = {
+  task_confirmed: { did: "confirmed", then: "" },
+  task_accepted: { did: "confirmed", then: ", which accepted it" },
+  task_rejected: { did: "rejected", then: "" },
+  task_reopened: { did: "reopened", then: ", ending your claim on it" },
+};
+
+/** What became of a task as a mailbox item: one line naming the key, the task and its
+ *  space, and a reject's reason below it, which a key wrote. The task links to its row
+ *  on the space's page only when the space and the number have the service's shapes. */
+function taskItemHtml(viewer: Viewer, seq: string, reason: string, why: string, t: NonNullable<MailboxItem["task"]>): string {
+  const n = typeof t.number === "number" && Number.isInteger(t.number) && t.number >= 1 ? String(t.number)
+    : typeof t.number === "string" && POST_SEQ.test(t.number) ? t.number : null;
+  const space = typeof t.space === "string" ? t.space : "";
+  const task = n === null ? "a task" : SPACE_NAME.test(space) ? `<a href="/me/spaces/${esc(space)}#task-${esc(n)}">task ${esc(n)}</a>` : `task ${esc(n)}`;
+  const where = space ? ` in ${spaceLink(space)}` : "";
+  const who = typeof t.by === "string" ? `${keyLink(t.by)}${messageLink(viewer, t.by, space)}` : "A key";
+  const done = ownWord(TASK_DONE, why) ?? { did: "acted on", then: "" };
+  const said = typeof t.reason === "string" && t.reason !== "" ? t.reason : null;
+  return `<div class="item">
+<p class="meta">Item ${esc(seq)}, ${reason} &middot; ${who} ${done.did} ${task}${where}${done.then}${said === null ? "." : ":"}</p>
+${said === null ? "" : `<pre>${esc(said)}</pre>`}
+</div>`;
+}
 
 /** What became of an offer of a role, in words, once it is not waiting. */
 const OFFER_STATE: Record<string, string> = {
@@ -560,6 +596,10 @@ export function mailboxHtml(
   // Accept on an offer counts only a press made on purpose, so a mailbox holding one
   // waiting runs the script that makes sure, once.
   const guarded = items.some((d) => d.offer?.state === "waiting");
+  // The lead names citations and tasks once the service lists their reasons, and not
+  // before, so it never says the mailbox holds what the service does not send.
+  const cites = reasons.includes("cited");
+  const tasks = reasons.some((r) => r.startsWith("task_"));
   const rows = items.map((d) => {
     const reason = esc(ownWord(MAILBOX_REASON, d.reason) ?? d.reason);
     if (d.offer) return offerItemHtml(viewer, d.mailbox_seq, reason, d.offer);
@@ -594,11 +634,12 @@ ${toDecide}
 ${spaceHref && r.state === "pending" ? `<p class="meta"><a href="${esc(spaceHref)}">Decide it on the space's join requests page</a>. Approve by what the space is for, not by what the note claims.</p>` : ""}
 </div>`;
     }
+    if (d.task && typeof d.task === "object") return taskItemHtml(viewer, d.mailbox_seq, reason, d.reason, d.task);
     return `<div class="item"><p class="meta">Item ${esc(d.mailbox_seq)}, ${reason}. This item is no longer readable by your key. Its place is kept.</p></div>`;
   }).join("\n");
   return htmlPage(shell, `${outcomeLine(notice)}
 <h1>Mailbox</h1>
-<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, and roles other keys offer you. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
+<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, ${cites ? "posts that cite yours, " : ""}join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, ${tasks ? "roles other keys offer you, and what became of tasks you claimed or confirmed" : "and roles other keys offer you"}. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
 ${mailboxFilterHtml(filter, reasons, kinds)}
 ${refusal ? refusalAlert(refusal) : `<p class="meta">${kept
     ? `Showing only ${esc([

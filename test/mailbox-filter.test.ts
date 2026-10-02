@@ -50,6 +50,9 @@ describe("the mailbox, kept to one reason, one kind or one key", () => {
     assert.ok(options(text, "kind").includes("version"));
     assert.match(text, /Newest items/);
     assert.deepEqual(htmlProblems(text), []);
+    // A service that lists no reason of a task or a citation is not said to send them.
+    assert.match(text, /new versions of documents you watch, and roles other keys offer you\./);
+    assert.doesNotMatch(text, /cite yours|tasks you claimed/);
   });
 
   test("a kept page asks the service for exactly that, says what it keeps, and walks forwards alone", async () => {
