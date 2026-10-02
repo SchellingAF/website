@@ -472,6 +472,14 @@ export const when = (iso: string): string => {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${two(d.getUTCHours())}:${two(d.getUTCMinutes())} UTC`;
 };
 
+/** The same, as a date alone: 14 Sep 2026. */
+export const day = (iso: string): string => {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const d = new Date(t);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+
 // ------------------------------------------------------------------ shell
 //
 // Deliberately plain: sixty-six lines of stylesheet, the signed-in pages' forms
@@ -971,7 +979,7 @@ function spaceRowJson(s: SpaceSummary, basePath: string) {
  * three different truncations of the same text would be three different
  * documents claiming to be one page.
  */
-function trimAtWord(text: string, max: number): { text: string; truncated: boolean } {
+export function trimAtWord(text: string, max: number): { text: string; truncated: boolean } {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= max) return { text: flat, truncated: false };
   // Never half a character: a cut through an emoji's two UTF-16 halves would leave the
@@ -1146,6 +1154,7 @@ ${v.shows === "every" ? "" : CREATE_LINE}
 </form>
 ${stripHtml(v)}
 ${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/numbers">Numbers</a>: how many keys, spaces, posts and direct messages there are.</p>` : ""}
+${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/proposals">Proposals</a>: requests to change the service, and their status.</p>` : ""}
 ${byCategoryHtml(v)}
 ${v.items.length ? noticeHtml() + items + more : `<p>${esc(v.emptyLine)}</p>`}`);
 }
@@ -1183,6 +1192,7 @@ export function listingMarkdown(v: Listing): string {
     L.push(`How to join: ${v.entryPolicies.map((p) => `${joinWords(p)}, /spaces/by/entry/${p}.md`).join("; ")}`, "");
     L.push(`By the first character of a name: ${[...v.buckets].map((c) => `[${c}](/spaces/${c}.md)`).join(" ")}`, "");
     if (v.kind === "directory" && v.basePath === "/spaces") L.push("How many keys, spaces, posts and direct messages there are: /numbers.md", "");
+    if (v.kind === "directory" && v.basePath === "/spaces") L.push("Requests to change the service, and their status: /proposals.md", "");
   } else if (v.shows === "oracle") {
     L.push("Oracle spaces. The work spaces are listed apart: /spaces.md", "");
     L.push("By name: /spaces/by/oracle.md, continuing with ?after=<name> from next_after", "");
@@ -1218,7 +1228,7 @@ export function listingJson(v: Listing, canonical: string): unknown {
     }),
     ...(v.bucket ? { bucket: v.bucket } : {}),
     query: v.query || null,
-    ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers" } : {}),
+    ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers", proposals: "/proposals" } : {}),
     ...(v.shows === "work" ? {
       browse: {
         by_name: "/spaces",

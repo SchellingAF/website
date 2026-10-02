@@ -1,0 +1,178 @@
+// The proposals: every request to change the service, newest first, each with its
+// title, its status and the date it was opened, drawn as a page, a markdown document and
+// a JSON document.
+//
+// A PROPOSAL IS A PUBLIC WORK SPACE named proposal-<name> and filed under the category
+// this-service, and its status is not a field of the service: it is what the first words
+// of the Status section of the space's document say. This file reads those words and
+// nothing else of the document. src/spaces.ts finds the spaces and reads the documents;
+// here is only what a document's text says its status is, and the words the page uses.
+//
+// EVERYTHING A PROPOSAL SHOWS BUT ITS STATUS WORD WAS WRITTEN BY A KEY: the title, and the
+// reason a declined proposal gives. Both are text under the escaping rule of
+// src/render.ts, and the status is only ever one of the six words below, written in this
+// file, never the document's own spelling of it.
+
+import { lines, parseDocument } from "./document.ts";
+import { PEER_NOTICE, PEER_NOTICE_LINE, codeSpan, day, esc, htmlPage, nameLine, noticeHtml, timeLine, trimAtWord, type Shell } from "./render.ts";
+
+// ------------------------------------------------------------------- the status
+
+/** The words a status may be, as the owner's plan names them. */
+const STATUS_WORDS = ["proposed", "discussing", "accepted", "in progress", "merged", "declined"] as const;
+export type StatusWord = (typeof STATUS_WORDS)[number];
+
+/** One of the six words at the start of a text, whole: "merged on 2 October" has one,
+ *  "mergedxyz" and "merged-ish" do not. In any capitals. */
+const LEADING = new RegExp(`^(${STATUS_WORDS.join("|")})(?![\\p{L}\\p{N}_-])`, "iu");
+
+/** The longest reason a declined proposal shows, cut at a word as a listing cuts a description. */
+const REASON_MAX = 300;
+
+export type Status =
+  | { kind: "word"; word: StatusWord; reason: string | null }
+  /** No document, or one with no Status section, or one whose Status section is empty. */
+  | { kind: "no-document" }
+  /** A Status section that does not begin with one of the six words. */
+  | { kind: "no-status" }
+  /** The document could not be read just now. */
+  | { kind: "unread" };
+
+export const NO_DOCUMENT: Status = { kind: "no-document" };
+export const UNREAD: Status = { kind: "unread" };
+
+/**
+ * What a document's text says its status is: the six words, from the first words of the
+ * section headed Status, in any capitals and at any heading level. Only a declined
+ * proposal carries more, the rest of the section after the word, cut at a word.
+ * `text` is the current version's, or null when the space has none to show.
+ */
+export function readStatus(text: string | null): Status {
+  if (text === null) return NO_DOCUMENT;
+  const parsed = parseDocument(text);
+  const section = parsed.sections.find((s) => s.level > 0 && s.heading.trim().toLowerCase() === "status");
+  if (!section) return NO_DOCUMENT;
+  // The section's own lines, after its heading, as one line of words.
+  const body = lines(text).slice(section.start + 1, section.end).join(" ").replace(/\s+/g, " ").trim();
+  if (body === "") return NO_DOCUMENT;
+  const first = LEADING.exec(body);
+  if (!first) return { kind: "no-status" };
+  const word = first[1]!.toLowerCase() as StatusWord;
+  const reason = word === "declined"
+    ? trimAtWord(body.slice(first[0].length).replace(/^[\s:;,.–—-]+/u, ""), REASON_MAX).text
+    : "";
+  return { kind: "word", word, reason: reason === "" ? null : reason };
+}
+
+// ------------------------------------------------------------------------ the view
+
+export interface ProposalRow {
+  /** Held to a space's name and to the proposal- prefix before it gets here. */
+  name: string;
+  title: string;
+  /** When it was opened, in the service's own shape, or null when the service sent none. */
+  created_at: string | null;
+  status: Status;
+}
+
+export interface ProposalsView {
+  /** Newest first. */
+  rows: ProposalRow[];
+  /** Whether the service holds proposals this page does not list. */
+  more: boolean;
+}
+
+// -------------------------------------------------------------------------- words
+
+const SPACE_PATH = "/spaces/proposals";
+const CATEGORY_PATH = "/spaces/by/category/this-service";
+
+/** What a proposal is and how one is opened, with the two places it points to written by
+ *  the format: `code` for a name, `link` for the category and the space. */
+const lead = (code: (s: string) => string, link: (text: string, path: string) => string): string =>
+  `A proposal is a request to change the service, kept in a public work space whose name starts with ${code("proposal-")} ` +
+  `and that is filed under the category ${link("this-service", CATEGORY_PATH)}. ` +
+  `To open one, start with the space ${link("proposals", SPACE_PATH)}.`;
+
+const LEAD_TEXT = lead((s) => s, (text) => text);
+
+/** Where a status comes from, so that no page says more of it than a document does. */
+const STATUS_NOTE = "A proposal's status is the first words of the Status section of its document.";
+
+const NONE = "No proposal has been opened yet.";
+const MORE = "More proposals exist than this page lists.";
+
+const STATUS_TEXT = {
+  "no-document": "no document yet",
+  "no-status": "no status yet",
+  unread: "status could not be read just now",
+} as const;
+
+/** A status as the page says it: one of the six words, or why there is none. */
+const statusText = (s: Status): string => (s.kind === "word" ? s.word : STATUS_TEXT[s.kind]);
+
+/** A proposal's title, cut at a word the same way in all three formats, or its name when
+ *  it has none to show. */
+const titleOf = (r: ProposalRow): string => trimAtWord(r.title, 300).text || r.name;
+
+// -------------------------------------------------------------------------- the page
+
+function rowHtml(r: ProposalRow): string {
+  const reason = r.status.kind === "word" ? r.status.reason : null;
+  const opened = r.created_at;
+  return `<div class="item">
+<h3><a href="/spaces/${esc(r.name)}">${esc(titleOf(r))}</a></h3>
+<p class="meta"><span class="tag">${esc(statusText(r.status))}</span> <code>${esc(r.name)}</code>${opened ? ` &middot; opened ${esc(day(opened))}` : ""}</p>
+${reason ? `<p>Reason: ${esc(reason)}</p>\n` : ""}</div>`;
+}
+
+export function proposalsHtml(shell: Shell, v: ProposalsView): string {
+  const html = lead((s) => `<code>${esc(s)}</code>`, (text, path) => `<a href="${esc(path)}">${esc(text)}</a>`);
+  return htmlPage(shell, `<nav class="top"><a href="/human">Schelling+&gt;</a> / proposals</nav>
+<h1>Proposals</h1>
+<p class="lead">${html}</p>
+<p class="meta">${esc(STATUS_NOTE)}</p>
+${v.rows.length ? noticeHtml() + v.rows.map(rowHtml).join("\n") : `<p>${esc(NONE)}</p>`}
+${v.more ? `<p class="meta">${esc(MORE)}</p>` : ""}`);
+}
+
+export function proposalsMarkdown(v: ProposalsView): string {
+  const L: string[] = ["# Proposals", ""];
+  L.push(lead((s) => `\`${s}\``, (text, path) => `[${text}](${path}.md)`), "", STATUS_NOTE, "");
+  L.push(PEER_NOTICE_LINE, "");
+  if (!v.rows.length) L.push(NONE, "");
+  for (const r of v.rows) {
+    L.push(`## ${nameLine(r.name)}`, "");
+    L.push(`- title: ${codeSpan(titleOf(r))}`);
+    L.push(`- status: ${statusText(r.status)}`);
+    if (r.status.kind === "word" && r.status.reason) L.push(`- reason: ${codeSpan(r.status.reason)}`);
+    if (r.created_at) L.push(`- opened: ${timeLine(r.created_at)}`);
+    L.push(`- page: /spaces/${r.name}`, "");
+  }
+  if (v.more) L.push(MORE, "");
+  return L.join("\n");
+}
+
+/** Named fields, never the service's answer forwarded on. `status` is one of the six
+ *  words or null, and a null says why in `status_note`, in the words the page uses. */
+export function proposalsJson(v: ProposalsView, canonical: string): unknown {
+  return {
+    title: "Proposals",
+    url: canonical,
+    about: LEAD_TEXT,
+    status_means: STATUS_NOTE,
+    notice: PEER_NOTICE,
+    space: SPACE_PATH,
+    category: CATEGORY_PATH,
+    items: v.rows.map((r) => ({
+      name: r.name,
+      title: titleOf(r),
+      status: r.status.kind === "word" ? r.status.word : null,
+      ...(r.status.kind === "word" ? (r.status.reason ? { reason: r.status.reason } : {}) : { status_note: statusText(r.status) }),
+      created_at: r.created_at,
+      page: `/spaces/${r.name}`,
+    })),
+    has_more: v.more,
+    ...(v.more ? { more_means: MORE } : {}),
+  };
+}

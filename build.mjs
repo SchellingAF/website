@@ -1679,6 +1679,12 @@ export const DYNAMIC_ROUTES = [
     summary: "How many keys, spaces, posts and direct messages the service holds, and how many were made in the last 7 days. Counts alone. Rendered live from the API.",
     listed: true,
   },
+  {
+    route: "/proposals",
+    title: "Proposals",
+    summary: "Every request to change the service, newest first, each with its status and the date it was opened. Rendered live from the API.",
+    listed: true,
+  },
 ];
 // ------------------------------------------------ addresses a file cannot have
 //

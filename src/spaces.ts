@@ -32,6 +32,7 @@
 //   /seek                        SEEK: prior work, by fingerprint or by text
 //   /vocabulary                  the service's words, and its limits, explained
 //   /numbers                     how many keys, spaces, posts and direct messages there are
+//   /proposals                   every request to change the service, newest first, with its status
 //   /peers/<key>                 who a key is: when it registered, what it owns
 //   /posts/<id>                  a redirect from a post's id to its address
 //   /join/<space>/<code>         an invite link or a hand-over link, and every way to
@@ -66,6 +67,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
+import { NO_DOCUMENT, UNREAD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -78,7 +80,7 @@ import {
   threadHtml, threadJson, threadMarkdown,
   checkpointsHtml, checkpointsJson, checkpointsMarkdown, readableCheckpoint, readableInclusion, readableProof,
   registerHtml, registerJson, registerMarkdown, categoryPageHtml, categoryPageJson, categoryPageMarkdown,
-  categoryHref, categoryLine, filedIds, hiddenOf, hiddenPost, howMatched, keepsDocument, labelLine, ownWord, shortKey, shownSpace, signedInTwin, POLICY_WORDS, WORK_WORDS,
+  categoryHref, categoryLine, filedIds, hiddenOf, hiddenPost, howMatched, keepsDocument, labelLine, ownWord, record, shortKey, shownSpace, signedInTwin, textOrNull, POLICY_WORDS, WORK_WORDS,
   type LookupAnswer,
   type Checkpoint, type CheckpointRow, type ProofAnswer, type PostVerdict,
   type Listing, type Page, type PeerProfile, type Post, type PostHistory, type PostRef,
@@ -135,6 +137,7 @@ export type RouteKind =
   | "reviewer-rules" // /reviewer-rules
   | "recovery"    // /recovery
   | "numbers"     // /numbers
+  | "proposals"   // /proposals
   | "peer"        // /peers/<key>
   | "post-id"     // /posts/<id>   -- a redirect
   | "join";       // /join/<space>/<code>   -- an invite link; reads nothing
@@ -265,6 +268,9 @@ const TTL: Record<RouteKind, number> = {
   recovery: 600,
   // The service counts at most once an hour and says when; the page is held well inside that.
   numbers: 600,
+  // A build reads the service once for the list and once for each proposal, so the page is
+  // held as long as a listing is; a status written into a document shows within ten minutes.
+  proposals: 600,
   // When a key registered never changes; the spaces it owns change rarely.
   peer: 1800,
   // A redirect is never stored by the page cache, which keeps only a 200.
@@ -325,7 +331,7 @@ export function matchSitemapChild(path: string): Route | null {
  *  three representations work by extension as well as by Accept. */
 export function matchRoute(path: string, accept: string | null, env: ApiEnv, hasQuery: boolean): Route | null {
   const within = (b: string) => path === b || path.startsWith(`${b}/`) || path.startsWith(`${b}.`);
-  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery", "/numbers"].find(within);
+  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery", "/numbers", "/proposals"].find(within);
   if (other) return matchOther(other, path, accept, env);
 
   let base: string;
@@ -519,6 +525,9 @@ function matchOther(base: string, path: string, accept: string | null, env: ApiE
     case "/recovery": return segment === "" ? of("recovery", null, true, "none") : null;
     // The service's counts, read with no key: none is broken down by space or by key.
     case "/numbers": return segment === "" ? of("numbers", null, true, "none") : null;
+    // The proposals read the public spaces as /spaces does: with the site's key when one is
+    // configured, and with none otherwise.
+    case "/proposals": return segment === "" ? of("proposals", null, true, publicReader(env)) : null;
   }
   return null;
 }
@@ -953,6 +962,8 @@ export async function handle(route: Route, url: URL, env: ApiEnv): Promise<Respo
       return recoveryPage(route, url, env);
     case "numbers":
       return numbersPage(route, url, env);
+    case "proposals":
+      return proposalsPage(route, url, env);
     case "peer":
       return peerPage(route, url, env);
     case "post-id":
@@ -2763,6 +2774,111 @@ async function numbersPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
   const numbers = readNumbers(res.data);
   if (!numbers) return unavailable(route, shell, "BAD_JSON", "the service's answer was not the numbers this page reads");
   return drawn(route, shell, numbers, { html: numbersHtml, md: numbersMarkdown, json: numbersJson });
+}
+
+// ------------------------------------------------------------------ the proposals
+
+/** A proposal's space is named with this and filed under this category. */
+const PROPOSAL_PREFIX = "proposal-";
+const PROPOSAL_CATEGORY = "this-service";
+/** The most proposals whose documents one build of the page reads, newest first. Anybody can
+ *  open a space that fits the two rules above, and every one costs the service a read. */
+const PROPOSALS_SHOWN = 100;
+/** The most pages of the list one build reads, two hundred spaces to a page. */
+const PROPOSAL_LIST_PAGES = 10;
+/** Documents read at once: the most a caller with no key may have open, which is two. */
+const PROPOSAL_READS_AT_ONCE = 2;
+/** How long one build may go on reading documents; those it did not reach are said so. */
+const PROPOSAL_READ_BUDGET_MS = 20_000;
+
+type ProposalsRead = { ok: true; view: ProposalsView } | { ok: false; why: Pick<Refusal, "code" | "message"> };
+
+/** A space found by the list, before its document is read. */
+type Found = Omit<ProposalRow, "status">;
+
+/**
+ * THE LIST, then ONE DOCUMENT READ A PROPOSAL.
+ *
+ * The list is one walk by name through the work spaces filed under the category, from just
+ * below the proposal- names to the first name that is not one: names sort by bytes, so the
+ * proposals are one run of them, and nothing in the category before or after it is read.
+ * It continues while the service says there is more. Only a public work space whose name
+ * has the prefix is a proposal, and the page sorts what the walk found by when each was
+ * opened, which the service's own order does not, so the newest is first whatever its name.
+ *
+ * Each document is then read for its status, and that is what makes the page dear: the
+ * service rations reads per key, or per address with none, and a caller with no key may
+ * have two open at once. So they are read two at a time, no more than PROPOSALS_SHOWN of
+ * them within PROPOSAL_READ_BUDGET_MS, and none after the service says to slow down. A
+ * proposal whose document was not read says so and the page is held for a minute only. A
+ * space that keeps no document answers NOT_AN_ORACLE, which is "no document yet".
+ */
+async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
+  const found = new Map<string, Found>();
+  // The cursor is exclusive: the name just below "proposal-" is "proposal", which no
+  // proposal can be called, so the first page starts at the first proposal.
+  let cursor: string | null = "proposal";
+  let cut = false;
+  for (let pages = 0; cursor !== null; pages++) {
+    if (pages === PROPOSAL_LIST_PAGES) { cut = true; break; }
+    const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT), category: PROPOSAL_CATEGORY, oracle: "false", after: cursor });
+    const res = await apiGet<unknown>(env, `/v1/spaces?${params}`, as);
+    if (!res.ok) return { ok: false, why: res };
+    const page = record(res.data);
+    if (!Array.isArray(page.items)) return { ok: false, why: { code: "BAD_JSON", message: "the service's answer was not a list of spaces" } };
+    let inside = true;
+    for (const item of page.items) {
+      const space = record(item);
+      const name = textOrNull(space.name);
+      if (name === null || !SPACE_NAME.test(name)) continue;
+      if (!name.startsWith(PROPOSAL_PREFIX)) { inside = false; break; }
+      if (space.visibility !== "public" || space.oracle === true) continue;
+      const opened = textOrNull(space.created_at);
+      found.set(name, { name, title: flat(textOrNull(space.title) ?? ""), created_at: opened !== null && ISO_TIME.test(opened) ? opened : null });
+    }
+    if (!inside || page.has_more !== true) { cursor = null; continue; }
+    // A cursor that does not move on would read the same page for ever.
+    const next = textOrNull(page.next_after);
+    if (next === null || !SPACE_NAME.test(next) || next <= cursor) { cut = true; cursor = null; continue; }
+    cursor = next;
+  }
+
+  const openedAt = (p: Found): number => (p.created_at === null ? 0 : Date.parse(p.created_at));
+  const all = [...found.values()].sort((a, b) => openedAt(b) - openedAt(a) || (a.name < b.name ? -1 : 1));
+  const listed = all.slice(0, PROPOSALS_SHOWN);
+
+  const statuses: Status[] = listed.map(() => UNREAD);
+  const until = Date.now() + PROPOSAL_READ_BUDGET_MS;
+  let taken = 0;
+  let slowDown = false;
+  const worker = async (): Promise<void> => {
+    for (let i = taken++; i < listed.length; i = taken++) {
+      if (slowDown || Date.now() > until) return;
+      const res = await apiGet<unknown>(env, `/v1/spaces/${listed[i]!.name}/document`, as);
+      if (res.ok) statuses[i] = readStatus(readableDocument(res.data).text);
+      else if (res.code === "NOT_AN_ORACLE") statuses[i] = NO_DOCUMENT;
+      else if (res.status === 429) slowDown = true;
+    }
+  };
+  await Promise.all(Array.from({ length: PROPOSAL_READS_AT_ONCE }, worker));
+
+  return { ok: true, view: { rows: listed.map((p, i) => ({ ...p, status: statuses[i]! })), more: cut || all.length > listed.length } };
+}
+
+/** The build under way, if one is: a visitor who comes while it is being made waits for it
+ *  rather than starting another, so a crowd of readers, or the page's three formats asked at
+ *  once, cost the service one build and not one each. What it reads does not depend on the
+ *  address asked, so every address shares it. */
+let buildingProposals: Promise<ProposalsRead> | null = null;
+
+async function proposalsPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
+  const shell = shellFor(route, url, `Proposals — ${SITE_NAME}`, `Every request to change ${SITE_NAME}, newest first, with its status.`);
+  const going = buildingProposals ?? (buildingProposals = readProposals(env, route.readAs).finally(() => { buildingProposals = null; }));
+  const read = await going;
+  if (!read.ok) return unavailable(route, shell, read.why.code, read.why.message);
+  return partial(
+    drawn(route, shell, read.view, { html: proposalsHtml, md: proposalsMarkdown, json: proposalsJson }),
+    read.view.rows.some((r) => r.status.kind === "unread"));
 }
 
 /**

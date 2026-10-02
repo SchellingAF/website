@@ -282,9 +282,9 @@ fi
 # Read from the site itself rather than typed here. The pages sitemap lists every
 # page the build made, and each page's JSON says who it is written for, so a new
 # page is checked from the day it is built. /spaces, /spaces/by/oracle, /vocabulary
-# /reviewer-rules and /numbers are in that sitemap too; they are not files, and their
-# checks come further down.
-PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$' -e '^/numbers$')
+# /reviewer-rules, /numbers and /proposals are in that sitemap too; they are not files, and
+# their checks come further down.
+PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$' -e '^/numbers$' -e '^/proposals$')
 case " $(echo $PAGES) " in
   *" / "*) ;;
   *) echo "  FAIL  could not read the list of pages from $SITE/sitemap-pages.xml"; echo; exit 1 ;;
@@ -2015,6 +2015,67 @@ else:
     refuse_body "/numbers$f names no private space" "$SITE/numbers$f" 'aarch64-wheels' -F
     refuse_body "/numbers$f carries no key or hash" "$SITE/numbers$f" '[0-9a-f]{64}' -E
   done
+fi
+
+# ------------------------------------------------------------------ the proposals
+#
+# Every request to change the service, newest first, read live: the public work spaces filed
+# under this-service whose names start with proposal-, each with the status the first words of
+# its document's Status section give. The page answers whether or not the service holds one
+# (it says so when it holds none), so nothing here needs a proposal to exist; a service that
+# does not list the category is a skip, so a site in front of an older one is never reported
+# as proved.
+if [ "$(status "$API_ORIGIN/v1/spaces?category=this-service&limit=1")" != "200" ]; then
+  skipped "the proposals as a page" "the service at $API_ORIGIN does not list the category this-service"
+else
+  for f in "" .md .json; do expect 200 "/proposals$f answers" "$SITE/proposals$f"; done
+  expect_prefix "the proposals are listed" x-robots-tag "index," "$SITE/proposals"
+  expect_header "the proposals declare their own address" link 'rel="canonical"' "$SITE/proposals"
+  if has_header "content-security-policy" "script-src" "$SITE/proposals"; then
+    bad "the proposals page loads nothing" "got '$(header_value "content-security-policy" "$SITE/proposals")'"
+  else
+    ok "the proposals page loads nothing"
+  fi
+  expect_body "the pages sitemap lists the proposals" "$SITE/sitemap-pages.xml" '/proposals</loc>' -F
+  expect_body "the index names the proposals" "$SITE/llms.txt" '/proposals.md' -F
+  refuse_body "/proposals escapes the mark" "$SITE/proposals" 'Schelling+>'
+  expect_body "/proposals carries the mark, escaped" "$SITE/proposals" 'Schelling+&gt;' -F
+  expect_body "the spaces page links the proposals" "$SITE/spaces" 'href="/proposals"' -F
+  # Linked from the spaces page, and never from the menu that every page carries.
+  if curl -s "$SITE/spaces" | grep '<nav class="site"' | grep -q '/proposals'; then
+    bad "the menu does not carry the proposals" "the menu on /spaces links /proposals"
+  else
+    ok "the menu does not carry the proposals"
+  fi
+
+  # THE PAGE'S ROWS, held to the service's own list: each is a public work space whose name
+  # starts with proposal-, its status is one of the six words or says why there is none, the
+  # newest is first, and no proposal is listed that the service does not list. A page held
+  # for ten minutes may lack the newest, so it is only ever held to be a part of the list.
+  theirs=$(curl -s "$API_ORIGIN/v1/spaces?category=this-service&oracle=false&limit=200&after=proposal")
+  ours=$(curl -s "$SITE/proposals.json")
+  got=$(THEIRS="$theirs" OURS="$ours" python3 -c '
+import json, os
+t, o = json.loads(os.environ["THEIRS"]), json.loads(os.environ["OURS"])
+WORDS = ("proposed", "discussing", "accepted", "in progress", "merged", "declined")
+NOTES = ("no document yet", "no status yet", "status could not be read just now")
+problems = []
+items = o["items"]
+for i in items:
+    if not i["name"].startswith("proposal-"): problems.append(i["name"] + " is not named proposal-")
+    if i["page"] != "/spaces/" + i["name"]: problems.append(i["name"] + " links elsewhere")
+    if i["status"] is None:
+        if i.get("status_note") not in NOTES: problems.append(i["name"] + " has no status and no reason for it")
+    elif i["status"] not in WORDS: problems.append(i["name"] + " has a status that is none of the six")
+    if "reason" in i and i["status"] != "declined": problems.append(i["name"] + " gives a reason and is not declined")
+times = [i["created_at"] for i in items if i["created_at"]]
+if times != sorted(times, reverse=True): problems.append("the proposals are not newest first")
+mine = set(s["name"] for s in t["items"] if s["name"].startswith("proposal-") and s["visibility"] == "public" and s.get("oracle") is not True)
+for i in items:
+    if i["name"] not in mine and not t["has_more"]: problems.append(i["name"] + " is listed and the service does not list it")
+print("ok" if not problems else "; ".join(problems))' 2>&1)
+  [ "$got" = "ok" ] && ok "the proposals are the service's own, newest first, each with a status or the reason for none" \
+    || bad "the proposals are the service's own, newest first, each with a status or the reason for none" "got '$got'"
 fi
 
 # ---- the same hostile shapes in an oracle space's document, its proposals and its

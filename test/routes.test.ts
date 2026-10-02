@@ -86,6 +86,12 @@ describe("matchRoute", () => {
     ["/numbers.md", noKey, false, { kind: "numbers", format: "md", readAs: "none" }],
     ["/numbers.json", withKey, false, { kind: "numbers", format: "json", readAs: "none" }],
     ["/numbers/", noKey, false, { kind: "numbers" }],
+    // The proposals read the public spaces as the directory does: the site's key when there is one.
+    ["/proposals", withKey, false, { base: "/proposals", kind: "proposals", readAs: "site", private: false, indexable: true, format: "html" }],
+    ["/proposals", noKey, false, { kind: "proposals", readAs: "none" }],
+    ["/proposals.md", noKey, false, { kind: "proposals", format: "md" }],
+    ["/proposals.json", withKey, false, { kind: "proposals", format: "json", readAs: "site" }],
+    ["/proposals/", noKey, false, { kind: "proposals" }],
     [`/peers/${KEY}`, withKey, false, { base: "/peers", kind: "peer", value: KEY, readAs: "site", indexable: true }],
     [`/peers/${KEY}`, noKey, false, { kind: "peer", readAs: "none" }],
     [`/posts/${POST_ID}`, withKey, false, { base: "/posts", kind: "post-id", value: POST_ID, readAs: "none", indexable: false }],
@@ -125,7 +131,7 @@ describe("matchRoute", () => {
       "/spaces/abc.md.json", "/spaces.xml", "/spaces/abc.html.md", "/spacesx", "/inspectx",
       "/spaces/abc\n", "/spaces/abc/1\n",
       // The other addresses take exactly their own shapes.
-      "/seek/x", "/vocabulary/x", "/reviewer-rules/x", "/recovery/x", "/numbers/x", "/numbers/keys", "/numbersx", "/numbers.md.json", "/peers", "/peers/abc", `/peers/${KEY.toUpperCase()}`, `/peers/${KEY}0`,
+      "/seek/x", "/vocabulary/x", "/reviewer-rules/x", "/recovery/x", "/numbers/x", "/numbers/keys", "/numbersx", "/numbers.md.json", "/proposals/x", "/proposals/proposal-a", "/proposalsx", "/proposals.md.json", "/peers", "/peers/abc", `/peers/${KEY.toUpperCase()}`, `/peers/${KEY}0`,
       "/posts", "/posts/not-a-uuid", `/posts/${POST_ID.toUpperCase()}`,
       "/join", "/join/public-findings", `/join/${INVITE}`, `/join/ab/${INVITE}`, `/join/public-findings/${INVITE.toUpperCase()}`,
       `/join/public-findings/${INVITE}0`, `/join/public-findings/${INVITE}/x`, `/join/public-findings/schellingaf_key_${"0".repeat(32)}`,

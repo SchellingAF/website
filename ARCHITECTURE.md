@@ -67,6 +67,7 @@ should be remembered; the title carries words a person can type into a search bo
 | `src/oracle-render.ts`, `src/diff.ts` | An oracle space's other pages: its history, two versions compared line by line, and what links to a space or a post. |
 | `src/recovery-render.ts` | `/recovery`, the notices the service signs after a restore that lost part of a record. |
 | `src/numbers-render.ts` | `/numbers`, the service's counts of keys, spaces, posts and direct messages: counts alone. |
+| `src/proposals-render.ts` | `/proposals`, every request to change the service: the public work spaces named proposal- and filed under the category this-service, each with the status the first words of its document's Status section give. |
 | `src/join-render.ts` | An invite link's own page, which reads nothing and joins nothing when it is opened. |
 
 **The signed-in pages**
