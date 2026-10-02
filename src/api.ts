@@ -112,7 +112,7 @@ export async function apiGet<T>(env: ApiEnv, path: string, as: ReadAs): Promise<
   const token = tokenFor(env, as);
   const headers: Record<string, string> = { accept: "application/json" };
   if (token) headers.authorization = `Bearer ${token}`;
-  const res = await inTurn(token, () => send<T>(path, { headers }));
+  const res = await send<T>(path, { headers });
   if (res.ok || !token || !DEAD_KEY_CODES.has(res.code)) return res;
   // THE SITE'S OWN KEY, lapsed, revoked or blocked. A public page reads only what anyone
   // may, so it reads it with no key rather than failing, and the operator hears of it
@@ -123,76 +123,10 @@ export async function apiGet<T>(env: ApiEnv, path: string, as: ReadAs): Promise<
       siteKeyWarnedAt = Date.now();
       console.error(`SITE_TOKEN refused by the service (${res.code}): public pages read with no key until it is replaced`);
     }
-    return inTurn(undefined, () => send<T>(path, { headers: { accept: "application/json" } }));
+    return send<T>(path, { headers: { accept: "application/json" } });
   }
   if (as === "session") env.onSessionRefused?.();
   return res;
-}
-
-/**
- * The reads the product lets one caller have in flight at once (`rate_limits` in its
- * /v1/capabilities): six for a KEY, two for a caller with no key. Past them it refuses
- * the read with BUSY at once rather than queueing it, and every visitor to this site
- * reads as the same caller, the site's key or its one address. A crawler asking for a
- * dozen pages together spent the six in a moment, and each page past them was a 503:
- * 403 in the first day live, measured on 2 October 2026.
- *
- * So the site queues its own reads per caller and never has more in flight than the
- * product allows; the product's limits stay as they are for everyone. The wait is
- * bounded, and so is the queue: past either, the read is BUSY, as the product would
- * have said.
- */
-export const READS_AT_ONCE = { key: 6, noKey: 2 } as const;
-const READ_WAIT_MS = 4000;
-const READ_WAITERS = 256;
-
-type Lane = { running: number; waiting: Array<() => void> };
-/** One lane per caller, held only while it has reads in flight or waiting. */
-const lanes = new Map<string, Lane>();
-
-const busyHere = (): Refusal => ({ ok: false, status: 503, code: "BUSY", message: "the service is busy" });
-
-async function inTurn<T>(token: string | undefined, work: () => Promise<ApiResult<T>>): Promise<ApiResult<T>> {
-  const key = token ?? "";
-  const max = token ? READS_AT_ONCE.key : READS_AT_ONCE.noKey;
-  let lane = lanes.get(key);
-  if (!lane) {
-    lane = { running: 0, waiting: [] };
-    lanes.set(key, lane);
-  }
-  const mine = lane;
-  if (mine.running < max) {
-    mine.running++;
-  } else {
-    if (mine.waiting.length >= READ_WAITERS) return busyHere();
-    // A read that finishes hands its place straight to the first waiting, so `running`
-    // never drops below max while anyone waits and nobody arriving later jumps the queue.
-    const handed = await new Promise<boolean>((resolve) => {
-      const wake = () => {
-        clearTimeout(timer);
-        resolve(true);
-      };
-      const timer = setTimeout(() => {
-        const at = mine.waiting.indexOf(wake);
-        if (at >= 0) mine.waiting.splice(at, 1);
-        resolve(false);
-      }, READ_WAIT_MS);
-      mine.waiting.push(wake);
-    });
-    if (!handed) return busyHere();
-  }
-  try {
-    return await work();
-  } finally {
-    const next = mine.waiting.shift();
-    if (next) next();
-    else if (--mine.running === 0 && lanes.get(key) === mine) lanes.delete(key);
-  }
-}
-
-/** For tests: how many reads each caller has in flight and waiting. */
-export function readLanes(): Array<{ running: number; waiting: number }> {
-  return [...lanes.values()].map((l) => ({ running: l.running, waiting: l.waiting.length }));
 }
 
 /** How many of a work space's tasks its page reads: the newest by number. */
