@@ -3,25 +3,32 @@
 // a JSON document.
 //
 // A PROPOSAL IS A PUBLIC WORK SPACE named proposal-<name> and filed under the category
-// this-service, and its status is not a field of the service: it is what the first words
-// of the Status section of the space's document say. This file reads those words and
-// nothing else of the document. src/spaces.ts finds the spaces and reads the documents;
-// here is only what a document's text says its status is, and the words the page uses.
+// this-service. Its status is the STAGE the service holds for the space when the owner of the
+// space proposals set it, and otherwise what the first words of the Status section of the
+// space's document say. This file reads a stage and those words and nothing else of either.
+// src/spaces.ts finds the spaces and reads the documents; here is only what a stage or a
+// document's text says the status is, and the words the page uses.
 //
 // EVERYTHING A PROPOSAL SHOWS BUT ITS STATUS WORD WAS WRITTEN BY A KEY: the title, and the
 // reason a declined proposal gives. Both are text under the escaping rule of
 // src/render.ts, and the status is only ever one of the six words below, written in this
-// file, never the document's own spelling of it.
+// file, never a stage's or a document's own spelling of it.
 //
-// WHO SET A STATUS MATTERS, because any key may open a proposal and write its document. Under
-// the proposal routine a status counts only in a version of the document posted by the owner of
-// the space proposals. accepted, in progress, merged and declined are the words that say what
-// was decided, so one written by anyone else is shown with a note that says so; proposed and
-// discussing decide nothing and are shown as they are.
+// WHO SET A STATUS MATTERS, because any key may open a proposal and write its document, and the
+// owner of a proposal's space may set a stage on it. A stage counts only when the key that set
+// it is the owner of the space proposals; otherwise the page reads the document as it did before
+// stages. Under the proposal routine a document's status counts only in a version posted by that
+// owner. accepted, in progress, merged and declined are the words that say what was decided, so
+// one written by anyone else is shown with a note that says so; proposed and discussing decide
+// nothing and are shown as they are.
+//
+// TWO PLACES FOR ONE STATUS: where a stage counts and the document's Status names another word,
+// the page shows the stage and says what the document says beside it.
 
 import { lines, parseDocument } from "./document.ts";
+import { KEY_ID } from "./grammar.ts";
 import { API_ORIGIN } from "./routes.generated.ts";
-import { PEER_NOTICE, PEER_NOTICE_LINE, codeSpan, day, esc, htmlPage, nameLine, noticeHtml, timeLine, trimAtWord, type Shell } from "./render.ts";
+import { PEER_NOTICE, PEER_NOTICE_LINE, codeSpan, day, esc, htmlPage, nameLine, noticeHtml, record, textOrNull, timeLine, trimAtWord, type Shell } from "./render.ts";
 
 // ------------------------------------------------------------------- the status
 
@@ -37,7 +44,15 @@ const LEADING = new RegExp(`^(${STATUS_WORDS.join("|")})(?![\\p{L}\\p{N}_-])`, "
 const REASON_MAX = 300;
 
 export type Status =
-  | { kind: "word"; word: StatusWord; reason: string | null; /** A decision written by a key that is not the owner's. */ notOwners: boolean }
+  | {
+    kind: "word"; word: StatusWord; reason: string | null;
+    /** A decision written by a key that is not the owner's. */
+    notOwners: boolean;
+    /** Where the word came from, when it is a stage; a word read from a document has no mark. */
+    from?: "stage";
+    /** What the document's Status says, when it names a word other than this stage's. */
+    documentSays?: StatusWord;
+  }
   /** No document, or one with no Status section, or one whose Status section is empty. */
   | { kind: "no-document" }
   /** A Status section that does not begin with one of the six words. */
@@ -93,6 +108,69 @@ export function vouched(status: Status, author: string, owner: string | null): S
   return author === owner ? status : { ...status, notOwners: true };
 }
 
+// ----------------------------------------------------------------------- the stage
+
+/** A stage's word as the service writes one: one lowercase word of up to 32 of a-z, 0-9, _, . and -. */
+const STAGE_WORD = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
+
+/** The stage words this page has a word for. The service's `in-progress` is said "in progress";
+ *  any other word is a stage the page does not show as a status. A map, because a word such as
+ *  constructor fits the grammar and must not find a member of an object. */
+const STAGE_STATUS = new Map<string, StatusWord>([
+  ["proposed", "proposed"], ["discussing", "discussing"], ["accepted", "accepted"],
+  ["in-progress", "in progress"], ["merged", "merged"], ["declined", "declined"],
+]);
+
+/** A space's stage as the service writes it, in the fields this page reads. */
+export interface Stage {
+  word: string;
+  /** The one line the setter gave with it, or null. */
+  note: string | null;
+  /** The key that made the stage current. */
+  setBy: string;
+}
+
+/**
+ * A listed space's `stage`, in the shape the service writes it and nothing else: an object whose
+ * `word` fits the grammar and whose `set_by` is a key's id. Anything else, and the null the
+ * service gives a space with none, is no stage.
+ */
+export function readStage(raw: unknown): Stage | null {
+  const given = record(raw);
+  const word = textOrNull(given.word);
+  const setBy = textOrNull(given.set_by);
+  if (word === null || !STAGE_WORD.test(word) || setBy === null || !KEY_ID.test(setBy)) return null;
+  const note = textOrNull(given.note)?.replace(/\s+/g, " ").trim();
+  return { word, note: note ? note : null, setBy };
+}
+
+/**
+ * The status a stage gives a proposal, or null when the stage does not count: there is none, the
+ * owner of the space proposals could not be read, the key that set it is another, or the page has
+ * no word for it. The key is compared whole and exactly, as the service writes one. Only a declined
+ * proposal shows its note, as a reason, as it shows the reason a document gives.
+ */
+export function stagedStatus(stage: Stage | null, owner: string | null): Status | null {
+  if (stage === null || owner === null || stage.setBy !== owner) return null;
+  const word = STAGE_STATUS.get(stage.word);
+  if (word === undefined) return null;
+  const reason = word === "declined" && stage.note !== null ? trimAtWord(stage.note, REASON_MAX).text : "";
+  return { kind: "word", word, reason: reason === "" ? null : reason, notOwners: false, from: "stage" };
+}
+
+/**
+ * A stage's status set beside what the document says, read as it was before stages. Where the
+ * document names another word, the status stays the stage's and says what the document says; a
+ * document with no status, or with words that are none of the six, names nothing to differ from.
+ * Who wrote the document's words does not matter here: the page says what the document says,
+ * and takes nothing from it.
+ */
+export function checked(staged: Status, prose: Status): Status {
+  return staged.kind === "word" && prose.kind === "word" && prose.word !== staged.word
+    ? { ...staged, documentSays: prose.word }
+    : staged;
+}
+
 // ------------------------------------------------------------------------ the view
 
 export interface ProposalRow {
@@ -131,8 +209,11 @@ const LEAD_TEXT = lead((s) => s, (text) => text);
 /** After a decision's word, when the key that wrote it is not the owner of the space proposals. */
 const NOT_OWNERS = "(not set by the service's owner)";
 
-/** Where a status comes from, so that no page says more of it than a document does. */
-const STATUS_NOTE = "A proposal's status is the first words of the Status section of its document.";
+/** Where a status comes from, so that no page says more of it than a stage or a document does. */
+const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document.";
+
+/** After a stage's word, when the document's Status names another word. */
+const DOCUMENT_SAYS = (word: StatusWord): string => `(the document's Status says ${word})`;
 
 const NONE = "No proposal has been opened yet.";
 const MORE = "More proposals exist than this page lists.";
@@ -147,8 +228,10 @@ const STATUS_TEXT = {
 /** A status as the page says it: one of the six words, or why there is none. */
 const statusText = (s: Status): string => (s.kind === "word" ? s.word : STATUS_TEXT[s.kind]);
 
-/** The note that follows a decision's word when it was not the owner's, or "". */
-const noteOf = (s: Status): string => (s.kind === "word" && s.notOwners ? NOT_OWNERS : "");
+/** The note that follows a word: that a decision was not the owner's, or that the document's Status
+ *  names another word than the stage; or "". */
+const noteOf = (s: Status): string =>
+  s.kind !== "word" ? "" : s.notOwners ? NOT_OWNERS : s.documentSays ? DOCUMENT_SAYS(s.documentSays) : "";
 
 /** A proposal's title, cut at a word the same way in all three formats, or its name when
  *  it has none to show. */
@@ -196,8 +279,9 @@ export function proposalsMarkdown(v: ProposalsView): string {
 }
 
 /** Named fields, never the service's answer forwarded on. `status` is one of the six
- *  words or null, and `status_note` says, in the words the page uses, why it is null or that
- *  a decision was not the owner's. */
+ *  words or null, and `status_note` says, in the words the page uses, why it is null, that
+ *  a decision was not the owner's, or that the document's Status names another word, which
+ *  `document_status` gives. `status_from` is "stage" where the status is the service's stage. */
 export function proposalsJson(v: ProposalsView, canonical: string): unknown {
   return {
     title: "Proposals",
@@ -214,8 +298,10 @@ export function proposalsJson(v: ProposalsView, canonical: string): unknown {
         name: r.name,
         title: titleOf(r),
         status: r.status.kind === "word" ? r.status.word : null,
+        ...(r.status.kind === "word" && r.status.from ? { status_from: r.status.from } : {}),
         ...(r.status.kind === "word" && r.status.reason ? { reason: r.status.reason } : {}),
         ...(note ? { status_note: note } : {}),
+        ...(r.status.kind === "word" && r.status.documentSays ? { document_status: r.status.documentSays } : {}),
         created_at: r.created_at,
         page: `/spaces/${r.name}`,
       };

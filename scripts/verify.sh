@@ -2176,8 +2176,9 @@ fi
 # ------------------------------------------------------------------ the proposals
 #
 # Every request to change the service, newest first, read live: the public work spaces filed
-# under this-service whose names start with proposal-, each with the status the first words of
-# its document's Status section give. The page answers whether or not the service holds one
+# under this-service whose names start with proposal-, each with its status: the stage the service
+# holds for the space when the owner of the space proposals set it, and otherwise the first words
+# of its document's Status section. The page answers whether or not the service holds one
 # (it says so when it holds none), so nothing here needs a proposal to exist; a service that
 # does not list the category is a skip, so a site in front of an older one is never reported
 # as proved.
@@ -2217,6 +2218,7 @@ t, o = json.loads(os.environ["THEIRS"]), json.loads(os.environ["OURS"])
 WORDS = ("proposed", "discussing", "accepted", "in progress", "merged", "declined")
 NOTES = ("no document yet", "no status yet", "status could not be read just now")
 NOT_OWNERS = "(not set by the service\x27s owner)"
+SAYS = "(the document\x27s Status says "
 problems = []
 items = o["items"]
 for i in items:
@@ -2225,6 +2227,11 @@ for i in items:
     if i["status"] is None:
         if i.get("status_note") not in NOTES: problems.append(i["name"] + " has no status and no reason for it")
     elif i["status"] not in WORDS: problems.append(i["name"] + " has a status that is none of the six")
+    elif i.get("status_from") not in (None, "stage"): problems.append(i["name"] + " says its status came from somewhere other than a stage")
+    elif "document_status" in i:
+        if i.get("status_from") != "stage": problems.append(i["name"] + " names what the document says and its status is not a stage")
+        elif i["document_status"] not in WORDS or i["document_status"] == i["status"]: problems.append(i["name"] + " says the document differs and names no other word of the six")
+        elif i.get("status_note") != SAYS + i["document_status"] + ")": problems.append(i["name"] + " has a note that is not the one for a document that names another word")
     elif i.get("status_note", NOT_OWNERS) != NOT_OWNERS: problems.append(i["name"] + " has a note that is not the one for a decision of another key")
     elif "status_note" in i and i["status"] in ("proposed", "discussing"): problems.append(i["name"] + " carries the note on a status that decides nothing")
     if "reason" in i and i["status"] != "declined": problems.append(i["name"] + " gives a reason and is not declined")

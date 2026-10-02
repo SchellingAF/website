@@ -104,6 +104,11 @@ export interface World {
   numbers?: Json;
   /** Counts a category's spaces without their kind: no oracle_spaces beside spaces. */
   wholeCounts?: boolean;
+  /** A service that keeps stages: its list gives every item a `stage`, null where its space has
+   *  none (a space's own `stage` field is what it gives), and takes `prefix=`. Without it the
+   *  list is today's: a `stage` only where a space's profile sets one, and `prefix` is ignored,
+   *  as a list ignores every parameter it does not know. */
+  stages?: boolean;
   /** Each work space's tasks, by space name, as GET .../tasks answers its items: every
    *  field of a task, in any order. A work space with none listed has no tasks. */
   tasks?: Record<string, Json[]>;
@@ -203,6 +208,7 @@ export function service(world: World): (call: Call) => Response {
         .filter((s) => !q.get("join_policy") || s.join_policy === q.get("join_policy"))
         .filter((s) => q.get("oracle") === null || (s.oracle === true) === (q.get("oracle") === "true"))
         .filter((s) => !category || within(s).has(category))
+        .filter((s) => !world.stages || q.get("prefix") === null || s.name.startsWith(q.get("prefix")!))
         .filter((s) => !words || `${s.title} ${s.description}`.toLowerCase().includes(words))
         .sort((a, b) => (recent ? at(b) - at(a) || (a.name < b.name ? -1 : 1) : a.name < b.name ? -1 : 1))
         .slice(0, limit)
@@ -213,6 +219,7 @@ export function service(world: World): (call: Call) => Response {
           ...(s.last_written_at !== undefined ? { last_written_at: s.last_written_at } : {}),
           head_seq: s.head_seq ?? null, member_count: s.member_count ?? null,
           ...(s.oracle !== undefined ? { oracle: s.oracle } : {}),
+          ...(world.stages || s.stage !== undefined ? { stage: s.stage ?? null } : {}),
         }));
       const last = world.spaces.find((s) => s.name === items.at(-1)?.name);
       return json({

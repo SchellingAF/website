@@ -67,7 +67,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
-import { NO_DOCUMENT, UNREAD, WITHHELD, proposalsHtml, proposalsJson, proposalsMarkdown, readStatus, vouched, type ProposalRow, type ProposalsView, type Status } from "./proposals-render.ts";
+import { NO_DOCUMENT, UNREAD, WITHHELD, checked, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -2784,8 +2784,8 @@ async function numbersPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
 /** A proposal's space is named with this and filed under this category. */
 const PROPOSAL_PREFIX = "proposal-";
 const PROPOSAL_CATEGORY = "this-service";
-/** The space whose owner decides: a status counts only in a version of a document that
- *  its owner posted. */
+/** The space whose owner decides: a stage counts only when its owner set it, and a document's
+ *  status only in a version its owner posted. */
 const PROPOSALS_SPACE = "proposals";
 /** The most proposals whose documents one build of the page reads, newest first. Anybody can
  *  open a space that fits the two rules above, and every one costs the service a read. */
@@ -2800,15 +2800,17 @@ const PROPOSAL_READS_AT_ONCE = 2;
  *  twenty-six seconds at the very most. */
 const PROPOSAL_READ_BUDGET_MS = 20_000;
 
-type ProposalsRead = { ok: true; view: ProposalsView } | { ok: false; why: Pick<Refusal, "code" | "message"> };
+/** `partial` says a build is short of what it could read, so that the page is held for a minute only:
+ *  a document that could not be read, or a stage whose document was not read to compare it with. */
+type ProposalsRead = { ok: true; view: ProposalsView; partial: boolean } | { ok: false; why: Pick<Refusal, "code" | "message"> };
 
 /** Whether the service said to slow down: the product answers a read over its window or its
  *  share BUSY, with a 503, and may answer RATE_LIMITED or a 429. */
 const toldToSlowDown = (res: Pick<Refusal, "code" | "status">): boolean =>
   res.code === "BUSY" || res.code === "RATE_LIMITED" || res.status === 429;
 
-/** A space found by the list, before its document is read. */
-type Found = Omit<ProposalRow, "status">;
+/** A space found by the list, before its document is read, with the stage the list gave it. */
+type Found = Omit<ProposalRow, "status"> & { stage: Stage | null };
 
 /**
  * THE LIST, then ONE DOCUMENT READ A PROPOSAL.
@@ -2836,6 +2838,19 @@ type Found = Omit<ProposalRow, "status">;
  * only in a version posted by the owner of the space proposals, whom the build reads once
  * (proposalsOwner). Each document names the key that posted the version it shows, and
  * vouched() compares the two. When the owner cannot be read, a decision is not shown at all.
+ *
+ * THE STAGE. A list item of a service that keeps stages carries `stage`, the word its owner or an
+ * admin or coordinator set when a version became current, and the key that did. It counts as the
+ * status where that key is the owner of the space proposals, and a stage another key set is
+ * ignored, as a document's words from another key are noted: the page reads the document as it did
+ * before there were stages. A service that keeps none gives an item no `stage`, and the same
+ * reading is all there is. Where both count and the document's Status names another word, the
+ * row says so, which is the one reason a document is still read for a row that has a stage.
+ *
+ * THE PREFIX. The walk also asks for `prefix`, which a service that takes it answers with the
+ * proposals alone, no page spent on the names after them. One that does not take it ignores it (its
+ * list reads only the parameters it knows), and then the walk stops at the first name that is no
+ * proposal's, as it always did, so the same page is right before and after the service ships it.
  */
 async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   const until = Date.now() + PROPOSAL_READ_BUDGET_MS;
@@ -2847,7 +2862,7 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   let cut = false;
   for (let pages = 0; cursor !== null; pages++) {
     if (pages === PROPOSAL_LIST_PAGES || (pages > 0 && late())) { cut = true; break; }
-    const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT), category: PROPOSAL_CATEGORY, oracle: "false", after: cursor });
+    const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT), category: PROPOSAL_CATEGORY, oracle: "false", prefix: PROPOSAL_PREFIX, after: cursor });
     const res = await apiGet<unknown>(env, `/v1/spaces?${params}`, as);
     if (!res.ok) return { ok: false, why: res };
     const page = record(res.data);
@@ -2860,7 +2875,10 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
       if (!name.startsWith(PROPOSAL_PREFIX)) { inside = false; break; }
       if (space.visibility !== "public" || space.oracle === true) continue;
       const opened = textOrNull(space.created_at);
-      found.set(name, { name, title: flat(textOrNull(space.title) ?? ""), created_at: opened !== null && ISO_TIME.test(opened) ? opened : null });
+      found.set(name, {
+        name, title: flat(textOrNull(space.title) ?? ""), created_at: opened !== null && ISO_TIME.test(opened) ? opened : null,
+        stage: readStage(space.stage),
+      });
     }
     if (!inside || page.has_more !== true) { cursor = null; continue; }
     // A cursor that does not move on would read the same page for ever.
@@ -2873,7 +2891,6 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   const all = [...found.values()].sort((a, b) => openedAt(b) - openedAt(a) || (a.name < b.name ? -1 : 1));
   const listed = all.slice(0, PROPOSALS_SHOWN);
 
-  const statuses: Status[] = listed.map(() => UNREAD);
   let slowDown = false;
   let owner: string | null = null;
   if (listed.length && !late()) {
@@ -2881,6 +2898,11 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
     owner = asked.owner;
     slowDown = asked.slow;
   }
+  // What each stage gives where it counts, which stands whether or not the document is read.
+  const staged = listed.map((p) => stagedStatus(p.stage, owner));
+  const statuses: Status[] = staged.map((s) => s ?? UNREAD);
+  /** Whether each document answered, with a text or with none to compare. */
+  const answered = listed.map(() => false);
   let taken = 0;
   const worker = async (): Promise<void> => {
     for (let i = taken++; i < listed.length; i = taken++) {
@@ -2889,16 +2911,23 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
       if (res.ok) {
         const current = readableDocument(res.data);
         // A current version with no text is withheld or hidden, which is not no document.
-        statuses[i] = current.version !== null && current.text === null
-          ? WITHHELD
-          : vouched(readStatus(current.text), current.version?.author ?? "", owner);
-      } else if (res.code === "NOT_AN_ORACLE") statuses[i] = NO_DOCUMENT;
-      else if (toldToSlowDown(res)) slowDown = true;
+        const withheld = current.version !== null && current.text === null;
+        const stage = staged[i];
+        statuses[i] = stage
+          ? (withheld ? stage : checked(stage, readStatus(current.text)))
+          : withheld ? WITHHELD : vouched(readStatus(current.text), current.version?.author ?? "", owner);
+        answered[i] = true;
+      } else if (res.code === "NOT_AN_ORACLE") {
+        statuses[i] = staged[i] ?? NO_DOCUMENT;
+        answered[i] = true;
+      } else if (toldToSlowDown(res)) slowDown = true;
     }
   };
   await Promise.all(Array.from({ length: PROPOSAL_READS_AT_ONCE }, worker));
 
-  return { ok: true, view: { rows: listed.map((p, i) => ({ ...p, status: statuses[i]! })), more: cut || all.length > listed.length } };
+  const rows = listed.map((p, i): ProposalRow => ({ name: p.name, title: p.title, created_at: p.created_at, status: statuses[i]! }));
+  const partial = statuses.some((s) => s.kind === "unread") || staged.some((s, i) => s !== null && !answered[i]);
+  return { ok: true, view: { rows, more: cut || all.length > listed.length }, partial };
 }
 
 /** The owner of the space proposals, as the service gives it, or null when it cannot be read
@@ -2945,7 +2974,7 @@ function buildProposals(origin: string, env: ApiEnv, as: ReadAs): Promise<Built>
   return (buildingProposals ??= (async (): Promise<Built> => {
     const read = await readProposals(env, as);
     if (!read.ok) return read;
-    const seconds = read.view.rows.some((r) => r.status.kind === "unread") ? PARTIAL_SECONDS : TTL.proposals;
+    const seconds = read.partial ? PARTIAL_SECONDS : TTL.proposals;
     const held: HeldReads = { view: read.view, seconds };
     await cachePut(heldKey(origin), new Response(JSON.stringify(held)), seconds);
     return { ok: true, view: read.view, left: seconds };

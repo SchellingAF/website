@@ -49,7 +49,7 @@ const LEAD_HTML = `A proposal is a request to change the service, kept in a publ
 const LEAD_TEXT = "A proposal is a request to change the service, kept in a public work space whose name starts with proposal- and that is filed under the category this-service. To open one, start with the space proposals. The steps are in the reference.";
 const LEAD_MARKDOWN = `A proposal is a request to change the service, kept in a public work space whose name starts with \`proposal-\` and that is filed under the category [this-service](/spaces/by/category/this-service.md). To open one, start with the space [proposals](/spaces/proposals.md). The steps are in the reference (${REFERENCE}).`;
 const NOT_OWNERS = "(not set by the service's owner)";
-const STATUS_NOTE = "A proposal's status is the first words of the Status section of its document.";
+const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document.";
 const MORE = "More proposals exist than this page lists.";
 
 describe("the list", () => {
@@ -396,6 +396,273 @@ describe("who set a status", () => {
       const maxAge = Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]);
       assert.ok(maxAge > 0 && maxAge <= 60, `${what}: held ${maxAge} seconds`);
     }
+  });
+});
+
+describe("the stage the service gives a proposal", () => {
+  // A stage as the service writes one on a list item: word, note, the post, the key that set it, and when.
+  const stage = (word: string, by: string = OWNER, note: string | null = null): Json =>
+    ({ word, note, post_id: "0199f0f0-0000-7000-8000-0000000000aa", set_by: by, set_at: "2026-10-02T10:00:00.000Z" });
+  /** A proposal whose list item carries `st` as its stage, with a document that says `prose`. */
+  const staged = (name: string, prose: string | null, st: unknown, created = at(1), extra: Partial<Proposal> = {}): Proposal =>
+    ({ ...withStatus(name, prose, created, { stage: st }), ...extra });
+  /** The same world as a service that keeps stages answers it. */
+  const keeping = (proposals: Proposal[], others: Json[] = []) => ({ ...proposalWorld(proposals, others), stages: true });
+  const jsonOf = async () => JSON.parse((await ask(`${host()}/proposals.json`)).text);
+  const itemOf = (doc: Json, name: string): Json => doc.items.find((i: Json) => i.name === name);
+  const sectionOf = (md: string, name: string): string => md.split(/^## /m).find((p) => p.startsWith(`${name}\n`))!;
+  const NOTE_SAYS = "(the document&#39;s Status says";
+
+  test("a stage the owner of the space proposals set is the status, whatever the document says or lacks, in every format", async () => {
+    const set = [
+      staged("proposal-s-accepted", "accepted on 2 October 2026.", stage("accepted"), at(9)),
+      staged("proposal-s-progress", "In progress: a pull request is open", stage("in-progress"), at(8)),
+      staged("proposal-s-declined", "declined: other words of the document.", stage("declined", OWNER, "it repeats proposal-routine."), at(7)),
+      { name: "proposal-s-nodoc", created: at(6), fields: { stage: stage("merged") } },
+      staged("proposal-s-nosection", null, stage("merged"), at(5)),
+      staged("proposal-s-nostatus", "something else entirely", stage("merged"), at(4)),
+      staged("proposal-s-proposed", "proposed; the owner decides", stage("proposed"), at(3)),
+      staged("proposal-s-discussing", "discussing", stage("discussing"), at(2)),
+      // The document is another key's, and the stage the owner's: the stage is what counts, with no note.
+      { ...staged("proposal-s-strangers-document", "merged on 2 October 2026.", stage("merged"), at(1)), author: STRANGER },
+    ];
+    answer = service(keeping(set));
+    const html = (await ask(`${host()}/proposals`)).text;
+    const want: [string, string][] = [
+      ["accepted", "accepted"], ["progress", "in progress"], ["declined", "declined"], ["nodoc", "merged"], ["nosection", "merged"],
+      ["nostatus", "merged"], ["proposed", "proposed"], ["discussing", "discussing"], ["strangers-document", "merged"],
+    ];
+    for (const [n, word] of want) assert.equal(statusOf(rowFor(html, `proposal-s-${n}`)), word, n);
+    assert.ok(!html.includes("not set by"), "a stage the owner set needs no note");
+    assert.ok(!html.includes("Status says"), "nor does a document that agrees or names nothing");
+    assert.ok(rowFor(html, "proposal-s-declined").includes("Reason: it repeats proposal-routine."), "the note is the reason, not the document's words");
+    assert.ok(!html.includes("other words of the document"));
+    assert.deepEqual(htmlProblems(html), []);
+    const md = (await ask(`${host()}/proposals.md`)).text;
+    for (const [n, word] of want) assert.match(sectionOf(md, `proposal-s-${n}`), new RegExp(`^- status: ${word}$`, "m"), n);
+    assert.match(sectionOf(md, "proposal-s-declined"), /^- reason: `it repeats proposal-routine\.`$/m);
+    assert.deepEqual(markdownProblems(md), []);
+    const doc = await jsonOf();
+    for (const [n, word] of want) {
+      const item = itemOf(doc, `proposal-s-${n}`);
+      assert.equal(item.status, word, n);
+      assert.equal(item.status_from, "stage", n);
+      assert.ok(!("status_note" in item) && !("document_status" in item), n);
+    }
+    assert.equal(itemOf(doc, "proposal-s-declined").reason, "it repeats proposal-routine.");
+    assert.ok(!("reason" in itemOf(doc, "proposal-s-accepted")));
+  });
+
+  test("only a declined proposal shows its note, as a reason", async () => {
+    answer = service(keeping([
+      staged("proposal-n-merged", "merged", stage("merged", OWNER, "in commit abc123."), at(3)),
+      staged("proposal-n-declined", "declined", stage("declined", OWNER, "A  long\n reason. ".repeat(60)), at(2)),
+      staged("proposal-n-bare", "declined", stage("declined"), at(1)),
+    ]));
+    const html = (await ask(`${host()}/proposals`)).text;
+    assert.ok(!rowFor(html, "proposal-n-merged").includes("Reason"));
+    assert.ok(!html.includes("abc123"));
+    const doc = await jsonOf();
+    assert.ok(!("reason" in itemOf(doc, "proposal-n-merged")));
+    assert.ok(!("reason" in itemOf(doc, "proposal-n-bare")), "no note, no reason: the document's words are not borrowed");
+    const reason = itemOf(doc, "proposal-n-declined").reason as string;
+    assert.ok(reason.length <= 301 && reason.endsWith("…"), `cut at a word: ${reason.length}`);
+    assert.ok(!/\s{2}/.test(reason), "on one line");
+    assert.ok(rowFor(html, "proposal-n-declined").includes(`Reason: ${reason.replace(/&/g, "&amp;")}`));
+    assert.ok((await ask(`${host()}/proposals.md`)).text.includes(`- reason: \`${reason}\``));
+  });
+
+  test("a stage another key set is not counted: the page reads the document as it did, and is the page it was", async () => {
+    const prose: [string, string, string?][] = [
+      ["proposed", "proposed; the owner decides"], ["by-owner", "merged on 2 October 2026."], ["by-stranger", "merged on 2 October 2026.", STRANGER],
+    ];
+    const make = (withStage: boolean): Proposal[] => prose.map(([n, text, author], i) => ({
+      ...withStatus(`proposal-t-${n}`, text, at(9 - i), withStage ? { stage: stage("declined", STRANGER, "not wanted.") } : {}), ...(author ? { author } : {}),
+    }));
+    const formats = async () => [(await ask(`${host()}/proposals`)).text, (await ask(`${host()}/proposals.md`)).text, await jsonOf()] as const;
+    answer = service(keeping(make(true)));
+    const [html, md, doc] = await formats();
+    assert.equal(statusOf(rowFor(html, "proposal-t-proposed")), "proposed");
+    assert.equal(statusOf(rowFor(html, "proposal-t-by-owner")), "merged");
+    assert.ok(!rowFor(html, "proposal-t-by-owner").includes("not set by"));
+    assert.ok(rowFor(html, "proposal-t-by-stranger").includes("(not set by the service&#39;s owner)"), "the document's own rule still applies");
+    assert.ok(!html.includes("Status says") && !html.includes("not wanted"), "no flag, and nothing of a stage that does not count");
+    for (const i of doc.items) assert.ok(!("status_from" in i) && !("reason" in i), i.name);
+    // Beside a service that gives no stage at all, the three formats are the same.
+    answer = service(proposalWorld(make(false)));
+    assert.deepEqual(await formats(), [html, md, doc]);
+  });
+
+  test("where the stage and the document name different words the row says what the document says, beside the stage, in every format", async () => {
+    answer = service(keeping([
+      staged("proposal-d-accepted", "merged on 2 October 2026.", stage("accepted"), at(9)),
+      staged("proposal-d-progress", "accepted: the owner decided.", stage("in-progress"), at(8)),
+      staged("proposal-d-proposed", "declined: not now.", stage("proposed"), at(7)),
+      // A document by another key that names another word is said the same: nothing is taken from it.
+      { ...staged("proposal-d-strangers", "merged", stage("accepted"), at(6)), author: STRANGER },
+      // Words that agree in other capitals, and a section that names none of the six, are no difference.
+      staged("proposal-d-capitals", "IN PROGRESS", stage("in-progress"), at(5)),
+      staged("proposal-d-none", "waiting on a reply", stage("accepted"), at(4)),
+    ]));
+    const html = (await ask(`${host()}/proposals`)).text;
+    const flagged: [string, string, string][] = [
+      ["accepted", "accepted", "merged"], ["progress", "in progress", "accepted"], ["proposed", "proposed", "declined"], ["strangers", "accepted", "merged"],
+    ];
+    for (const [n, word, says] of flagged) {
+      const row = rowFor(html, `proposal-d-${n}`);
+      assert.equal(statusOf(row), word, n);
+      assert.ok(row.includes(`<span class="tag">${word}</span> ${NOTE_SAYS} ${says}) <code>proposal-d-${n}</code>`), n);
+      assert.ok(!row.includes("not set by"), n);
+    }
+    for (const n of ["capitals", "none"]) assert.ok(!rowFor(html, `proposal-d-${n}`).includes("Status says"), n);
+    const md = (await ask(`${host()}/proposals.md`)).text;
+    for (const [n, word, says] of flagged) assert.match(sectionOf(md, `proposal-d-${n}`), new RegExp(`^- status: ${word} \\(the document's Status says ${says}\\)$`, "m"), n);
+    const doc = await jsonOf();
+    for (const [n, word, says] of flagged) {
+      const item = itemOf(doc, `proposal-d-${n}`);
+      assert.equal(item.status, word, n);
+      assert.equal(item.status_from, "stage", n);
+      assert.equal(item.status_note, `(the document's Status says ${says})`, n);
+      assert.equal(item.document_status, says, n);
+    }
+    for (const n of ["capitals", "none"]) assert.ok(!("status_note" in itemOf(doc, `proposal-d-${n}`)), n);
+    assert.deepEqual(htmlProblems(html), []);
+    assert.deepEqual(markdownProblems(md), []);
+  });
+
+  test("a stage the page has no word for, or that is not in the shape the service writes, is none, and the document is read as before", async () => {
+    const bad: [string, unknown][] = [
+      ["unknown-word", stage("stalled")], ["constructor", stage("constructor")], ["to-string", stage("toString")], ["capitals", stage("Merged")],
+      ["too-long", stage("merged".padEnd(33, "x"))], ["empty-word", stage("")], ["not-a-key", stage("merged", "not-a-key")], ["capital-key", stage("merged", OWNER.toUpperCase())],
+      ["no-key", { word: "merged", note: null }], ["a-string", "merged"], ["a-list", [stage("merged")]], ["a-number", 7], ["empty", {}],
+    ];
+    answer = service(keeping(bad.map(([n, st], i) => staged(`proposal-b-${n}`, "proposed", st, at(20 - i)))));
+    const { res, text } = await ask(`${host()}/proposals`);
+    assert.equal(res.status, 200, text.slice(0, 200));
+    for (const [n] of bad) assert.equal(statusOf(rowFor(text, `proposal-b-${n}`)), "proposed", n);
+    assert.ok(!text.includes("Status says") && !text.includes("not set by"));
+  });
+
+  test("a note is text in every format, never structure", async () => {
+    const note = `<script>alert(51)</script> [a link](https://x.invalid) \`code\`\n## a heading`;
+    answer = service(keeping([staged("proposal-h-note", "declined", stage("declined", OWNER, note), at(1))]));
+    const html = (await ask(`${host()}/proposals`)).text;
+    assert.ok(!html.includes("<script>alert(51)"), "no raw script");
+    assert.ok(html.includes("&lt;script&gt;alert(51)&lt;/script&gt; [a link](https://x.invalid) `code` ## a heading"), "escaped, on one line");
+    assert.deepEqual(htmlProblems(html), []);
+    const md = (await ask(`${host()}/proposals.md`)).text;
+    assert.ok(!/^## (?!`?proposal-)/m.test(md), "a note never became a heading");
+    assert.deepEqual(markdownProblems(md), []);
+    assert.equal(itemOf(await jsonOf(), "proposal-h-note").reason, "<script>alert(51)</script> [a link](https://x.invalid) `code` ## a heading");
+  });
+
+  test("a service that gives no stage, or gives null, is read from the documents alone, and the page is the same", async () => {
+    const set = [
+      withStatus("proposal-alpha", "merged on 1 October 2026 in commit abc123.", at(1)),
+      withStatus("proposal-beta", "proposed; the owner decides", at(2)),
+      { ...withStatus("proposal-gamma", "declined: it repeats proposal-routine.", at(3)), author: STRANGER },
+    ];
+    answer = service(proposalWorld(set));
+    const today = [(await ask(`${host()}/proposals`)).text, (await ask(`${host()}/proposals.md`)).text, (await ask(`${host()}/proposals.json`)).text];
+    answer = service(keeping(set));
+    const nulls = [(await ask(`${host()}/proposals`)).text, (await ask(`${host()}/proposals.md`)).text, (await ask(`${host()}/proposals.json`)).text];
+    assert.deepEqual(nulls, today);
+    assert.equal(statusOf(rowFor(today[0]!, "proposal-alpha")), "merged");
+    assert.ok(rowFor(today[0]!, "proposal-gamma").includes("(not set by the service&#39;s owner)"));
+  });
+
+  test("with no owner to compare a stage to, it does not count: a decision is not shown, and the page is held for a minute only", async () => {
+    const world = keeping([
+      staged("proposal-o-merged", "merged", stage("merged"), at(3)),
+      staged("proposal-o-proposed", "proposed", stage("proposed"), at(2)),
+      staged("proposal-o-other", "declined: no.", stage("accepted", STRANGER), at(1)),
+    ]);
+    const base = service(world);
+    answer = (call) => (call.url.pathname === "/v1/spaces/proposals" ? new Response("down", { status: 500 }) : base(call));
+    const { text, h } = await ask(`${host()}/proposals`);
+    assert.equal(statusOf(rowFor(text, "proposal-o-merged")), "status could not be read just now");
+    assert.equal(statusOf(rowFor(text, "proposal-o-proposed")), "proposed", "what decides nothing is shown as it is");
+    assert.equal(statusOf(rowFor(text, "proposal-o-other")), "status could not be read just now");
+    const maxAge = Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]);
+    assert.ok(maxAge > 0 && maxAge <= 60, `held ${maxAge} seconds`);
+  });
+
+  test("a stage stands when its document cannot be read, and the page is held a minute so that the comparison is made later", async () => {
+    const world = keeping([
+      staged("proposal-r-fails", "merged", stage("merged"), at(3)),
+      staged("proposal-r-fine", "accepted", stage("accepted"), at(2)),
+    ]);
+    const base = service(world);
+    answer = (call) => (call.url.pathname === "/v1/spaces/proposal-r-fails/document" ? new Response("down", { status: 500 }) : base(call));
+    const { text, h } = await ask(`${host()}/proposals`);
+    assert.equal(statusOf(rowFor(text, "proposal-r-fails")), "merged", "not 'could not be read'");
+    assert.equal(statusOf(rowFor(text, "proposal-r-fine")), "accepted");
+    const maxAge = Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]);
+    assert.ok(maxAge > 0 && maxAge <= 60, `held ${maxAge} seconds`);
+  });
+
+  test("is held ten minutes when every stage's document was read, and a document that is withheld or has no text does not shorten it", async () => {
+    answer = service(keeping([
+      staged("proposal-w-fine", "accepted", stage("accepted"), at(4)),
+      { ...staged("proposal-w-withheld", "merged", stage("merged"), at(3)), unavailable: "withheld" },
+      { ...staged("proposal-w-hidden", "merged", stage("merged"), at(2)), unavailable: "hidden" },
+      { name: "proposal-w-nodoc", created: at(1), fields: { stage: stage("declined") } },
+    ]));
+    const { text, h } = await ask(`${host()}/proposals`);
+    for (const [n, word] of [["fine", "accepted"], ["withheld", "merged"], ["hidden", "merged"], ["nodoc", "declined"]]) assert.equal(statusOf(rowFor(text, `proposal-w-${n}`)), word, n);
+    assert.ok(!text.includes("Status says"));
+    assert.ok(Number(/max-age=(\d+)/.exec(h("Cache-Control") ?? "")?.[1]) > 60, "held for the full time");
+  });
+
+  test("a document is still read for each proposal, two at a time, for the comparison, and the owner once", async () => {
+    answer = service(keeping([
+      staged("proposal-c-a", "accepted", stage("accepted"), at(3)),
+      staged("proposal-c-b", "merged", stage("merged"), at(2)),
+      staged("proposal-c-c", "proposed", null, at(1)),
+    ]));
+    const before = fake.calls.length;
+    await ask(`${host()}/proposals`);
+    assert.deepEqual([...documentsSince(before)].sort(), ["proposal-c-a", "proposal-c-b", "proposal-c-c"]);
+    assert.equal(fake.calls.filter((c, i) => i >= before && c.url.pathname === "/v1/spaces/proposals").length, 1);
+  });
+
+  test("the list is asked for the names that start with proposal- and the page is the same from a service that takes it and one that does not", async () => {
+    const tail = [otherSpace("proposals"), otherSpace("quest-one"), otherSpace("zeta-notes")];
+    const set = [staged("proposal-x-a", "proposed", stage("merged"), at(2)), staged("proposal-x-b", "merged", null, at(1))];
+    // A service that keeps stages takes the prefix and answers only the names that start with it.
+    answer = service(keeping(set, tail));
+    const before = fake.calls.length;
+    const kept = [(await ask(`${host()}/proposals`)).text];
+    const asked = listReads().filter((c) => fake.calls.indexOf(c) >= before);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0]!.url.searchParams.get("prefix"), "proposal-");
+    assert.equal(asked[0]!.url.searchParams.get("category"), "this-service");
+    assert.equal(asked[0]!.url.searchParams.get("oracle"), "false");
+    assert.equal(asked[0]!.url.searchParams.get("after"), "proposal");
+    assert.equal(statusOf(rowFor(kept[0], "proposal-x-a")), "merged");
+    assert.equal(statusOf(rowFor(kept[0], "proposal-x-b")), "merged");
+    // One that does not know it ignores it, as it does every parameter it does not know, and sends no stage at all.
+    answer = service(proposalWorld(set.map((p) => ({ ...p, fields: {} })), tail));
+    const mark = fake.calls.length;
+    const today = await ask(`${host()}/proposals`);
+    const heard = listReads().filter((c) => fake.calls.indexOf(c) >= mark);
+    assert.equal(heard.length, 1, "the walk stops at the first name that is no proposal's");
+    assert.equal(heard[0]!.url.searchParams.get("prefix"), "proposal-");
+    assert.deepEqual(rows(today.text).map(nameOf), ["proposal-x-a", "proposal-x-b"]);
+    assert.equal(statusOf(rowFor(today.text, "proposal-x-a")), "proposed", "no stage was given, so the document says");
+  });
+
+  test("walks the pages of a service that takes the prefix, and reads no page past the proposals", async () => {
+    const crowd = Array.from({ length: 450 }, (_, i) => otherSpace(`zz-notes-${String(i).padStart(3, "0")}`));
+    const many = Array.from({ length: 205 }, (_, i) => withStatus(`proposal-p${String(i).padStart(3, "0")}`, "proposed", new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString()));
+    answer = service(keeping(many, [otherSpace("proposals"), ...crowd]));
+    const before = fake.calls.length;
+    const { text } = await ask(`${host()}/proposals`);
+    const asked = listReads().filter((c) => fake.calls.indexOf(c) >= before);
+    assert.deepEqual(asked.map((c) => c.url.searchParams.get("after")), ["proposal", "proposal-p199"]);
+    for (const c of asked) assert.equal(c.url.searchParams.get("prefix"), "proposal-");
+    assert.equal(rows(text).length, 100);
+    assert.equal(nameOf(rows(text)[0]!), "proposal-p204");
   });
 });
 
