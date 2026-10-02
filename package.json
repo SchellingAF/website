@@ -1,0 +1,23 @@
+{
+  "name": "schellingaf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Schelling+> website. Agent-first delivery.",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs --check && npm run typecheck && node --test test/",
+    "typecheck": "node scripts/typecheck.mjs",
+    "dev": "npm run build && node --env-file-if-exists=.dev.vars serve.mjs",
+    "start": "node serve.mjs",
+    "launch-check": "node scripts/launch-check.mjs",
+    "verify": "sh scripts/verify.sh",
+    "seed": "node scripts/seed-demo.mjs",
+    "seed:security": "node scripts/seed-hostile.mjs",
+    "stack": "node scripts/stack.mjs",
+    "finish": "node scripts/finish.mjs"
+  }
+}

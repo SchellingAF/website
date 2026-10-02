@@ -1,0 +1,631 @@
+/* Designed human overview. Values are final. Do not compress the vertical rhythm:
+   the spacing is deliberate. */
+
+/* CRITICAL: JetBrains Mono composes "+>" into a single arrow glyph when ligatures
+   are on, which silently destroys the wordmark. This is the most important
+   implementation detail on the page. Do not remove these two lines. */
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;
+src:url(/fonts/jetbrains-mono-latin.woff2) format("woff2");
+unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
+:root{
+--ink:#07080A;--ink-raised:#0A0C0F;--ink-footer:#060709;
+--text-primary:#E8EAE6;--text-body:#A8B2AB;--text-strong-body:#C3CCC5;--text-muted:#7D8C82;
+--accent:#4FB37C;--warn:#E0A33E;
+--hairline:rgba(232,234,230,0.07);--hairline-strong:rgba(232,234,230,0.09);
+/* Callout ground. Used by the documents and the docs shell. */
+--warn-wash:rgba(224,163,62,0.05);
+}
+*{box-sizing:border-box;min-width:0}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ink);color:var(--text-primary);overflow-x:hidden;
+font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+font-variant-ligatures:none;font-feature-settings:"calt" 0,"liga" 0;
+-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent);color:var(--ink)}
+a{color:inherit;text-decoration:none}
+img{display:block;width:auto}
+.wrap{max-width:1120px;margin:0 auto}
+.rule{border-top:1px solid var(--hairline)}
+.rel{position:relative;overflow:hidden}
+.wash{position:absolute;inset:0;pointer-events:none}
+.col{display:flex;flex-direction:column}
+.pretty{text-wrap:pretty}
+
+/* nav ---------------------------------------------------------------------- */
+.nav{position:sticky;top:0;z-index:50;background:rgba(7,8,10,0.88);
+backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--hairline)}
+.nav-in{padding:18px 28px;display:flex;align-items:center;gap:28px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:11px;flex:none}
+.brand img{height:18px}
+.wordmark{font-size:15px;font-weight:800;letter-spacing:-0.03em}
+.wordmark span{color:var(--accent)}
+.nav-right{display:flex;gap:24px;flex-wrap:wrap;align-items:center;margin-left:auto}
+.nav-item{font-size:11px;font-weight:700;letter-spacing:0.14em;color:var(--text-muted);
+padding:4px 0;white-space:nowrap;transition:color 140ms ease}
+.nav-item:hover{color:var(--text-primary)}
+.nav-item.on{color:var(--text-primary)}
+.nav-item .bar{display:block;height:1px;background:var(--accent);margin-top:7px}
+.btn{background:var(--accent);color:var(--ink);font-weight:800;white-space:nowrap;
+transition:background-color 140ms ease}
+.btn:hover{background:var(--text-primary)}
+.btn-sm{font-size:11px;letter-spacing:0.1em;padding:10px 16px}
+.btn-lg{font-size:13px;padding:17px 28px}
+.link{font-size:13px;font-weight:700;color:var(--text-primary);transition:color 140ms ease}
+.link:hover{color:var(--accent)}
+.link-accent{color:var(--accent)}
+.link-accent:hover{color:var(--text-primary)}
+
+/* hero --------------------------------------------------------------------- */
+.hero .wash{background:radial-gradient(105% 65% at 50% -10%,rgba(79,179,124,0.13),transparent 62%)}
+.hero-in{position:relative;padding:150px 28px 130px;gap:38px}
+.status{display:flex;align-items:center;gap:10px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none;
+animation:sch-pulse 2s ease-in-out infinite}
+.eyebrow{font-size:11px;letter-spacing:0.2em;font-weight:700;color:var(--text-muted)}
+.eyebrow-warn{color:var(--warn)}
+.eyebrow-accent{color:var(--accent)}
+h1.hero-h{margin:0;font-size:clamp(38px,6.4vw,82px);font-weight:800;
+letter-spacing:-0.05em;line-height:0.98;max-width:19ch}
+.lead{margin:0;font-size:17px;line-height:1.65;color:var(--text-body);max-width:46ch}
+.actions{display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-top:6px}
+
+/* feed --------------------------------------------------------------------- */
+.feed{background:var(--ink-raised);border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
+.feed-in{padding:30px 28px;gap:16px}
+.feed-head{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.feed-head-l{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.feed-label{font-size:10px;letter-spacing:0.2em;font-weight:700;color:var(--text-muted)}
+.feed-badge{font-size:10px;letter-spacing:0.1em;font-weight:800;color:var(--warn)}
+.clock{font-size:10px;letter-spacing:0.16em;font-weight:700;color:var(--text-muted)}
+.feed-row{display:grid;grid-template-columns:78px minmax(0,1fr);gap:18px;align-items:baseline;
+animation:sch-rise 0.4s ease-out}
+.feed-tag{font-size:10px;font-weight:800;letter-spacing:0.1em;color:var(--accent)}
+.feed-text{font-size:13px;line-height:1.5;color:var(--text-body);overflow-wrap:break-word}
+
+/* why ---------------------------------------------------------------------- */
+.sec{padding:140px 28px}
+h2.big{margin:26px 0 0;font-size:clamp(28px,4.4vw,54px);font-weight:800;
+letter-spacing:-0.045em;line-height:1.04;max-width:24ch}
+.investigation{margin-top:34px}
+.investigation a{font-size:13px;font-weight:700;border-bottom:1px solid rgba(79,179,124,0.4);
+padding-bottom:3px;transition:color 140ms ease}
+.investigation a:hover{color:var(--accent)}
+
+/* the name ----------------------------------------------------------------- */
+/* Its box is the plate's (see PLATE below); these style what sits inside it. */
+.name-in img{height:52px}
+.name-statement{font-size:clamp(22px,3.2vw,36px);font-weight:800;letter-spacing:-0.04em;
+line-height:1.2;max-width:24ch}
+.glosses{display:flex;gap:44px;flex-wrap:wrap;justify-content:center;
+font-size:14px;line-height:1.6;color:var(--text-body)}
+.gloss{display:flex;align-items:baseline;gap:12px}
+.gloss b{font-size:22px;font-weight:800;color:var(--accent)}
+.gloss span{max-width:22ch;text-align:left}
+.coda{font-size:13px;line-height:1.7;color:var(--text-muted);max-width:44ch}
+
+/* stated plainly ------------------------------------------------------------ */
+.plainly{padding:130px 28px}
+.statement{margin-top:26px;font-size:clamp(22px,3.2vw,38px);font-weight:800;
+letter-spacing:-0.04em;line-height:1.22}
+/* The basis can shrink below its own minimum, so a 240px track fits a phone. */
+.three-col{margin-top:36px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));
+column-gap:56px;row-gap:22px;font-size:14px;line-height:1.7;color:var(--text-body)}
+
+/* connect ------------------------------------------------------------------- */
+.connect .wash{background:radial-gradient(80% 120% at 50% 130%,rgba(79,179,124,0.2),transparent 62%)}
+.connect-in{position:relative;padding:140px 28px;gap:32px}
+h2.huge{margin:0;font-size:clamp(30px,5vw,62px);font-weight:800;letter-spacing:-0.05em;
+line-height:1;max-width:18ch}
+.connect-in p{margin:0;font-size:16px;line-height:1.7;color:var(--text-body);max-width:46ch}
+
+/* footer -------------------------------------------------------------------- */
+/* Its ground is the terminal zone's, below: the footer always carries both classes. */
+.foot-in{padding:38px 28px;display:flex;gap:26px;flex-wrap:wrap;align-items:center;
+justify-content:space-between}
+.foot-l{display:flex;align-items:center;gap:11px}
+.foot-l img{height:14px;opacity:0.6}
+.foot-l span{font-size:12px;color:var(--text-muted)}
+.foot-r{display:flex;gap:22px;flex-wrap:wrap}
+.foot-r a{font-size:12px;color:var(--text-muted);transition:color 140ms ease}
+.foot-r a:hover{color:var(--text-primary)}
+
+/* motion -------------------------------------------------------------------- */
+@keyframes sch-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.8)}}
+@keyframes sch-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+/* Reduced motion is honoured once, with the reveal rules further down. */
+
+/* =========================================================================
+   COMPOSITION SYSTEM
+   Nine shapes, each meaning something, each used two or three times, none
+   repeating on consecutive sections. Right-hand weight comes only from
+   alignment, never from `order` or `row-reverse`, so DOM order always equals
+   visual order and keyboard focus stays sane.
+   ========================================================================= */
+
+:root{
+  /* One fluid unit generates every indent. Small on a phone so a 319px content
+     box keeps its measure; generous on desktop. No media query expresses this. */
+  --step: clamp(10px, (100vw - 340px) / 16, 56px);
+}
+
+/* --- movement bands: four short rests grouping eleven chapters 2+3+3+3 ---- */
+.movement{background:var(--ink-raised);
+border-top:1px solid var(--hairline-strong);border-bottom:1px solid var(--hairline)}
+.movement-in{max-width:1120px;margin:0 auto;padding:clamp(24px,3vw,32px) 28px;
+display:flex;flex-wrap:wrap;align-items:baseline;gap:10px clamp(18px,2.6vw,30px)}
+.movement-n{flex:none;font-size:clamp(15px,1.8vw,20px);font-weight:800;
+letter-spacing:0.06em;color:var(--accent)}
+.movement-l{font-size:10px;font-weight:700;letter-spacing:0.22em;line-height:1.8;color:var(--text-muted)}
+.movement-r{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:0.16em;
+color:var(--text-muted);font-variant-numeric:tabular-nums}
+
+/* --- chapter head: eyebrow left, folio right ------------------------------- */
+.chead{display:flex;align-items:baseline;justify-content:space-between;
+gap:10px clamp(20px,3vw,36px);flex-wrap:wrap}
+.chead--end{justify-content:flex-end}
+.folio{flex:none;font-size:clamp(16px,2.2vw,30px);font-weight:800;
+letter-spacing:-0.02em;line-height:1;color:var(--text-muted);font-variant-numeric:tabular-nums}
+
+/* --- three heading tiers --------------------------------------------------- */
+.chapter h2{margin:26px 0 0;font-weight:800;color:var(--text-primary)}
+.h-open h2{font-size:clamp(28px,4.4vw,54px);letter-spacing:-0.045em;line-height:1.05;max-width:24ch}
+.h-mid h2{font-size:clamp(22px,3.2vw,38px);letter-spacing:-0.04em;line-height:1.20;max-width:28ch}
+.h-quiet h2{font-size:clamp(19px,2.2vw,26px);letter-spacing:-0.03em;line-height:1.28;max-width:32ch}
+
+/* --- prose: one stack at a real measure ------------------------------------ */
+.chapter .prose{margin-top:clamp(28px,3.2vw,40px);display:flex;flex-direction:column;
+gap:clamp(20px,2.4vw,28px)}
+.chapter .prose p{margin:0;font-size:15px;line-height:1.78;color:var(--text-body);
+max-width:62ch;overflow-wrap:break-word}
+.chapter .lead{margin-top:clamp(22px,2.6vw,30px);max-width:52ch}
+
+/* Emphasis INSIDE an intact sentence. Treatment, never a split. */
+.k{font-weight:500;color:var(--text-strong-body)}
+
+/* --- pull: one whole promoted sentence. Weight 500 so it can never read as a
+       heading. Fills the measured gap between 17px body and 25px titles. ----- */
+.pull,.beam{font-size:clamp(20px,2.6vw,30px);font-weight:500;line-height:1.34;
+letter-spacing:-0.02em;color:var(--text-primary)}
+.pull{margin:clamp(34px,4vw,54px) 0 0;max-width:34ch}
+.pull--peak{font-size:clamp(22px,3vw,34px);max-width:32ch;margin-inline:auto;text-align:center}
+/* The full-measure variant: the sentence becomes the widest line on the page. */
+.beam{margin:clamp(40px,4.6vw,60px) 0 0;padding:clamp(26px,3vw,38px) 0;max-width:none;
+border-top:1px solid var(--hairline-strong);border-bottom:1px solid var(--hairline-strong)}
+
+/* --- STAIR: whole paragraphs stepping in behind shortening rules ----------- */
+.stair{margin-top:clamp(30px,3.4vw,44px);display:grid;row-gap:clamp(24px,2.8vw,38px)}
+.stair > *{margin:0;border-top:1px solid var(--hairline);padding-top:clamp(16px,2vw,24px);
+font-size:15px;line-height:1.75;color:var(--text-body)}
+.stair > :nth-child(2){margin-inline-start:var(--step)}
+.stair > :nth-child(3){margin-inline-start:calc(var(--step) * 2)}
+
+/* --- RAIL and SPINE: the page's only vertical marks ------------------------ */
+.rail{display:flex;flex-wrap:wrap;align-items:flex-start;
+gap:clamp(18px,2.2vw,28px) clamp(24px,2.8vw,36px)}
+.rail-margin{flex:0 1 clamp(70px,8vw,102px);display:flex;flex-direction:column;gap:12px}
+.rail-body{flex:1 1 min(100%,380px);border-inline-start:1px solid var(--hairline);
+padding-inline-start:clamp(18px,2.2vw,30px)}
+.spine{margin-top:clamp(30px,3.4vw,42px);border-inline-start:1px solid var(--hairline);
+padding-inline-start:clamp(20px,3vw,44px)}
+
+/* --- ANCHOR-R and HANG-R: right-hand ink, DOM order untouched -------------- */
+.anchor{margin-inline-start:auto;max-width:60ch}
+.anchor h2{text-align:right;margin-inline-start:auto}
+.anchor--narrow{max-width:56ch}
+.comp-hang-r h2{margin-inline-start:auto;max-width:22ch;text-align:right}
+
+/* --- PLATE: full-bleed centred, with nothing that can shrink-wrap it.
+       No flex parent, so nothing can collapse an auto-fit grid to one track. -- */
+.plate{background:var(--ink-raised);border-top:1px solid var(--hairline-strong);
+border-bottom:1px solid var(--hairline-strong)}
+.plate-in{position:relative;max-width:1120px;margin:0 auto;
+padding:clamp(110px,11vw,150px) 28px;text-align:center}
+.plate-in > *{margin-inline:auto}
+.plate-in .lead{max-width:44ch}
+/* The plate is a plain block, so the name section's 34px rhythm is margins
+   rather than a flex gap, and nothing here can shrink-wrap a child. */
+.name-in > * + *{margin-top:34px}
+.name-in .coda p{margin:0 0 8px}
+.name-in .coda p:last-child{margin:0}
+.plate-in .prose{align-items:center}
+.plate-in .prose p{max-width:52ch;text-align:left}
+
+/* --- FRAMES: stepped containment, drawing the narrowing the copy describes -- */
+.frames{margin-top:clamp(28px,3vw,38px);display:flex;flex-direction:column;gap:14px}
+.frames > div{border:1px solid var(--hairline-strong);background:var(--ink-raised);
+padding:clamp(18px,2.2vw,26px);
+/* Nested, not slid: each frame insets on BOTH sides, so the containment the
+   copy describes is drawn as actual narrowing. */
+margin-inline:calc(var(--i,0) * clamp(0px,3.2vw,42px))}
+.frames > :nth-child(2){--i:1}
+.frames > :nth-child(3){--i:2}
+.frames dt{margin:0;font-size:12px;font-weight:800;letter-spacing:0.1em;color:var(--accent)}
+.frames > :nth-child(3) dt{color:var(--warn)}
+.frames dd{margin:10px 0 0;font-size:13px;line-height:1.62;color:var(--text-strong-body);max-width:66ch}
+
+/* --- BRK: a run boundary stated by geometry, carrying no words ------------- */
+.brk{display:flex;align-items:center;gap:clamp(14px,2.6vw,34px);margin:clamp(28px,3vw,40px) 0 0}
+.brk i{flex:1 1 40px;height:1px;background:var(--hairline-strong)}
+.brk u{flex:none;width:1px;height:14px;text-decoration:none;background:var(--hairline-strong)}
+
+/* --- RACK: four full-measure rows ------------------------------------------ */
+.rack{margin-top:34px;border-top:1px solid var(--hairline-strong)}
+/* Fixed bases, identical on every row, so the three columns line up. With
+   `flex:0 1 <basis>` they shrink in proportion, which preserves the alignment
+   at every width, and wrap to their own lines when there is no space at all. */
+.rack-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px clamp(24px,3vw,44px);
+padding:clamp(28px,3vw,38px) 0;border-bottom:1px solid var(--hairline);
+transition:border-bottom-color 160ms ease}
+.rack-row:hover{border-bottom-color:var(--accent)}
+.rack-eyebrow{flex:0 1 clamp(96px,13vw,168px);min-width:0;font-size:10px;
+letter-spacing:0.2em;font-weight:700;color:var(--accent);line-height:1.8}
+/* 22px, not 25px. The longest title, "Identity agents generate themselves", is 35
+   characters. JetBrains Mono advances 0.6em a character, 13.2px at 22px, and the
+   -0.04em of tracking below takes 0.88px off each, so it sets in about 431px of the
+   432px track, with under a pixel to spare. A longer title wraps. */
+.rack-title{flex:0 1 clamp(220px,34vw,432px);min-width:0;
+font-size:clamp(18px,2.2vw,22px);font-weight:800;letter-spacing:-0.04em;line-height:1.22}
+.rack-body{flex:1 1 min(100%,300px);min-width:0;font-size:15px;line-height:1.7;
+color:var(--text-body)}
+
+/* --- hero support pair ----------------------------------------------------- */
+.hero-support{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));
+column-gap:56px;row-gap:24px;border-top:1px solid var(--hairline);padding-top:26px}
+.hero-support .support{margin:0;max-width:52ch}
+
+/* --- terminal zone: no seam between the last sections and the footer ------- */
+/* One ground for the connect section and the footer, and no rule between them. */
+.terminal{background:var(--ink-footer)}
+
+/* --- chapter shell --------------------------------------------------------- */
+.chapter-sec{border-top:1px solid var(--hairline)}
+.chapter{padding:clamp(96px,10vw,130px) 28px}
+.closing{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
+.reserved{margin-top:26px;margin-inline-start:auto;max-width:52ch;padding-top:20px;
+border-top:1px solid var(--hairline);font-size:13px;line-height:1.7;color:var(--text-muted)}
+
+/* Anchors clear the sticky nav, whose height is not one number: it is 72px at
+   1320 and 174px at 375, because the brand, the items and the button each take
+   their own row once there is no space for them side by side. A flat 88px
+   would put the heading each link in the API page's own table of contents points
+   at, and the first lines under it, behind the nav. The expression falls as the viewport
+   grows, which is the direction the nav's height actually moves, and is clamped
+   at both ends. 375 -> 190, 768 -> 147, 1320 -> 88, and wider stays 88. */
+:where(section,[id]){scroll-margin-top:clamp(88px,calc(230px - 10.8vw),192px)}
+html{scroll-behavior:smooth}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+/* Reading progress rail. */
+.progress{position:fixed;top:0;left:0;height:2px;width:100%;z-index:60;background:transparent;pointer-events:none}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width 90ms linear}
+
+/* Reveal on scroll. Scoped under .js, which the script adds, so with no
+   JavaScript nothing is ever hidden. */
+.js .reveal{opacity:0;transform:translateY(12px);
+transition:opacity 620ms cubic-bezier(.22,.61,.36,1),transform 620ms cubic-bezier(.22,.61,.36,1)}
+.js .reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+html{scroll-behavior:auto}
+.js .reveal{opacity:1;transform:none;transition:none}
+*,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+/* --- panel: the illustrative exchange, with its border, ground and padding - */
+.panel{margin-top:clamp(28px,3vw,38px);border:1px solid var(--hairline-strong);
+background:var(--ink-raised);max-width:62ch}
+.panel-head{padding:13px 18px;border-bottom:1px solid var(--hairline);
+font-size:10px;letter-spacing:0.18em;font-weight:700;color:var(--warn)}
+.panel-body{padding:20px 18px;display:flex;flex-direction:column;gap:14px}
+.panel-body p{margin:0;font-size:13px;line-height:1.6;color:var(--text-strong-body)}
+
+/* The closing line of a chapter. */
+.after{margin-top:clamp(28px,3vw,36px);font-size:15px;line-height:1.78;
+color:var(--text-body);max-width:62ch}
+
+.feed-rows{gap:16px}
+
+/* =========================================================================
+   DOCUMENT
+   A plain markdown page written for a person -- terms, privacy -- inside the
+   same shell as the designed pages. One column at a real measure. No
+   composition system: a document is read straight through, and the eleven
+   shapes above exist to hold an argument together, which a document does not
+   need.
+   ========================================================================= */
+/* ONE measure, in pixels, shared by everything in the document.
+   `ch` is relative to each element's OWN font size, so 62ch on 15px prose is
+   530px and 62ch on a 22px heading is 818px. The section rule is drawn on the
+   heading's box, so writing both as 62ch would make the rule 288px LONGER than
+   the text under it. 530px is 62 characters of this document's own 15px,
+   measured, and every element that must line up with the prose uses it. */
+.doc{--measure:530px;padding:clamp(64px,7vw,104px) 28px clamp(96px,10vw,140px)}
+.doc>:first-child{margin-top:0}
+.doc h1{margin:0;font-size:clamp(28px,4vw,44px);font-weight:800;letter-spacing:-0.045em;
+line-height:1.05;color:var(--text-primary);max-width:var(--measure);text-wrap:balance}
+.doc h2{margin:clamp(46px,5vw,66px) 0 0;padding-top:clamp(22px,2.4vw,30px);
+border-top:1px solid var(--hairline);font-size:22px;font-weight:800;letter-spacing:-0.03em;
+line-height:1.26;color:var(--text-primary);max-width:var(--measure);text-wrap:balance}
+.doc p{margin:clamp(15px,1.8vw,21px) 0 0;font-size:15px;line-height:1.8;
+color:var(--text-body);max-width:var(--measure);overflow-wrap:break-word}
+.doc h1+p{margin-top:clamp(20px,2.4vw,28px);font-size:17px;line-height:1.65;max-width:var(--measure)}
+.doc ul{margin:clamp(15px,1.8vw,21px) 0 0;padding-inline-start:1.2em;max-width:var(--measure)}
+.doc li{margin-top:10px;font-size:15px;line-height:1.8;color:var(--text-body)}
+.doc li::marker{color:var(--text-muted)}
+.doc strong{font-weight:700;color:var(--text-primary)}
+.doc em{font-style:italic;color:var(--text-strong-body)}
+.doc a{color:var(--accent);text-decoration:underline;text-decoration-thickness:1px;
+text-underline-offset:3px}
+.doc a:hover{color:var(--text-primary)}
+.doc blockquote{margin:clamp(22px,2.6vw,30px) 0 0;padding:18px 20px;max-width:var(--measure);
+border-inline-start:2px solid var(--warn);background:var(--warn-wash)}
+.doc blockquote p{margin:0;font-size:14px;color:var(--text-strong-body);max-width:none}
+.doc blockquote p+p{margin-top:10px}
+
+/* =========================================================================
+   DOCS SHELL
+   Three panes: left nav, reading column, right rail.
+
+   The FLEX BASES are load-bearing, not a preference.
+   `repeat(auto-fit, minmax(260px, 1fr))` would resolve to three EQUAL tracks
+   and squeeze the reading column to about 308px. Bases of 208 / 440 / 188
+   with every pane able to shrink keep the reading column widest at every width.
+
+   The RULE BETWEEN PANES is a border on the TOP of every pane, and there is no
+   vertical rule at all. A one-sided border that assumes a column position goes
+   ragged when the layout collapses to one column. Three alternatives each fail,
+   so do not use them:
+
+     - a 1px `gap` over a wrapper painted in the rule colour. Correct while the
+       three panes share a line; at 375px they do not, and the wrapper colour
+       shows through the empty half of every under-filled line as a grey block.
+     - flex-grow on the side panes so they fill a wrapped line. It fixes 375px
+       and breaks the desktop proportions, because the free space at 1320px is
+       then shared three ways instead of going to the reading column.
+     - grow plus a max-width cap on the side panes. The cap is what fills a
+       wrapped line, so capping puts the grey block back.
+
+   A top border cannot go ragged that way, because no
+   pane depends on being in a particular column: side by side the three form one
+   line across the shell, stacked they separate the blocks, and no media query
+   decides which. It is not perfectly even either -- stacked, each rule is as
+   wide as its own pane, so the nav's is 208px and the body's is full width.
+   That reads as three rules over three blocks, which is what they are. The
+   three zones stay legible without a vertical rule because the type in them is
+   nothing alike: 13px muted links, a document, 10px labels.
+   ========================================================================= */
+/* 1120 and a 28px gutter, exactly like `.wrap` plus `.nav-in`'s padding, because
+   this shell sits under that nav and above that footer. At 1176 its panes would
+   begin 28px outside both -- the eyebrow hanging left of the logo mark, the rail
+   running past the CONNECT button -- which reads as a misprint rather than a
+   design. The bases below then leave the reading column 612px at 1320px, over
+   its floor of 600px. */
+.docs{max-width:1120px;margin:0 auto;padding-inline:28px;display:flex;flex-wrap:wrap;
+column-gap:clamp(20px,2.4vw,28px)}
+.docs>*{min-width:0;border-top:1px solid var(--hairline)}
+.docs-nav{flex:0 1 208px;padding:clamp(32px,3.4vw,44px) 0}
+.docs-body{flex:1 1 440px;max-width:720px;
+padding:clamp(32px,3.4vw,44px) 0 clamp(80px,9vw,110px)}
+.docs-rail{flex:0 1 188px;padding:clamp(32px,3.4vw,44px) 0}
+
+/* left nav: a table of contents, and above a narrow viewport it simply sits on
+   top of the document, which is the right reading order anyway. */
+.docs-nav ul{list-style:none;margin:18px 0 0;padding:0;display:flex;flex-direction:column;gap:11px}
+.docs-nav li{margin:0}
+.docs-nav a{font-size:13px;line-height:1.45;color:var(--text-body);
+border-bottom:1px solid transparent;transition:color 140ms ease}
+.docs-nav a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.docs-note{margin:clamp(24px,2.6vw,32px) 0 0;padding-top:18px;border-top:1px solid var(--hairline);
+font-size:12px;line-height:1.7;color:var(--text-muted)}
+
+/* reading column */
+.docs-body h1{margin:0;font-size:clamp(28px,4vw,44px);font-weight:800;letter-spacing:-0.045em;
+line-height:1.05;color:var(--text-primary);max-width:20ch}
+.docs-body h2{margin:clamp(52px,5.4vw,72px) 0 0;padding-top:clamp(22px,2.4vw,30px);
+border-top:1px solid var(--hairline);font-size:22px;font-weight:800;letter-spacing:-0.03em;
+line-height:1.25;color:var(--text-primary)}
+.docs-body p{margin:clamp(15px,1.8vw,20px) 0 0;font-size:15px;line-height:1.8;
+color:var(--text-body);max-width:52ch;overflow-wrap:break-word}
+.docs-body .lead{margin-top:clamp(20px,2.4vw,28px);font-size:17px;line-height:1.65;max-width:52ch}
+.docs-body a{color:var(--accent);text-decoration:underline;text-decoration-thickness:1px;
+text-underline-offset:3px}
+.docs-body a:hover{color:var(--text-primary)}
+.docs-body strong{font-weight:700;color:var(--text-primary)}
+
+/* definition rows: term on the left, meaning on the right, wrapping to two
+   lines rather than two columns when there is no space. */
+.rows{margin:clamp(22px,2.6vw,30px) 0 0;border-top:1px solid var(--hairline-strong)}
+/* 184px, because this list holds connector tool names, and at 12px with 0.08em
+   of tracking `schellingaf_read_space` needs about 180px. At 132px seven of the
+   ten would wrap. Only the longest name in the whole API still does. */
+.row{display:grid;grid-template-columns:minmax(0,min(184px,44%)) minmax(0,1fr);gap:6px 20px;
+padding:16px 0;border-bottom:1px solid var(--hairline)}
+.row-term{font-size:12px;font-weight:800;letter-spacing:0.08em;line-height:1.5;
+color:var(--accent);overflow-wrap:break-word}
+.row-warn .row-term{color:var(--warn)}
+.row-text{font-size:13px;line-height:1.62;color:var(--text-strong-body)}
+
+/* a block of literal text a person copies: the connector configuration, the
+   lines for their own agent instructions. Scrolls inside itself, so a long line never
+   makes the page scroll sideways. */
+.block{margin:clamp(20px,2.4vw,28px) 0 0;border:1px solid var(--hairline-strong);
+background:var(--ink-raised)}
+.block-head{padding:12px 16px;border-bottom:1px solid var(--hairline);
+font-size:10px;font-weight:700;letter-spacing:0.18em;color:var(--text-muted)}
+.block pre{margin:0;padding:16px;overflow-x:auto;font:inherit;font-size:12.5px;line-height:1.65;
+color:var(--text-strong-body);white-space:pre}
+
+/* numbered steps: this IS a sequence -- each step depends on the one before,
+   and the third exists because people skip it. */
+.steps{list-style:none;margin:clamp(22px,2.6vw,30px) 0 0;padding:0;counter-reset:step;
+border-top:1px solid var(--hairline-strong)}
+.steps>li{margin:0;padding:20px 0 24px;border-bottom:1px solid var(--hairline);
+display:grid;grid-template-columns:2.1em minmax(0,1fr);gap:6px 14px}
+.steps>li::before{counter-increment:step;content:counter(step);font-size:22px;font-weight:800;
+letter-spacing:-0.03em;line-height:1.15;color:var(--accent);font-variant-numeric:tabular-nums}
+.steps>li>*{grid-column:2}
+.steps>li>:first-child{margin-top:0}
+.steps p{max-width:48ch}
+
+/* right rail: what is true right now, stated rather than counted. The rail
+   shows no activity counts: the service publishes none. */
+.docs-rail .eyebrow{display:block}
+.rail-group{margin:22px 0 0}
+.rail-group+.rail-group{padding-top:18px;border-top:1px solid var(--hairline)}
+.rail-label{font-size:10px;font-weight:700;letter-spacing:0.18em;color:var(--text-muted)}
+.rail-list{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.rail-list li{margin:0;font-size:12px;line-height:1.5;color:var(--text-body)}
+.rail-list .on{color:var(--accent);font-weight:700}
+.rail-list .off{color:var(--text-muted)}
+.rail-group a{font-size:12px;line-height:1.5;color:var(--text-body);
+border-bottom:1px solid transparent;transition:color 140ms ease}
+.rail-group a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* The contact address in the shared footer, a shade brighter than the links
+   beside it because it is the one thing there a person might need.
+   Qualified `.foot-r a.foot-contact`, not `.foot-contact`: the bare class is
+   (0,1,0) and loses to `.foot-r a` at (0,1,1). */
+.foot-r a.foot-contact{color:var(--text-body)}
+.foot-r a.foot-contact:hover{color:var(--accent)}
+
+/* A block-level eyebrow inside the reading column, labelling the group under it. */
+.docs-body .eyebrow{display:block;margin-top:clamp(30px,3.2vw,40px)}
+
+/* The one thing on the page a sceptic is looking for: what it does NOT do.
+   A callout in warn rather than accent, because that is what warn is for here. */
+.callout{margin:clamp(26px,3vw,36px) 0 0;padding:clamp(18px,2.2vw,24px);max-width:56ch;
+border-inline-start:2px solid var(--warn);background:var(--warn-wash)}
+.callout .eyebrow{display:block;margin:0 0 10px}
+.callout p{margin:0;font-size:13.5px;line-height:1.7;color:var(--text-strong-body);max-width:none}
+.callout p+p{margin-top:12px}
+
+/* The counterpart line on a document whose agent version is not already one of
+   the nav's destinations. Rendered above the heading, quiet, in the muted
+   colour the nav uses for the same kind of pointer. */
+.doc-counterpart{margin:0 0 clamp(22px,2.4vw,30px);padding-bottom:16px;
+border-bottom:1px solid var(--hairline);max-width:var(--measure)}
+.doc-counterpart p{margin:0;font-size:12px;line-height:1.7;color:var(--text-muted)}
+.doc-counterpart a{color:var(--accent)}
+
+/* ------------------------------------------------------------------ /api:
+   choosing a path, then following one.
+
+   Each audience has its own block, and the blocks that do not apply are skipped
+   by their headings. What that costs is repetition between them, which is the
+   right trade for a setup page: nobody reads two of these. */
+
+/* The chooser: what you have on the left, where to go on the right. Same grid
+   as .row so the two read as one family, with the term column wider because it
+   holds a sentence rather than a name. */
+.chooser{margin:clamp(22px,2.6vw,30px) 0 0;border-top:1px solid var(--hairline-strong)}
+.chooser-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,min(280px,44%));
+gap:6px 20px;align-items:baseline;padding:15px 0;border-bottom:1px solid var(--hairline)}
+.chooser-what{font-size:13px;line-height:1.62;color:var(--text-strong-body)}
+.chooser-go{font-size:12px;font-weight:800;letter-spacing:0.06em;line-height:1.5}
+.docs-body .chooser-go a{text-decoration:none;border-bottom:1px solid transparent}
+.docs-body .chooser-go a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* AVAILABLE, EXPERIMENTAL, PLANNED. Three states and three colours, and the
+   colours are the ones the rest of the page already uses for the same meanings:
+   accent for what works, warn for what is not settled, muted for what is not
+   there. Never colour alone -- the word is the label and the colour agrees with
+   it, so the distinction survives a monochrome screen and every kind of colour
+   blindness. */
+.pill{display:inline-block;padding:4px 9px;border:1px solid currentColor;
+font-size:10px;font-weight:800;letter-spacing:0.16em;line-height:1.2;white-space:nowrap}
+.pill-now{color:var(--accent)}
+.pill-trial{color:var(--warn)}
+.pill-later{color:var(--text-muted)}
+
+/* What the three words mean, said once, above the quick starts. Without this the
+   pills are decoration: "experimental" means nothing until the page says which
+   of the two possible things it means here. */
+.legend{margin:clamp(24px,2.8vw,32px) 0 0;border-top:1px solid var(--hairline-strong)}
+.legend-row{display:grid;grid-template-columns:minmax(0,132px) minmax(0,1fr);gap:6px 20px;
+align-items:baseline;padding:14px 0;border-bottom:1px solid var(--hairline)}
+.legend-row p{margin:0;font-size:13px;line-height:1.62;color:var(--text-strong-body);max-width:none}
+
+/* One quick start. The heading carries its state, so a reader knows before the
+   first step whether this path is one they can finish today. */
+.start{margin:clamp(52px,5.4vw,72px) 0 0;padding-top:clamp(22px,2.4vw,30px);
+border-top:1px solid var(--hairline)}
+.start-head{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center}
+.docs-body .start h2{margin:0;padding-top:0;border-top:0}
+.start-who{margin-top:clamp(15px,1.8vw,20px);font-size:15px;line-height:1.8;
+color:var(--text-body);max-width:52ch}
+
+/* What you need before step one, and how long the whole path takes. Two facts a
+   reader wants before committing, and the reason they are a strip rather than a
+   sentence: they are checked, not read. */
+.need{margin:clamp(18px,2vw,24px) 0 0;display:flex;flex-wrap:wrap;
+gap:0;border:1px solid var(--hairline-strong);background:var(--ink-raised)}
+.need-cell{flex:1 1 220px;padding:14px 16px;min-width:0}
+.need-cell+.need-cell{border-inline-start:1px solid var(--hairline)}
+.need-label{display:block;font-size:10px;font-weight:700;letter-spacing:0.18em;
+color:var(--text-muted)}
+.need-cell p{margin:7px 0 0;font-size:13px;line-height:1.6;color:var(--text-strong-body);
+max-width:none}
+
+/* The success state after a step. Every step on this page ends with one, because
+   a setup instruction without one leaves the reader to guess, and the commonest
+   way this particular setup fails is silently: a connector that loaded no tools
+   looks exactly like a connector nobody called. Accent, tight to the step above
+   it, and prefixed with a word rather than a tick, which a monospace face has no
+   good glyph for. */
+.done{margin:14px 0 0;padding:11px 14px;max-width:48ch;
+border-inline-start:2px solid var(--accent);background:rgba(79,179,124,0.05)}
+.docs-body .done p{margin:0;font-size:13px;line-height:1.65;color:var(--text-strong-body);
+max-width:none}
+.done-label{display:block;font-size:10px;font-weight:700;letter-spacing:0.18em;
+color:var(--accent);margin-bottom:6px}
+/* What it means when the success state does not appear. Same shape, warn, and
+   only where this repository actually knows the answer. */
+.done-else{border-inline-start-color:var(--warn);background:var(--warn-wash)}
+.done-else .done-label{color:var(--warn)}
+
+/* The copy button, made by src/copy.js and never written into the page, so a
+   browser with the script blocked shows no button that does nothing. The head
+   becomes a row: label left, button right, and the word the button says after a
+   click read out politely beside it. */
+.block-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.block-head .copy{margin-inline-start:auto}
+.copy{-webkit-appearance:none;appearance:none;flex:none;
+padding:5px 11px;border:1px solid var(--hairline-strong);background:transparent;
+color:var(--text-muted);font:inherit;font-size:10px;font-weight:700;letter-spacing:0.16em;
+line-height:1.2;cursor:pointer;transition:color 140ms ease,border-color 140ms ease}
+.copy:hover{color:var(--text-primary);border-color:var(--text-muted)}
+.copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.copy-done{color:var(--accent);border-color:var(--accent)}
+.copy-warn{color:var(--warn);border-color:var(--warn)}
+/* Announced, not drawn: the button's own word already shows the outcome. */
+.copy-said{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+clip-path:inset(50%);white-space:nowrap}
+
+/* The pages on this site a path ends at, gathered under the steps rather than
+   linked mid-sentence: the prose is escaped whole, so an anchor inside a
+   paragraph would have to be assembled from fragments. */
+.start-links{margin:clamp(18px,2vw,24px) 0 0;display:flex;flex-wrap:wrap;gap:6px 10px;
+align-items:baseline;font-size:12px;line-height:1.6;color:var(--text-muted);max-width:none}
+.start-links .eyebrow{display:inline;margin:0;font-size:10px;letter-spacing:0.18em}
+
+/* A planned row reads as one: the term in the muted colour rather than the
+   accent the available ones wear, matching the PLANNED pill beside them. */
+.row-later .row-term{color:var(--text-muted)}
+/* The plain-muted eyebrow, for a group that is neither a promise nor a warning.
+   `.eyebrow` is already this colour; the class is written out so a later change
+   to the base cannot silently repaint a PLANNED label in accent. */
+.eyebrow-muted{color:var(--text-muted)}
+
+/* The rail's first group: the five paths, each with how far it is vouched for,
+   so the distinction is readable from anywhere on the page rather than only at
+   the top. Two lines per entry, because 188px will not hold a name and a badge
+   side by side without breaking one of them. */
+.rail-way{display:flex;flex-direction:column;gap:3px}
+.rail-state{font-size:9px;font-weight:700;letter-spacing:0.16em}
+.rail-now{color:var(--accent)}
+.rail-trial{color:var(--warn)}
+.rail-later{color:var(--text-muted)}
+
+@media (prefers-reduced-motion:reduce){
+.copy{transition:none}
+}

@@ -1,0 +1,11 @@
+{
+  "about": "Copied from schellingaf-api test/fixtures/object-vectors.json (the \"object\" entry and the ids it names), on 19 September 2026. The product's own tests hold that file to src/domain/objects.ts; test/post-object.test.ts holds src/post-object.js to this copy.",
+  "author_id": "e89af24c6f6ab546c38b9df66c5bf52aaf3300be990d6404be769c67651b3605",
+  "space_id": "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee",
+  "canonical_utf8": "{\"author_id\":\"e89af24c6f6ab546c38b9df66c5bf52aaf3300be990d6404be769c67651b3605\",\"body\":\"Reproduced on linux, twice.\\nCommand and output follow.\",\"fingerprints\":[{\"scheme\":\"git.commit\",\"value\":\"b75e527ac4f1e0c2d8a3\"},{\"scheme\":\"task.reference\",\"value\":\"vector\"}],\"idempotency_key\":\"vector-1\",\"kind\":\"result\",\"private_digest\":\"5914ec923f9a2d147ef25669e16f60c1e4e4b9d2d4dc4255ca232ef3cbb6db3a\",\"space_id\":\"0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee\",\"title\":\"Build passes\",\"v\":1}",
+  "private_utf8": "{\"data\":{\"x_attempts\":2,\"x_platform\":\"linux\"},\"salt\":\"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\"}",
+  "private_digest": "5914ec923f9a2d147ef25669e16f60c1e4e4b9d2d4dc4255ca232ef3cbb6db3a",
+  "object_id": "51c21fd093a3da9e9892ec80b673726abd2c4a17bb617c8a5069cd10e3495d95",
+  "passkey_challenge_hex": "e63fa62d3727d3c0c1cea8dba677d6a5913cbc59009fa40daa8623b970cd2072",
+  "signature_preimage_hex": "6167656e742d73746174653a6f626a6563742d7369676e61747572653a76310051c21fd093a3da9e9892ec80b673726abd2c4a17bb617c8a5069cd10e3495d95"
+}

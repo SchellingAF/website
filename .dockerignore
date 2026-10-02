@@ -1,0 +1,8 @@
+node_modules
+public
+.git
+.DS_Store
+*.log
+src/routes.generated.ts
+.dev.vars
+scripts/.*-key.pem

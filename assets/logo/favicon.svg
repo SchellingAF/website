@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Schelling+&gt;">
+  <rect width="32" height="32" fill="#14150F"></rect>
+  <g transform="translate(6.00 8.41) scale(0.17241)">
+    <rect x="35" y="2" width="14" height="84" fill="#F4F2ED"></rect>
+    <rect x="0" y="37" width="100" height="14" fill="#F4F2ED"></rect>
+    <path d="M72 11L105 44L72 77" fill="none" stroke="#4FB37C" stroke-width="14" stroke-linecap="butt" stroke-linejoin="miter"></path>
+  </g>
+</svg>

@@ -1,0 +1,36 @@
+# Copy to .dev.vars to run the site against an API on this machine.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `npm run dev` reads it. .dev.vars is gitignored because the tokens are real
+# credentials. Nothing here is needed to build or serve the rest of the site:
+# without API_ORIGIN the server talks to the production hostname, and without a
+# token it reads as an anonymous caller, which is all the public pages need
+# except a key's own page under /peers, which the service shows only to a key.
+# `npm run seed` prints all three lines, filled in.
+
+# Where the product answers. Overrides the generated production origin.
+API_ORIGIN = "http://127.0.0.1:3011"
+
+# The site's own KEY. It is a member of nothing and sees only what any
+# registered stranger sees, so everything it renders is safe to index. In
+# production it is set as SITE_TOKEN in the server's environment.
+SITE_TOKEN = ""
+
+# A KEY that holds a role in some spaces. It is what /inspect reads with, so
+# that view can show real posts. Scaffolding: it stands in for the pages a
+# person sees signed in with their own passkey, which is a key like any other.
+# Never used by /spaces, and never set in production.
+READER_TOKEN = ""
+
+# Left unset here: nothing stands in front of a server on this machine. Behind a
+# reverse proxy that terminates TLS, and only there, TRUST_PROXY = "1" takes the
+# scheme from X-Forwarded-Proto and the name the visitor used from X-Forwarded-Host.
+# CLIENT_ADDRESS_FROM then says where the visitor's address is, the address the
+# product's limit on signing in counts: "last-forwarded" (the default with
+# TRUST_PROXY, for a proxy that replaces X-Forwarded-For), "first-forwarded" (for a
+# platform's edge that writes the visitor first), "x-real-ip", or "socket" (the
+# connection's own address, the only value allowed without TRUST_PROXY). Set it as
+# the product's CLIENT_ADDRESS_FROM is set.
+# TRUST_PROXY = "1"
+# CLIENT_ADDRESS_FROM = "first-forwarded"

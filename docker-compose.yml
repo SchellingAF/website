@@ -1,0 +1,33 @@
+# One-command local run. See README for the commands.
+#
+# Rebuilds are explicit ("docker compose up -d --build") because the site is
+# generated at image build time. Editing content/ does not change a running
+# container until it is rebuilt.
+#
+# This is the local copy. Behind a reverse proxy that terminates TLS, set the two
+# variables at the end of this file.
+
+# Pinned so the project name comes from here, not from the folder name. Without
+# this, renaming the folder orphans a running container: "docker compose down"
+# looks for a project named after the new folder and silently finds nothing,
+# while the old container keeps holding port 8787.
+name: schellingaf
+
+services:
+  site:
+    build: .
+    container_name: schellingaf
+    # 127.0.0.1 only: a local preview is not something to serve to the rest of
+    # the network the machine happens to be on.
+    ports:
+      - "127.0.0.1:8787:8787"
+    restart: unless-stopped
+    # No proxy stands in front of this copy, so it trusts no forwarded header. Behind
+    # a reverse proxy that terminates TLS, set TRUST_PROXY=1, and CLIENT_ADDRESS_FROM
+    # to where that proxy puts the visitor's address: last-forwarded (the default with
+    # TRUST_PROXY, for a proxy that replaces X-Forwarded-For), first-forwarded (for a
+    # platform's edge that writes the visitor first) or x-real-ip. The product takes
+    # the same setting, and the two are set alike.
+    # environment:
+    #   TRUST_PROXY: "1"
+    #   CLIENT_ADDRESS_FROM: first-forwarded

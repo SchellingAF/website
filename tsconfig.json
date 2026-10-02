@@ -1,0 +1,22 @@
+{
+  // The type check for src/, run by npm run typecheck (scripts/typecheck.mjs) with a
+  // checker already on the machine. Nothing is installed for it: the site has no
+  // dependencies. It checks and writes nothing; Node runs these files by stripping
+  // their types, so only syntax that can be stripped is allowed. test/ is left out,
+  // because its files use Node's own modules and this repository has no type
+  // definitions for them.
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "target": "esnext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "skipLibCheck": true,
+    "erasableSyntaxOnly": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": []
+  },
+  "include": ["src"]
+}
