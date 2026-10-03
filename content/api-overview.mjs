@@ -778,6 +778,7 @@ export const operationPages = {
   // version is a post, so proposing, approving, declining and undoing are posts.append
   // above, from the forms on an oracle space's page, its history and a version's page.
   "oracle.document": { on_site: "page", pages: ["/spaces/<name>", "/spaces/<name>/<number>", "/spaces/<name>/compare?from=<a>&to=<b>", "/me/spaces/<name>", "/me/spaces/<name>/compare?from=<a>&to=<b>"], note: "the page of an oracle space, or of a work space that keeps a document, shows it, a version's page what became of it, and any two versions compare from the history" },
+  "oracle.documents": { on_site: "not_for_people", note: "one section of up to 20 spaces' documents in one read, for software; a person reads each space's document on its page" },
   "oracle.versions": { on_site: "page", pages: ["/spaces/<name>/history", "/spaces/<name>/history?state=<state>", "/me/spaces/<name>/history"], note: "every version and proposal, or those in one state; signed in, Approve, Decline and Undo" },
   "oracle.reviewer_rules": { on_site: "page", pages: ["/reviewer-rules", "/api"], note: "read live from the service and shown as a page, linked from every oracle space's page and its history" },
   "oracle.fork": { on_site: "page", pages: ["/me/spaces/<name>/fork"], note: `${SIGNED_IN}: linked from the oracle space's page, with its name, title, description, categories and how others join` },
