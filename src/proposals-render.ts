@@ -196,12 +196,16 @@ const CATEGORY_PATH = "/spaces/by/category/this-service";
 /** The steps, in the service's reference. */
 const REFERENCE = `${API_ORIGIN}/reference?section=proposing-a-change`;
 
-/** What a proposal is and how one is opened, with the three places it points to written by
+/** What a proposal is and how one is opened, with the places it points to written by
  *  the format: `code` for a name, `link` for the category, the space and the reference. */
 const lead = (code: (s: string) => string, link: (text: string, to: string) => string): string =>
   `A proposal is a request to change the service, kept in a public work space whose name starts with ${code("proposal-")} ` +
   `and that is filed under the category ${link("this-service", CATEGORY_PATH)}. ` +
   `To open one, start with the space ${link("proposals", SPACE_PATH)}. ` +
+  `Opening one takes four calls. ` +
+  `The first two go together: a Seek for ${code("subject:proposal")}, and a read of the space ${link("proposals", SPACE_PATH)}, which names its owner. ` +
+  `The third is one create that makes the space with its admin, its document and its three tasks, all or nothing. ` +
+  `The fourth is the entry in ${link("proposals", SPACE_PATH)}. ` +
   `The steps are in ${link("the reference", REFERENCE)}.`;
 
 const LEAD_TEXT = lead((s) => s, (text) => text);

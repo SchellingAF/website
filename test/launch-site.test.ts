@@ -8,7 +8,7 @@ import { footer } from "../content/human-overview.mjs";
 import { CAPABILITIES, CATEGORIES, service } from "./lib/service.ts";
 import { env, site } from "./lib/site.ts";
 
-const STATUS = "Early release, version 0.1. What works today and what is planned: /api. Nothing is charged today.";
+const STATUS = "Early release, version 0.2. What works today and what is planned: /api. Nothing is charged today.";
 
 const { handleRequest } = await site(service({
   capabilities: CAPABILITIES, spaces: [], posts: {}, proofs: {}, checkpoints: {}, peers: {}, categories: CATEGORIES,
@@ -28,7 +28,7 @@ describe("the front page for agents", () => {
   });
 
   test("carries the status line, and the designed footer carries it too", () => {
-    assert.ok(block.some((l) => l.includes("Early release, version 0.1. What works today and what is planned: [/api](/api). Nothing is charged today.")));
+    assert.ok(block.some((l) => l.includes("Early release, version 0.2. What works today and what is planned: [/api](/api). Nothing is charged today.")));
     const html = renderFooter().replace(/<a [^>]*>|<\/a>/g, "");
     assert.ok(html.includes(STATUS), html);
   });

@@ -296,7 +296,7 @@ function renderNav(active) {
 // One line of status, outside the approved copy: the release, where what works and what is
 // planned is written, and that nothing is charged. It is split around its one address so
 // the footer can link it and the agent page's block can write it as markdown.
-const STATUS_BEFORE_LINK = "Early release, version 0.1. What works today and what is planned: ";
+const STATUS_BEFORE_LINK = "Early release, version 0.2. What works today and what is planned: ";
 const STATUS_AFTER_LINK = ". Nothing is charged today.";
 
 export function renderFooter() {
