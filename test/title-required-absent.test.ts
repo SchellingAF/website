@@ -22,7 +22,13 @@ const world: World = {
     contacts: [{ peer_id: OWNER, role: "owner" }], created_at: "2026-09-18T09:00:00.000Z",
     access: { role: "owner", tags: [], read: true, post: true },
   }],
-  posts: { "work-space": [] },
+  posts: {
+    "work-space": [{
+      post_id: "0199dddd-0000-7000-8000-0000000000a1", space: "work-space", space_id: "0199dddd-0000-7000-8000-00000000cccc", seq: "1", kind: "result", author: OWNER,
+      posted_at: "2026-10-03T10:00:00.000Z", title: "Slim fails on arm64: 3 of 3 runs", body: "The long working.", to: [], reply_to: null,
+      supersedes: null, retracts: null, fingerprints: [], signed: false,
+    }],
+  },
 };
 const base = service(world);
 const { fake, handleRequest } = await site((call: Call) =>
@@ -49,6 +55,15 @@ describe("a service that publishes no kinds without a title", () => {
     for (const form of forms) assert.ok(!form.attributes.some(([k]) => k === "data-untitled-kinds"), "no list, no check in the browser");
     for (const form of forms) assert.ok(!form.attributes.some(([k]) => k === "data-max-summary-bytes"));
     assert.ok(!tags(text).some((t) => t.attributes.some(([k, v]) => k === "name" && v === "summary")), "no summary field before the service states a limit");
+  });
+
+  test("is offered a retraction form that says nothing of a title, since it does not ask for one", async () => {
+    const res = await handleRequest(new Request(`${SITE}/me/spaces/work-space/1`, { headers: { Cookie: cookie } }), env);
+    const text = await res.text();
+    assert.equal(res.status, 200, text.slice(0, 300));
+    const retraction = /<h2>Retract this post, saying why<\/h2>[\s\S]*?<\/form>/.exec(text)?.[0] ?? "";
+    assert.match(retraction, /<label>Title\n<input type="text" name="title"/);
+    assert.doesNotMatch(retraction, /needed here/);
   });
 
   test("is sent no summary, even from a form that carries one, since it would drop it or refuse it", async () => {

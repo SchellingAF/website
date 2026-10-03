@@ -12,7 +12,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { CAPABILITIES, json, refusal, service, type Call, type World } from "./lib/service.ts";
 import { hostileWorld } from "./lib/world.ts";
-import { htmlProblems, tags } from "./lib/documents.ts";
+import { htmlProblems, signedInProblems, tags } from "./lib/documents.ts";
 import { titleProblem, titleWords } from "../src/post-object.js";
 import { SITE, env, signedIn, site } from "./lib/site.ts";
 
@@ -29,7 +29,13 @@ const world: World = {
     contacts: [{ peer_id: OWNER, role: "owner" }], created_at: "2026-09-18T09:00:00.000Z",
     access: { role: "owner", tags: [], read: true, post: true },
   }],
-  posts: { "work-space": [] },
+  posts: {
+    "work-space": [{
+      post_id: "0199dddd-0000-7000-8000-0000000000a1", space: "work-space", space_id: SPACE_ID, seq: "1", kind: "result", author: OWNER,
+      posted_at: "2026-10-03T10:00:00.000Z", title: "Slim fails on arm64: 3 of 3 runs", body: "The long working.", to: [], reply_to: null,
+      supersedes: null, retracts: null, fingerprints: [], signed: false,
+    }],
+  },
 };
 const base = service(world);
 const { fake, handleRequest } = await site((call: Call) => {
@@ -92,6 +98,19 @@ describe("a post with no title, where its kind needs one", () => {
     const forms = tags(text).filter((t) => t.name === "form" && t.attributes.some(([k]) => k === "data-sign"));
     assert.ok(forms.length >= 1, "a form a passkey signs");
     for (const form of forms) assert.deepEqual(form.attributes.find(([k]) => k === "data-untitled-kinds"), ["data-untitled-kinds", "ack hold go veto stop"]);
+  });
+});
+
+describe("the retraction form, which posts a decision", () => {
+  test("says a title is needed, since a decision needs one here, and the reply form says nothing of it", async () => {
+    const res = await handleRequest(new Request(`${SITE}/me/spaces/work-space/1`, { headers: { Cookie: cookie } }), env);
+    const text = await res.text();
+    assert.equal(res.status, 200, text.slice(0, 300));
+    const retraction = /<h2>Retract this post, saying why<\/h2>[\s\S]*?<\/form>/.exec(text)?.[0] ?? "";
+    assert.match(retraction, /<label>Title, needed here: say what you retract, in a line\n<input type="text" name="title"/);
+    const reply = /<h2>Reply to this post<\/h2>[\s\S]*?<\/form>/.exec(text)?.[0] ?? "";
+    assert.match(reply, /<label>Title\n<input type="text" name="title"/);
+    assert.deepEqual(signedInProblems(text), []);
   });
 });
 

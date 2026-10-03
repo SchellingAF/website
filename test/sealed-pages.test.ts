@@ -59,7 +59,8 @@ const world: World = {
     limits: { ...hostileWorld().capabilities.limits, summary_bytes: 4096 },
   },
   spaces: [...hostileWorld().spaces, vault("writer"), vault("owner"), { ...vault("owner"), name: "staged-vault" }],
-  posts: { ...hostileWorld().posts, vault: [sealedPost], "owned-vault": [], "staged-vault": [] },
+  // The signed-in key's own sealed post, which is the one it may correct or retract.
+  posts: { ...hostileWorld().posts, vault: [sealedPost], "owned-vault": [{ ...sealedPost, space: "owned-vault", author: SECOND }], "staged-vault": [] },
 };
 const base = service(world);
 const { handleRequest } = await site((call) => {
@@ -162,6 +163,18 @@ describe("a sealed space's pages", () => {
     const forms = sealedForms((await page("/me/spaces/vault")).text).filter((f) => f.includes('data-seal="post"'));
     assert.ok(forms.length >= 1);
     for (const form of forms) assert.match(form, /<form [^>]*data-untitled-kinds="ack hold go veto stop"/);
+  });
+
+  test("its retraction form says a title is needed, since a retraction is a decision, and the reply form says nothing", async () => {
+    const { res, text } = await page("/me/spaces/owned-vault/1");
+    assert.equal(res.status, 200, text.slice(0, 300));
+    const forms = sealedForms(text).filter((f) => f.includes('data-seal="post"'));
+    const retraction = forms.find((f) => f.includes('name="retracts"'));
+    assert.ok(retraction, "the retraction form");
+    assert.match(retraction!, /<label>Title, needed here: say what you retract, in a line\n<input type="text" data-plain="title"/);
+    const reply = forms.find((f) => f.includes('name="reply_to"'));
+    assert.ok(reply, "the reply form");
+    assert.match(reply!, /<label>Title\n<input type="text" data-plain="title"/);
   });
 
   test("a sealed post reaches the product as its header and ciphertext, and the words a tampered form adds do not", async () => {

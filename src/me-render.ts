@@ -869,6 +869,15 @@ function untitledAttribute(): string {
   return untitled ? ` data-untitled-kinds="${esc(untitled.join(" "))}"` : "";
 }
 
+/** The label of a retraction form's title. A retraction is a decision, and a decision needs a
+ *  title unless the service's list of kinds that need none names it: the form says so where
+ *  the page has read such a list, since a person who writes only a reason is refused once.
+ *  No list, no words, as for any other form, because then the service does not ask. */
+function retractionTitleLabel(): string {
+  const untitled = heldKindsWithoutTitle();
+  return untitled && !untitled.includes("decision") ? "Title, needed here: say what you retract, in a line" : "Title";
+}
+
 /** The attributes src/sign-post.js reads from a form it signs. The limits let it say,
  *  before the passkey is asked, that a post names more than the service takes. */
 function signAttributes(viewer: Viewer, signing: Signing | null): string {
@@ -989,7 +998,7 @@ ${hiddenFields(hidden)}
 ${emptyFields(SIGNATURE_FIELDS)}
 <label>Kind: <a href="/vocabulary#kinds">what each means</a>
 <select name="kind" required>${options}</select></label>
-<label>Title
+<label>${extra.retracts ? retractionTitleLabel() : "Title"}
 <input type="text" data-plain="title" maxlength="512" autocomplete="off"></label>
 <label>Text
 <textarea data-plain="body" maxlength="65536" required></textarea></label>
@@ -1011,7 +1020,7 @@ ${signedOnly
 
 /** The post form, for a new post or a reply, empty or as it was typed. */
 function postForm(
-  action: string, viewer: Viewer, kinds: string[], extra: { replyTo?: string; heading: string; button?: string }, signing: Signing | null,
+  action: string, viewer: Viewer, kinds: string[], extra: { replyTo?: string; heading: string; button?: string; retracting?: boolean }, signing: Signing | null,
   typed: PostValues | null = null, files: FileRules | null = null,
 ): string {
   const chosen = typed && kinds.includes(typed.kind) ? typed.kind : "obs";
@@ -1024,7 +1033,7 @@ ${idempotencyField(typed?.idempotencyKey ?? null)}
 ${hiddenFields(hidden)}
 <label>Kind: <a href="/vocabulary#kinds">what each means</a>
 <select name="kind" required>${options}</select></label>
-<label>Title
+<label>${extra.retracting ? retractionTitleLabel() : "Title"}
 <input type="text" name="title" maxlength="512" value="${esc(typed?.title ?? "")}"></label>
 ${summaryFieldHtml(typed)}
 <label>Text
@@ -1312,7 +1321,7 @@ export function replyActionsHtml(
       budget: json(post.budget),
       runId: typeof post.run_id === "string" && UUID.test(post.run_id) ? post.run_id : "",
     }, filesFor(a.role, signing)));
-    out.push(postForm(base, viewer, kinds, { heading: "Retract this post, saying why", button: "Retract this post" }, signing, {
+    out.push(postForm(base, viewer, kinds, { heading: "Retract this post, saying why", button: "Retract this post", retracting: true }, signing, {
       kind: "decision", title: "", body: "", fingerprints: "", to: "", idempotencyKey: null, hidden: { retracts: post.post_id },
     }));
   }
