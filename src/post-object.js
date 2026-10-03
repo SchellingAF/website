@@ -272,3 +272,36 @@ export function privateBytes({ data, budget, runId }, salt) {
 
 /** The digest a signed post's object names its private part by. */
 export const privateDigestOf = (bytes) => hex(sha256(concat(label("object-private"), bytes)));
+
+// ── a title, where one is needed ─────────────────────────────────────────────
+
+/** A list in a sentence: "a", "a and b", "a, b and c". */
+const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+
+/**
+ * What a post that needs a title and has none is told, in a person's words: the service's
+ * own sentence for TITLE_REQUIRED, with the kinds that need none named from the list its
+ * capability document publishes, when the caller has it. One sentence for the form that
+ * checks before sending (this server, the browser that signs, the browser that seals) and
+ * for the refusal the service sends, so the two never differ.
+ * @param {string[] | null | undefined} untitled
+ * @returns {string}
+ */
+export function titleWords(untitled) {
+  const only = Array.isArray(untitled) && untitled.length ? ` Only ${listed(untitled)} post without one.` : "";
+  return `This kind of post needs a title: the result and the figure that decides it, not the topic, in about 120 bytes.${only}`;
+}
+
+/**
+ * What is wrong with a post's title for its kind, in a sentence, or "" when nothing is. Only
+ * when the service publishes the kinds that need none (`untitled`, from its capability
+ * document): without the list nothing is checked here, and the service decides.
+ * @param {string} kind
+ * @param {string | null | undefined} title
+ * @param {string[] | null | undefined} untitled
+ * @returns {string}
+ */
+export function titleProblem(kind, title, untitled) {
+  if (!Array.isArray(untitled) || !kind || untitled.includes(kind)) return "";
+  return String(title ?? "").trim() === "" ? titleWords(untitled) : "";
+}

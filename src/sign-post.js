@@ -29,7 +29,7 @@
 // place. The files themselves go with the form, which the browser then submits.
 
 import { canonicalBytes } from "/jcs.js";
-import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256 } from "/post-object.js";
+import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, titleProblem } from "/post-object.js";
 
 // ── the post as the product's object ─────────────────────────────────────────
 
@@ -255,6 +255,14 @@ function setup(form) {
       return;
     }
     const { object, part } = made;
+    // A kind that needs a title and has none, where the page names the kinds that need none:
+    // said here, before the passkey is asked to sign something the service would refuse.
+    const untitled = form.dataset.untitledKinds === undefined ? null : form.dataset.untitledKinds.split(" ").filter(Boolean);
+    const noTitle = titleProblem(object.kind, object.title, untitled);
+    if (noTitle) {
+      say(`${noTitle} Nothing was sent. Write one and press Post again.`);
+      return;
+    }
     // More than the service takes: said here, with the form as it was typed, before the
     // passkey is asked to sign something that would be refused.
     const over = tooMany(form, object);

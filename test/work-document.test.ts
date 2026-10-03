@@ -502,6 +502,17 @@ describe("proposing a version from the site", () => {
     }
   });
 
+  test("what the proposal changed is required, where a decision on one asks for no title at all", async () => {
+    const { text } = await get("/me/spaces/field-notes", true);
+    const title = inputs(formOf(text), "title");
+    assert.equal(title.length, 1);
+    assert.ok(title[0]!.attributes.some(([k]) => k === "required"), "the proposal's title is required");
+    const history = (await get("/me/spaces/field-notes/history", true)).text;
+    const deciding = [...history.matchAll(/<form [^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]).filter((f) => /name="kind" value="(go|veto)"/.test(f));
+    assert.ok(deciding.length >= 2, "Approve and Decline are there");
+    for (const form of deciding) assert.equal(inputs(form, "title").length, 0, "a decision has no title to ask for");
+  });
+
   test("a writer proposes, and the sentence names who decides in a work space", async () => {
     const { text } = await get("/me/spaces/writer-notes", true);
     const form = formOf(text);

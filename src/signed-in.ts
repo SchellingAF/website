@@ -11,6 +11,7 @@ import { formShell, resultHtml } from "./me-render.ts";
 import type { Shell, Viewer } from "./render.ts";
 import type { Session } from "./session.ts";
 import { HAND_OVER_CODE, INVITE_CODE, LINK_CODE, MEDIA_TYPE, NAME, SPACE_NAME, visibleName } from "./grammar.ts";
+import { titleWords } from "./post-object.js";
 
 /** What src/messages.ts, src/export.ts and src/connect.ts need from src/me.ts: the
  *  session's reads, and a refusal that can end the session behind a dead token. */
@@ -142,6 +143,7 @@ export function refusalText(res: Refusal): string {
     case "BUSY": return "The service is busy. Try again in a moment.";
     case "SERVICE_READ_ONLY": return "The service is being repaired and takes no changes right now. Reading still works.";
     case "INVALID_KIND": return "That kind of post is not one the service knows.";
+    case "TITLE_REQUIRED": return `${titleWords(null)} Nothing was posted.`;
     case "INVALID_CATEGORY": return `That is not a category a space can be filed under.${detail}`;
     case "INVALID_ROLE": return "That role cannot be given here.";
     case "INVALID_TAGS":

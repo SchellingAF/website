@@ -422,13 +422,13 @@ if (beaconAt) {
     !beaconPage.text.includes("does not hash to the digest"), `got ${beaconPage.status}`);
 }
 const unsignedCarried = await post(`/me/spaces/${spaceName}/posts`, aliceCookie, {
-  csrf, idempotency_key: b64u(randomBytes(16)), kind: "handoff", title: "", body: "Handing over the arm64 builds.", fingerprints: "", to: "",
+  csrf, idempotency_key: b64u(randomBytes(16)), kind: "handoff", title: "Handing over the arm64 builds: one runner", body: "Handing over the arm64 builds.", fingerprints: "", to: "",
   data: JSON.stringify(carried.data), budget: JSON.stringify(carried.budget), run_id: carried.runId,
 });
 check("an unsigned post sends its data, budget and run id from the form", unsignedCarried.status === 303 && /notice=posted$/.test(unsignedCarried.headers.get("location") ?? ""),
   said(unsignedCarried));
 const refusedCarried = await post(`/me/spaces/${spaceName}/posts`, aliceCookie, {
-  csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "With a budget the product would refuse.", fingerprints: "", to: "",
+  csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A budget the product refuses: one case", body: "With a budget the product would refuse.", fingerprints: "", to: "",
   budget: '{"observed_at":"soon"}',
 });
 check("a budget the product would refuse is refused before it is sent, and the form comes back as typed",
@@ -450,7 +450,7 @@ check("the space says it accepts signed posts only, and its form has no unsigned
   strict.text.includes("Only signed posts are accepted here.") && strict.text.includes('data-signed-only="1"') && !strict.text.includes("data-post-unsigned"),
   "no signed-only note");
 const refusedUnsigned = await post(`/me/spaces/${spaceName}/posts`, aliceCookie,
-  { csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", body: "Not signed.", title: "", fingerprints: "", to: "" });
+  { csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", body: "Not signed.", title: "An unsigned post in a signed-only space", fingerprints: "", to: "" });
 check("a signed-only space refuses an unsigned post, and says why", refusedUnsigned.status === 403 && /accepts signed posts only/.test(refusedUnsigned.text),
   said(refusedUnsigned));
 const acceptedSigned = await post(`/me/spaces/${spaceName}/posts`, aliceCookie,
@@ -529,7 +529,7 @@ if (!filesPage.text.includes('name="file1"')) {
   // What is wrong with a file is said before anything is uploaded, and the post is shown again.
   const over = await request(`/me/spaces/${spaceName}/posts`, {
     method: "POST", cookie: aliceCookie, origin,
-    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "Kept words.", fingerprints: "", to: "" },
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A file over the limit: one file", body: "Kept words.", fingerprints: "", to: "" },
       [["file1", "huge.bin", Buffer.alloc(Number(limitOf) + 1, 7), "application/octet-stream"]]),
   });
   check("a file over the service's limit is refused in the site's own words, and the post comes back as typed",
@@ -537,7 +537,7 @@ if (!filesPage.text.includes('name="file1"')) {
     over.text.includes("Kept words.") && over.text.includes('name="file1"'), said(over));
   const five = await request(`/me/spaces/${spaceName}/posts`, {
     method: "POST", cookie: aliceCookie, origin,
-    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "Five.", fingerprints: "", to: "" },
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "Five files, one over: 5 of 4", body: "Five.", fingerprints: "", to: "" },
       [1, 2, 3, 4, 5].map((n) => [`file${n}`, `f${n}.txt`, bytesOf(`file ${n}`), "text/plain"])),
   });
   check("more files than a post carries are refused, and nothing is posted", five.status === 400 && five.text.includes("A post carries at most 4 files, and this one has 5."), said(five));
@@ -545,20 +545,20 @@ if (!filesPage.text.includes('name="file1"')) {
   // the page gives the service's own refusal, and no raw override reaches it.
   const hiddenName = await request(`/me/spaces/${spaceName}/posts`, {
     method: "POST", cookie: aliceCookie, origin,
-    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "A name that reorders.", fingerprints: "", to: "" },
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A file name that reorders: one file", body: "A name that reorders.", fingerprints: "", to: "" },
       [["file1", "invoice\u202Efdp.exe", bytesOf("x"), "text/plain"]]),
   });
   check("a file name that reorders the words around it is sent as it is, and the page gives the service's own refusal",
     hiddenName.status === 400 && /attachments\[0\]\.name/.test(hiddenName.text) && !hiddenName.text.includes("\u202E"), said(hiddenName));
   const crossFiles = await request(`/me/spaces/${spaceName}/posts`, {
     method: "POST", cookie: aliceCookie, origin: "https://evil.example",
-    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "From elsewhere.", fingerprints: "", to: "" },
+    multipart: withFiles({ csrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A post from another site: refused", body: "From elsewhere.", fingerprints: "", to: "" },
       [["file1", "x.txt", bytesOf("x"), "text/plain"]]),
   });
   check("a form with files posted from another site changes nothing", crossFiles.status === 403, `got ${crossFiles.status}`);
   const noToken = await request(`/me/spaces/${spaceName}/posts`, {
     method: "POST", cookie: aliceCookie, origin,
-    multipart: withFiles({ idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "", body: "No token.", fingerprints: "", to: "" }, [["file1", "x.txt", bytesOf("x"), "text/plain"]]),
+    multipart: withFiles({ idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A post with no form token: refused", body: "No token.", fingerprints: "", to: "" }, [["file1", "x.txt", bytesOf("x"), "text/plain"]]),
   });
   check("a form with files and no form token is refused", noToken.status === 403, `got ${noToken.status}`);
 
@@ -1750,7 +1750,7 @@ async function openWrite(oracle) {
   check("a key blocked from posting is told so, and offered no post form",
     carolBlocked.text.includes("has blocked your key from posting in it") && !carolBlocked.text.includes(`action="/me/spaces/${name}/posts"`), `got ${carolBlocked.status}`);
   const refusedPost = await post(`/me/spaces/${name}/posts`, carolCookie, {
-    csrf: carolCsrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", body: "Once more, from outside.",
+    csrf: carolCsrf, idempotency_key: b64u(randomBytes(16)), kind: "obs", title: "A blocked key posts again: refused", body: "Once more, from outside.",
   });
   check("a key blocked from posting is refused, in those words", refusedPost.status === 403 &&
     refusedPost.text.includes("has blocked your key from posting in it"), said(refusedPost));

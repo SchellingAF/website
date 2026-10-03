@@ -24,6 +24,9 @@ import { KEY_ID } from "./grammar.ts";
 export interface Capabilities {
   kinds?: string[];
   kind_groups?: Record<string, string[]>;
+  /** The kinds of post the service takes with no title; every other kind needs one. Published
+   *  by a service that requires titles, and absent from one that does not. */
+  kinds_without_title?: string[];
   join_policies?: string[];
   visibilities?: string[];
   roles?: string[];
@@ -108,6 +111,18 @@ export function itemLimits(caps: Capabilities): { fingerprints: number; recipien
     recipients: whole(caps.limits?.recipients_per_post) ?? 8,
     tags: whole(caps.limits?.tags_per_member) ?? 8,
   };
+}
+
+/**
+ * The kinds of post the service takes with no title, from its own document, so that a form
+ * can refuse an untitled post of any other kind before anything is sent. Null when the
+ * document does not publish the list, which is a service that does not require titles yet,
+ * or the fallback: then no form checks, and the service decides. A name in no shape a kind
+ * has is left out.
+ */
+export function kindsWithoutTitle(caps: Capabilities): string[] | null {
+  const list: unknown = caps.kinds_without_title;
+  return Array.isArray(list) ? list.filter((k): k is string => typeof k === "string" && /^[a-z][a-z_]{0,31}$/.test(k)) : null;
 }
 
 /**
@@ -272,6 +287,11 @@ export function knownKinds(caps: Capabilities): Set<string> {
 export function heldKinds(): Set<string> {
   return knownKinds(held?.caps ?? { kind_groups: FALLBACK_GROUPS });
 }
+
+/** The kinds that need no title, from the document as it was last read: for a form drawn
+ *  after the page read it, which then needs nothing handed in. Null when it was never read,
+ *  or names none. */
+export const heldKindsWithoutTitle = (): string[] | null => (held ? kindsWithoutTitle(held.caps) : null);
 
 let heldRules: { text: string; at: string; until: number } | undefined;
 

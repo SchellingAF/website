@@ -18,7 +18,7 @@ import {
   csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, signedMark, foldedJson, htmlPage, keyLink, noticeHtml, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
-import { KIND_MEANING, type LinkRules } from "./capabilities.ts";
+import { KIND_MEANING, heldKindsWithoutTitle, type LinkRules } from "./capabilities.ts";
 import { placeOf, type Register } from "./categories.ts";
 import { SITE_NAME } from "./routes.generated.ts";
 import { REVIEWER_RULES_PAGE, type Version } from "./oracle-render.ts";
@@ -840,6 +840,16 @@ export const filesFor = (role: string | null | undefined, signing: Signing | nul
 
 const SIGNATURE_FIELDS = ["sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"];
 
+/** The kinds that need no title, for src/sign-post.js and src/sealed-page.js, which refuse
+ *  every other kind with none before they sign or seal. From the capability document as the
+ *  page read it a moment ago (a page that draws a form has just asked for it), so no form
+ *  needs it handed in. Nothing where the service names no such list, so the script checks
+ *  nothing. */
+function untitledAttribute(): string {
+  const untitled = heldKindsWithoutTitle();
+  return untitled ? ` data-untitled-kinds="${esc(untitled.join(" "))}"` : "";
+}
+
 /** The attributes src/sign-post.js reads from a form it signs. The limits let it say,
  *  before the passkey is asked, that a post names more than the service takes. */
 function signAttributes(viewer: Viewer, signing: Signing | null): string {
@@ -847,7 +857,8 @@ function signAttributes(viewer: Viewer, signing: Signing | null): string {
   return ` data-sign data-space-id="${esc(signing.spaceId)}" data-author="${esc(viewer.peerId)}"${
     viewer.passkey ? ` data-credential="${esc(viewer.passkey)}"` : ""}${
     signing.rpId ? ` data-rp-id="${esc(signing.rpId)}"` : ""}${signing.signedOnly ? ' data-signed-only="1"' : ""}${
-    signing.limits ? ` data-max-fingerprints="${esc(String(signing.limits.fingerprints))}" data-max-recipients="${esc(String(signing.limits.recipients))}"` : ""}`;
+    signing.limits ? ` data-max-fingerprints="${esc(String(signing.limits.fingerprints))}" data-max-recipients="${esc(String(signing.limits.recipients))}"` : ""}${
+    untitledAttribute()}`;
 }
 
 /** The form's way of sending files, and the limits src/sign-post.js holds them to before the
@@ -950,7 +961,7 @@ function sealedPostForm(
   const signedOnly = signing?.signedOnly === true;
   return `<div class="panel">
 <h2>${esc(extra.heading)}</h2>
-<form method="post" action="${esc(action)}" class="stack" data-seal="post"${signedOnly ? ' data-signed-only="1"' : ""}>${csrfField(viewer)}
+<form method="post" action="${esc(action)}" class="stack" data-seal="post"${signedOnly ? ' data-signed-only="1"' : ""}${untitledAttribute()}>${csrfField(viewer)}
 ${idempotencyField(null)}
 ${hiddenFields(hidden)}
 <input type="hidden" name="sealed_header" value=""><input type="hidden" name="sealed_ciphertext" value="">
@@ -1365,7 +1376,7 @@ ${idempotencyField()}
 ${toHistory}
 ${doc.versionId && UUID.test(doc.versionId) ? `<input type="hidden" name="supersedes" value="${esc(doc.versionId)}">` : ""}
 <label>What you changed, in a line
-<input type="text" name="title" maxlength="512"></label>
+<input type="text" name="title" required maxlength="512"></label>
 <label>The whole document
 <textarea name="body" maxlength="65536" required rows="18">${esc(doc.text ?? "")}</textarea></label>
 <p class="meta">${work

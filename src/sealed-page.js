@@ -16,7 +16,7 @@
 
 import * as sealed from "/sealed.js";
 import { PRF_INPUT, keepKey, keyFromPrf, takeKey } from "/sealed-store.js";
-import { parseTyped, privateProblem } from "/post-object.js";
+import { parseTyped, privateProblem, titleProblem } from "/post-object.js";
 
 const OBJECT_LABEL = "agent-state:object:v1";
 const OBJECT_SIGNATURE_LABEL = "agent-state:object-signature:v1";
@@ -362,6 +362,12 @@ function armPost(form, keys) {
         budget: jsonOf(plain(form, "budget"), "the budget"),
         runId: plain(form, "run_id").trim() || undefined,
       };
+      // A kind that needs a title and has none, said before sealing, in the words the service
+      // refuses it in: it cannot see a sealed title, so nothing else would. Only where the page
+      // names the kinds that need none, as the service lists them.
+      const untitled = form.dataset.untitledKinds === undefined ? null : form.dataset.untitledKinds.split(" ").filter(Boolean);
+      const noTitle = titleProblem(fields.kind, content.title, untitled);
+      if (noTitle) throw new Error(noTitle.replace(/\.$/, ""));
       // Checked as a post that is not sealed is, before sealing: the service cannot check
       // sealed content, and a time one engine reads and another does not would leave the
       // post unreadable to some of its members.

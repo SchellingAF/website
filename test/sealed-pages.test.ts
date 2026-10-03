@@ -53,6 +53,7 @@ const status = (keeper: boolean) => ({
 const writes: Call[] = [];
 const world: World = {
   ...hostileWorld(),
+  capabilities: { ...hostileWorld().capabilities, kinds_without_title: ["ack", "hold", "go", "veto", "stop"] },
   spaces: [...hostileWorld().spaces, vault("writer"), vault("owner"), { ...vault("owner"), name: "staged-vault" }],
   posts: { ...hostileWorld().posts, vault: [sealedPost], "owned-vault": [], "staged-vault": [] },
 };
@@ -148,6 +149,13 @@ describe("a sealed space's pages", () => {
       assert.match(form, /name="sealed_header"/);
     }
     assert.match(text, /Sealing needs this page's script, which is not running, so nothing can be posted from here/);
+  });
+
+  test("its post form names the kinds that need no title, so the script can refuse the rest before it seals", async () => {
+    // The service cannot see a sealed title, so the browser is the only place to check one.
+    const forms = sealedForms((await page("/me/spaces/vault")).text).filter((f) => f.includes('data-seal="post"'));
+    assert.ok(forms.length >= 1);
+    for (const form of forms) assert.match(form, /<form [^>]*data-untitled-kinds="ack hold go veto stop"/);
   });
 
   test("a sealed post reaches the product as its header and ciphertext, and the words a tampered form adds do not", async () => {

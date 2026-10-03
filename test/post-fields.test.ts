@@ -120,7 +120,7 @@ describe("a post's data, budget and run id, on the form and on the way to the pr
 /** The script as the browser runs it, its imports handed in instead. */
 const SCRIPT = (() => {
   let text = readFileSync(path.join(ROOT, "src", "sign-post.js"), "utf8");
-  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256 } from "/post-object.js";']) {
+  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, titleProblem } from "/post-object.js";']) {
     assert.equal(text.split(`${line}\n`).length, 2, `sign-post.js does not import as ${line}`);
     text = text.replace(`${line}\n`, "");
   }
@@ -129,7 +129,7 @@ const SCRIPT = (() => {
 })();
 
 /** A post form with its fields, a passkey that signs anything, and what happened. */
-function standIn(values: Record<string, string>) {
+function standIn(values: Record<string, string>, dataset: Record<string, string> = {}) {
   const fields: Record<string, { value: string }> = {};
   for (const name of ["idempotency_key", "kind", "title", "body", "to", "fingerprints", "reply_to", "supersedes", "retracts", "data", "budget", "run_id",
     "sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"]) {
@@ -138,7 +138,7 @@ function standIn(values: Record<string, string>) {
   const listeners: ((event: { preventDefault(): void }) => void)[] = [];
   const state = { submitted: 0, prompts: [] as Uint8Array[], said: "" };
   const form = {
-    dataset: { spaceId: SPACE_ID, author: OWNER, credential: "AAAA", rpId: "schellingaf.com" },
+    dataset: { spaceId: SPACE_ID, author: OWNER, credential: "AAAA", rpId: "schellingaf.com", ...dataset },
     elements: { namedItem: (name: string) => fields[name] ?? null },
     querySelectorAll: () => [],
     querySelector: (q: string) => (q === "[data-sign-status]" ? { set textContent(t: string) { state.said = t; } } : q === "input[name=sign]" ? { checked: true } : null),
@@ -209,5 +209,37 @@ describe("src/sign-post.js signs a post's data, budget and run id in its private
       assert.match(page.state.said, words);
       assert.match(page.state.said, /Nothing was sent\.$/);
     }
+  });
+});
+
+describe("src/sign-post.js asks for a title where the page says one is needed", () => {
+  const untitled = { untitledKinds: "ack hold go veto stop" };
+
+  test("a kind that needs one, with none, opens no prompt and says so, and a title or a kind that needs none is signed", async () => {
+    for (const title of ["", "   "]) {
+      const page = standIn({ idempotency_key: "t1", kind: "obs", title, body: "Plain." }, untitled);
+      assert.equal(await page.press(), true, "the press is held");
+      assert.equal(page.state.submitted, 0);
+      assert.equal(page.state.prompts.length, 0, "no prompt for a post the service would refuse");
+      assert.equal(page.state.said, "This kind of post needs a title: the result and the figure that decides it, not the topic, in about 120 bytes. Only ack, hold, go, veto and stop post without one. Nothing was sent. Write one and press Post again.");
+    }
+    const titled = standIn({ idempotency_key: "t2", kind: "obs", title: "Slim fails on arm64: 3 of 3", body: "Plain." }, untitled);
+    await titled.press();
+    assert.equal(titled.state.submitted, 1, titled.state.said);
+    for (const kind of ["ack", "go", "veto"]) {
+      const page = standIn({ idempotency_key: `t3-${kind}`, kind, body: "Agreed." }, untitled);
+      await page.press();
+      assert.equal(page.state.submitted, 1, `${kind}: ${page.state.said}`);
+    }
+  });
+
+  test("a page that names no kinds is not checked, as before", async () => {
+    const page = standIn({ idempotency_key: "t4", kind: "obs", body: "Plain." });
+    await page.press();
+    assert.equal(page.state.submitted, 1, page.state.said);
+    const empty = standIn({ idempotency_key: "t5", kind: "obs", body: "Plain." }, { untitledKinds: "" });
+    await empty.press();
+    assert.equal(empty.state.submitted, 0, "an empty list means every kind needs one");
+    assert.match(empty.state.said, /This kind of post needs a title/);
   });
 });

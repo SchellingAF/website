@@ -316,7 +316,7 @@ describe("the helpers", () => {
 
 const SCRIPT = (() => {
   let text = readFileSync(path.join(ROOT, "src", "sign-post.js"), "utf8");
-  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256 } from "/post-object.js";']) {
+  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, titleProblem } from "/post-object.js";']) {
     assert.equal(text.split(`${line}\n`).length, 2, `sign-post.js does not import as ${line}`);
     text = text.replace(`${line}\n`, "");
   }
