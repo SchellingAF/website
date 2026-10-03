@@ -726,7 +726,23 @@ function readParams(route: Route, url: URL): URLSearchParams {
       // An invite link is its path and nothing else: a query on it changes nothing.
       break;
   }
+  // The lists of spaces leave finished ones out unless the address says finished=all, which is
+  // a page of its own: one value, so no other word typed after it is another page held.
+  if (FINISHED_LISTS.has(route.kind) && url.searchParams.get("finished") === "all") keep.set("finished", "all");
   return keep;
+}
+
+/** The routes that list spaces from the service's list, and so take finished=all. */
+const FINISHED_LISTS: ReadonlySet<string> = new Set(["directory", "bucket", "search", "facet", "oracles", "oracles-recent", "recent", "category"]);
+
+/** Whether a list shows its finished spaces, and the query of the other view, which the link
+ *  to it uses: every other parameter the page carries stays, and finished=all is set or taken
+ *  away. */
+function finishedView(route: Route, url: URL): { all: boolean; query: string } {
+  const kept = readParams(route, url);
+  const all = kept.get("finished") === "all";
+  if (all) kept.delete("finished"); else kept.set("finished", "all");
+  return { all, query: kept.toString() };
 }
 
 /** The address this page declares as its own.
@@ -991,6 +1007,9 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
   const after = read.get("after") ?? "";
 
   const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT) });
+  // Finished spaces are left out unless the address asks for them, which sends no filter.
+  const finished = finishedView(route, url);
+  if (!finished.all) params.set("finished", "false");
   let cursor = "";
 
   // THE TWO KINDS, never one list. Every listing under /spaces but the oracle spaces'
@@ -1035,8 +1054,10 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     strip ? categoryCounts() : null,
     capabilities(),
   ]);
-  const meta = listingMeta(route, q);
+  const meta = listingMeta(route, q, finished.all);
   const shell = shellFor(route, url, meta.title, meta.description);
+  // The view with finished spaces is the same list again: followed, not listed.
+  if (finished.all) shell.robots = robotsFor(route, 200, true);
 
   if (!res.ok) {
     if ((route.kind === "search" || q) && res.code === "INVALID_REQUEST") {
@@ -1085,6 +1106,8 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     publicOnly: !route.private,
     emptyLine: meta.empty,
     register: reg,
+    finishedAll: finished.all,
+    finishedQuery: finished.query,
     ...(strip ? browseByCategory(reg, counts, strip) : {}),
   };
 
@@ -1117,7 +1140,7 @@ function browseByCategory(reg: Register | null, counts: Counts | null, kind: Spa
 
 /** The words each listing wears. Kept in one place so the page, the markdown and
  *  the JSON cannot describe the same query differently. */
-function listingMeta(route: Route, q: string) {
+function listingMeta(route: Route, q: string, finishedAll: boolean) {
   // Under /spaces a listing shows one kind; /inspect, a reader's view, shows both.
   const work = route.base === "/spaces";
   switch (route.kind) {
@@ -1128,7 +1151,8 @@ function listingMeta(route: Route, q: string) {
         description: `Every work space on ${SITE_NAME} whose name begins with ${c}: what each is for, who owns it and how to get in.`,
         heading: `Work spaces beginning with ${c}`,
         lead: "Space names are permanent and never reused, so this list is stable: a work space stays under the same letter for as long as it exists.",
-        empty: `No work space has a name beginning with ${c} yet.`,
+        // Leaving finished spaces out, it cannot say none exists: only that none unfinished does.
+        empty: finishedAll ? `No work space has a name beginning with ${c} yet.` : `No unfinished work space has a name beginning with ${c}.`,
       };
     }
     case "facet": {
@@ -3132,6 +3156,8 @@ async function categoryPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
   // was made. Its cursor is a time and a name, which readParams holds to that shape.
   const params = new URLSearchParams({ limit: String(DIRECTORY_LIMIT), category: id, order: "recent" });
   if (before) params.set("before", before);
+  const finished = finishedView(route, url);
+  if (!finished.all) params.set("finished", "false");
   const [res, counts] = await Promise.all([
     apiGet<Page<SpaceSummary>>(env, `/v1/spaces?${params}`, route.readAs),
     categoryCounts(),
@@ -3147,10 +3173,13 @@ async function categoryPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
   const items = Array.isArray(res.data.items) ? res.data.items : [];
   const cursor = (res.data as { next_before?: unknown }).next_before;
   const next = res.data.has_more && typeof cursor === "string" && RECENT_CURSOR.test(cursor) ? cursor : null;
-  // Listed only while it holds a space. Decided from the page itself rather than from
-  // the counts, which this site holds for up to ten minutes.
-  if (items.length === 0) shell.robots = robotsFor(route, 200, true);
-  const view = { register: reg, category, counts, items, before, nextBefore: next, readAs: route.readAs };
+  // Listed only while it holds a space, finished or not, as sitemap-categories.xml lists it:
+  // from the counts the page shows. Without them, from the page itself. A page past the end
+  // shows none and is not listed either.
+  const held = countOf(counts, category.id);
+  const holds = held === null ? items.length > 0 : held > 0;
+  if (!holds || finished.all || (before && items.length === 0)) shell.robots = robotsFor(route, 200, true);
+  const view = { register: reg, category, counts, items, before, nextBefore: next, readAs: route.readAs, finishedAll: finished.all, finishedQuery: finished.query };
   return partial(
     drawn(route, shell, view, { html: categoryPageHtml, md: categoryPageMarkdown, json: categoryPageJson }),
     counts === null);

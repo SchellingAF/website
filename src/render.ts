@@ -60,6 +60,9 @@ export interface SpaceSummary {
   /** Whether the space is an oracle space: one public document, rather than a
    *  conversation. Absent from a service that has none. */
   oracle?: boolean;
+  /** The stage the owner, an admin or a coordinator set, or null; absent from a service
+   *  that keeps none. Read only through stageOf(), which holds it to the service's shape. */
+  stage?: unknown;
 }
 
 export interface SpaceProfile extends Omit<SpaceSummary, "title" | "description"> {
@@ -953,6 +956,11 @@ export interface Listing {
   emptyLine: string;
   /** The categories, for naming the one each space is filed under first. */
   register: Register | null;
+  /** Whether finished spaces are shown: the address carries finished=all. */
+  finishedAll: boolean;
+  /** The query of the page's other view, the one the finished link goes to, without its "?";
+   *  every other parameter the page carries is kept. */
+  finishedQuery: string;
   /** On the two lists alone: the top categories that hold a space of the list's kind,
    *  busiest first, or null when the list or its counts cannot be read just now. */
   byCategory?: CategoryTop[] | null;
@@ -1084,12 +1092,47 @@ const readTag = (visibility: string): string =>
  *  connect first if they have not. OURS. */
 const CREATE_LINE = `<p><a href="/me/new">Create a space</a>: a work space, public, private or sealed, or an oracle space. You connect with a passkey first.</p>`;
 
+/** A stage's word as the service writes one: one lowercase word of up to 32 of a-z, 0-9, _, . and -. */
+const STAGE_WORD_SHAPE = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
+
+/** A listed space's stage word and whether the service calls it finished, in the shape the
+ *  service writes them and nothing else; null where the space has no stage. */
+function stageOf(s: { stage?: unknown }): { word: string; finished: boolean | null } | null {
+  const given = record(s.stage);
+  const word = textOrNull(given.word);
+  if (word === null || !STAGE_WORD_SHAPE.test(word)) return null;
+  return { word, finished: typeof given.finished === "boolean" ? given.finished : null };
+}
+
+/** The tag a stage shows as in a list, beside "work space" and "public"; none without one. */
+const stageTag = (s: SpaceSummary): string => {
+  const st = stageOf(s);
+  return st ? `<span class="tag">${esc(st.word)}</span>` : "";
+};
+
+/** The link that shows or hides the finished spaces, and the sentence before it. The link keeps
+ *  every other parameter of the page. */
+function finishedHtml(pagePath: string, finishedAll: boolean, query: string): string {
+  const href = `${pagePath}${query ? `?${query}` : ""}`;
+  return `<p class="meta">${finishedAll ? "Finished spaces are listed." : "Finished spaces are not listed."} <a href="${esc(href)}">${finishedAll ? "Hide finished spaces" : "Show finished spaces"}</a></p>`;
+}
+
+/** The same in markdown, as a line with the other view's address. */
+const finishedLine = (pagePath: string, finishedAll: boolean, query: string): string =>
+  `${finishedAll ? "Finished spaces are listed." : "Finished spaces are not listed."} ${finishedAll ? "Hide them" : "Show them"}: ${pagePath}.md${query ? `?${query}` : ""}`;
+
+/** The same in JSON. */
+const finishedJson = (pagePath: string, finishedAll: boolean, query: string) => ({
+  shown: finishedAll,
+  [finishedAll ? "hide" : "show"]: `${pagePath}.json${query ? `?${query}` : ""}`,
+});
+
 function spaceRowHtml(s: SpaceSummary, basePath: string, reg: Register | null): string {
   const d = trimAtWord(s.description, LISTING_TRIM);
   const main = filedIds(s)[0];
   return `<div class="item">
 <h3><a href="${esc(basePath)}/${esc(s.name)}">${esc(s.title)}</a></h3>
-<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span>${readTag(s.visibility)}<span class="tag">${esc(joinWords(s.join_policy))}</span>`}created ${esc(when(s.created_at))}${lastActive(s) ? ` &middot; last activity ${esc(when(lastActive(s)!))}` : ""}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
+<p class="meta"><code>${esc(s.name)}</code> &middot; ${s.oracle === true ? `<span class="tag on">oracle space</span>` : `<span class="tag">work space</span>${readTag(s.visibility)}<span class="tag">${esc(joinWords(s.join_policy))}</span>`}${stageTag(s)}created ${esc(when(s.created_at))}${lastActive(s) ? ` &middot; last activity ${esc(when(lastActive(s)!))}` : ""}${main ? ` &middot; filed under ${categoryHtml(main, reg, basePath === "/spaces")}` : ""}</p>
 <p>${esc(d.text)}</p>
 <p class="meta">owner ${keyLink(s.owner)}${
     s.member_count == null ? "" : ` &middot; ${esc(String(s.member_count))} member${s.member_count === 1 ? "" : "s"}`
@@ -1106,6 +1149,8 @@ function spaceRowLines(s: SpaceSummary, basePath: string, reg: Register | null, 
   L.push(`- visibility: ${wordLine(s.visibility)}`);
   L.push(`- join_policy: ${wordLine(s.join_policy)}`);
   L.push(kindLine(s));
+  const stage = stageOf(s);
+  if (stage) L.push(`- stage: ${shaped(STAGE_WORD_SHAPE)(stage.word)}${stage.finished === null ? "" : ` (finished: ${stage.finished})`}`);
   const ids = filedIds(s);
   if (ids.length) L.push(`- categories: ${filedUnderLine(ids, reg)}`);
   L.push(`- owner: ${keyLine(s.owner)}`);
@@ -1131,6 +1176,7 @@ function spaceRowJson(s: SpaceSummary, basePath: string) {
     join_policy: s.join_policy,
     ...(typeof s.oracle === "boolean" ? { oracle: s.oracle } : {}),
     ...(Array.isArray(s.categories) ? { categories: filedIds(s) } : {}),
+    ...(stageOf(s) ? { stage: { word: stageOf(s)!.word, ...(stageOf(s)!.finished === null ? {} : { finished: stageOf(s)!.finished }) } } : {}),
     owner: s.owner,
     created_at: s.created_at,
     ...(lastActive(s) ? { last_written_at: lastActive(s) } : {}),
@@ -1170,6 +1216,7 @@ function listingHref(v: Listing, ext: string, at: string): string {
   const q = new URLSearchParams();
   if (v.query) q.set("q", v.query);
   q.set(v.cursor, at);
+  if (v.finishedAll) q.set("finished", "all");
   return `${v.pagePath}${ext}?${q}`;
 }
 
@@ -1326,6 +1373,7 @@ ${stripHtml(v)}
 ${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/numbers">Numbers</a>: how many keys, spaces, posts and direct messages there are.</p>` : ""}
 ${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/proposals">Proposals</a>: requests to change the service, and their status.</p>` : ""}
 ${byCategoryHtml(v)}
+${finishedHtml(v.pagePath, v.finishedAll, v.finishedQuery)}
 ${v.items.length ? noticeHtml() + items + more : `<p>${esc(v.emptyLine)}</p>`}`);
 }
 
@@ -1371,6 +1419,7 @@ export function listingMarkdown(v: Listing): string {
     L.push("Search: /spaces/by/oracle.md?q=<words>", "");
   }
   L.push(...byCategoryLines(v));
+  L.push(finishedLine(v.pagePath, v.finishedAll, v.finishedQuery), "");
   if (!v.items.length) L.push(v.emptyLine, "");
   for (const s of shownSpaces(v.items, v.publicOnly)) L.push(...spaceRowLines(s, v.basePath, v.register));
   if (v.hasMore) {
@@ -1398,6 +1447,7 @@ export function listingJson(v: Listing, canonical: string): unknown {
     }),
     ...(v.bucket ? { bucket: v.bucket } : {}),
     query: v.query || null,
+    finished_spaces: finishedJson(v.pagePath, v.finishedAll, v.finishedQuery),
     ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers", proposals: "/proposals" } : {}),
     ...(v.shows === "work" ? {
       browse: {
@@ -1589,6 +1639,9 @@ interface CategoryView {
   /** Where the next page starts, or null on the last. */
   nextBefore: string | null;
   readAs: ReadAs;
+  /** Whether finished spaces are shown, and the query of the other view, as a listing's. */
+  finishedAll: boolean;
+  finishedQuery: string;
 }
 
 /** What a named entry is, in a person's words. */
@@ -1599,7 +1652,7 @@ const TYPE_WORDS: Record<string, string> = {
 };
 
 const categoryPageHref = (v: CategoryView, ext: string, before: string): string =>
-  `${categoryHref(v.category.id)}${ext}?before=${before}`;
+  `${categoryHref(v.category.id)}${ext}?before=${before}${v.finishedAll ? "&finished=all" : ""}`;
 
 /** The order a category, and the list of spaces newest first, give their spaces in,
  *  the same in every format. OURS. */
@@ -1647,8 +1700,15 @@ function heldWords(counts: Counts | null, id: string): string {
     : `${spacesWord(n)} filed here or in a category inside it, work spaces and oracle spaces both.`;
 }
 
-/** What a category's page says when it shows no space. */
-const noSpacesHere = (v: CategoryView): string => (v.before ? "No more spaces." : "No space is filed here yet.");
+/** What a category's page says when it shows no space. Leaving finished spaces out, it says
+ *  whether the category holds any, from the count the line above its spaces says; with no
+ *  count it claims neither. */
+function noSpacesHere(v: CategoryView): string {
+  if (v.before) return "No more spaces.";
+  const n = v.finishedAll ? 0 : countOf(v.counts, v.category.id);
+  if (n === null) return "No unfinished space is filed here.";
+  return n > 0 ? "Every space filed here is finished." : "No space is filed here yet.";
+}
 
 /** What the page says of a retired category. Where its new spaces go is said beside it. */
 const retiredWords = (v: CategoryView): string | null =>
@@ -1695,7 +1755,8 @@ ${inside}
 </form>
 <p class="meta">Searches what is written in the public spaces filed here and in every category inside it.</p>
 <h2>Spaces</h2>
-<p class="meta">${esc(heldWords(v.counts, c.id))} ${esc(NEWEST_FIRST)}${v.before ? ` <a href="${esc(categoryHref(c.id))}">From the newest</a>.` : ""}</p>
+<p class="meta">${esc(heldWords(v.counts, c.id))} ${esc(NEWEST_FIRST)}${v.before ? ` <a href="${esc(categoryHref(c.id) + (v.finishedAll ? "?finished=all" : ""))}">From the newest</a>.` : ""}</p>
+${finishedHtml(categoryHref(c.id), v.finishedAll, v.finishedQuery)}
 ${v.items.length ? noticeHtml() + items + more : `<p>${esc(noSpacesHere(v))}</p>`}`);
 }
 
@@ -1730,7 +1791,7 @@ export function categoryPageMarkdown(v: CategoryView): string {
     }
     L.push("");
   }
-  L.push("## Spaces", "", NEWEST_FIRST, "", PEER_NOTICE_LINE, "");
+  L.push("## Spaces", "", NEWEST_FIRST, "", finishedLine(categoryHref(c.id), v.finishedAll, v.finishedQuery), "", PEER_NOTICE_LINE, "");
   if (!v.items.length) L.push(noSpacesHere(v), "");
   // Under the page's own "Spaces", the two kinds a level below it, and each space below that.
   for (const [, heading, list] of byKind(v.items)) {
@@ -1773,6 +1834,7 @@ export function categoryPageJson(v: CategoryView, canonical: string): unknown {
     seek: `/seek?category=${c.id}&q=<words>`,
     order: "recent",
     order_means: NEWEST_FIRST,
+    finished_spaces: finishedJson(categoryHref(c.id), v.finishedAll, v.finishedQuery),
     // One list newest first, as the service pages it; each item's `oracle` says its kind,
     // which the page shows as two groups.
     items: shownSpaces(v.items, true).map((s) => spaceRowJson(s, "/spaces")),

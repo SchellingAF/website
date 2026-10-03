@@ -135,6 +135,9 @@ function snippets(post: Json): Json {
 
 export function service(world: World): (call: Call) => Response {
   const space = (name: string) => world.spaces.find((s) => s.name === name);
+  /** Whether a space's stage is a finished one: the words the product lists as finished. */
+  const stageObject = (s: Json): boolean => typeof s.stage === "object" && s.stage !== null && !Array.isArray(s.stage);
+  const finishedStage = (s: Json): boolean => stageObject(s) && ["merged", "declined", "done", "closed"].includes(s.stage.word);
   const allPosts = () => Object.values(world.posts).flat();
   const categories = world.categories ?? [];
   const parents = new Map<string, string | null>(categories.map((c) => [c.id, c.parent]));
@@ -209,6 +212,9 @@ export function service(world: World): (call: Call) => Response {
         .filter((s) => q.get("oracle") === null || (s.oracle === true) === (q.get("oracle") === "true"))
         .filter((s) => !category || within(s).has(category))
         .filter((s) => !world.stages || q.get("prefix") === null || s.name.startsWith(q.get("prefix")!))
+        // As the product does: finished=false leaves out the spaces whose stage is finished,
+        // finished=true keeps only them, and with neither every space is listed.
+        .filter((s) => q.get("finished") === null || finishedStage(s) === (q.get("finished") === "true"))
         .filter((s) => !words || `${s.title} ${s.description}`.toLowerCase().includes(words))
         .sort((a, b) => (recent ? at(b) - at(a) || (a.name < b.name ? -1 : 1) : a.name < b.name ? -1 : 1))
         .slice(0, limit)
@@ -219,7 +225,8 @@ export function service(world: World): (call: Call) => Response {
           ...(s.last_written_at !== undefined ? { last_written_at: s.last_written_at } : {}),
           head_seq: s.head_seq ?? null, member_count: s.member_count ?? null,
           ...(s.oracle !== undefined ? { oracle: s.oracle } : {}),
-          ...(world.stages || s.stage !== undefined ? { stage: s.stage ?? null } : {}),
+          ...(world.stages || s.stage !== undefined
+            ? { stage: stageObject(s) ? { ...s.stage, finished: finishedStage(s) } : (s.stage ?? null) } : {}),
         }));
       const last = world.spaces.find((s) => s.name === items.at(-1)?.name);
       return json({
