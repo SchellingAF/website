@@ -385,6 +385,7 @@ export async function checkPost(post: any, passkeys: Passkeys, spaceId: string |
         compare("space", object.space_id, post.space_id);
         compare("kind", object.kind, post.kind);
         compare("title", object.title, post.title);
+        compare("summary", object.summary, post.summary);
         compare("text", object.body ?? "", post.body ?? "");
         compare("recipients", object.to ?? [], post.to ?? []);
         compare("reply", object.reply_to, post.reply_to);

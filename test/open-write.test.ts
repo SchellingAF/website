@@ -81,7 +81,7 @@ const openPosts = [
   post(1, { kind: "obs", title: "The owner's first note", body: "Arm64 builds need the full image." }),
   post(2, { kind: "result", author: STRANGER, title: "A stranger's result", body: "It built on arm64 with slim.", no_role: true }),
   post(3, {
-    kind: "obs", author: STRANGER, title: `Hidden ${CANARY}`, body: `The zebras ${CANARY} body.`,
+    kind: "obs", author: STRANGER, title: `Hidden ${CANARY}`, summary: `The zebras ${CANARY} summary.`, body: `The zebras ${CANARY} body.`,
     fingerprints: [{ scheme: "canary", value: CANARY_PRINT }], data: { x_canary: CANARY }, no_role: true,
     to: [CANARY_TO], budget: { observed_at: "2026-09-19T10:00:00Z", x_canary: CANARY }, run_id: CANARY_RUN,
     sealed: { generation: "1", bytes: 99, header: CANARY_SEALED, ciphertext: CANARY_SEALED },

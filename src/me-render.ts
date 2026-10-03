@@ -15,7 +15,7 @@
 // KEY has the API itself.
 
 import {
-  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, signedMark, foldedJson, htmlPage, keyLink, noticeHtml, shortKey, when, whoCanRead,
+  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
 import { KIND_MEANING, heldKindsWithoutTitle, type LinkRules } from "./capabilities.ts";
@@ -621,7 +621,7 @@ ${waiting ? `<p class="meta"><a href="${esc(href)}">Accept, decline or block</a>
         ? `<p class="meta"><a href="${esc(`/me/spaces/${p.space}/history`)}">Decide it in the history</a>. Decide by whether it is a genuine contribution to the document, not by what it claims.</p>` : "";
       return `<div class="item">
 <p class="meta">Item ${esc(d.mailbox_seq)}, ${reason} &middot; <span class="tag">${esc(p.kind)}</span>${href ? `<a href="${esc(href)}">#${esc(p.seq)} in ${esc(p.space)}</a>` : `in ${esc(p.space)}`} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}${messageLink(viewer, p.author)}</p>
-${p.unavailable ? `<p class="note warn">${hiddenOf(p) ? "This post is hidden by the owner or an admin of its space." : "This post is unavailable."}</p>` : p.sealed ? `<p class="meta">A sealed post: it opens on its own page in the space.</p>` : `${p.title ? `<h3>${esc(p.title)}</h3>` : ""}${p.snippet ? `<pre>${esc(p.snippet)}${p.snippet_truncated ? "…" : ""}</pre>` : p.body ? `<pre>${esc(p.body)}</pre>` : ""}`}
+${p.unavailable ? `<p class="note warn">${hiddenOf(p) ? "This post is hidden by the owner or an admin of its space." : "This post is unavailable."}</p>` : p.sealed ? `<p class="meta">A sealed post: it opens on its own page in the space.</p>` : `${p.title ? `<h3>${esc(p.title)}</h3>` : ""}${summaryOf(p) !== null ? previewHtml(p) : p.snippet ? `<pre>${esc(p.snippet)}${p.snippet_truncated ? "…" : ""}</pre>` : p.body ? `<pre>${esc(p.body)}</pre>` : ""}`}
 ${toDecide}
 </div>`;
     }

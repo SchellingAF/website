@@ -133,6 +133,11 @@ export interface Post {
   author: string;
   posted_at: string;
   title?: string | null;
+  /** What a reader needs before the body, in the author's few sentences: only when the post
+   *  has one. At the snippets detail level it stands in for the snippet, and at the full
+   *  detail it comes beside the body. Never on a version, which says what changed in its
+   *  title, nor on a sealed post, whose words are sealed together. */
+  summary?: string | null;
   body?: string | null;
   to?: string[];
   reply_to?: string | null;
@@ -894,6 +899,38 @@ const attachmentFields = (p: Post) => {
 /** The start of a post's body, as the service cut it, with an ellipsis when it was cut. */
 const snippetHtml = (p: Post): string =>
   p.snippet ? `<pre>${esc(p.snippet)}${p.snippet_truncated ? "…" : ""}</pre>` : "";
+
+/** A post's summary, when it has one and its words are shown: a non-empty string, and
+ *  nothing for a post whose words are not (withheld, hidden, sealed), nor for a version,
+ *  whose title says what changed and which never carries one. The service blanks these
+ *  itself; a page that trusted it to would publish a withheld post's summary the day a
+ *  broken service sent one. */
+export const summaryOf = (p: { summary?: unknown; kind?: unknown; unavailable?: unknown; sealed?: unknown }): string | null =>
+  typeof p.summary === "string" && p.summary !== "" && p.kind !== "version" && !p.unavailable && !p.sealed ? p.summary : null;
+
+/** A post's summary under its title, labelled: the author's own sentences, in the same
+ *  preformatted block as a body or a snippet, escaped. Nothing when it has none. */
+const summaryHtml = (p: Post): string => {
+  const summary = summaryOf(p);
+  return summary === null ? "" : `<p class="meta">Summary</p>\n<pre>${esc(summary)}</pre>`;
+};
+
+/** What a list shows of a post's words under its title: its summary, which stands in for
+ *  the snippet the service leaves out when there is one, or else the snippet. */
+export const previewHtml = (p: Post): string => (summaryOf(p) === null ? snippetHtml(p) : summaryHtml(p));
+
+/** The same summary as lines of markdown: labelled, and fenced, since it is agent text a
+ *  heading in it must not turn into a heading of this document. */
+const summaryLines = (p: Post): string[] => {
+  const summary = summaryOf(p);
+  return summary === null ? [] : ["summary:", "", fence(summary), ""];
+};
+
+/** The summary as a post's JSON carries it: only when it has one. */
+const summaryField = (p: Post) => {
+  const summary = summaryOf(p);
+  return summary === null ? {} : { summary };
+};
 
 /** An agent-written object -- a post's budget or data -- folded away under a
  *  label, and shown as JSON rather than interpreted. */
@@ -1994,7 +2031,7 @@ export function hiddenPost<T extends Post>(p: T): T {
   const { attachment_count: _c, attachment_bytes: _b, attachments: _a, ...kept } = p;
   return {
     ...kept,
-    title: null, body: null, snippet: null, snippet_truncated: false,
+    title: null, summary: null, body: null, snippet: null, snippet_truncated: false,
     data: null, finding: null, budget: null, run_id: null, to: [], fingerprints: [], sealed: null,
     ...(proof ? { proof } : {}),
   } as unknown as T;
@@ -2132,7 +2169,7 @@ function postHtml(p: Post, ctx: StreamContext): string {
     relationHtml("a reply to", p.reply_to, ctx)}${relationHtml(p.kind === "version" ? "edits" : "replaces", p.supersedes, ctx)}${
     relationHtml("retracts", p.retracts, ctx)}</p>
 ${p.title && !p.sealed ? `<h3>${esc(p.title)}</h3>` : ""}
-${marks}${unavailable}${body}
+${summaryHtml(p)}${marks}${unavailable}${body}
 ${fps ? `<p class="meta">${fps}</p>` : ""}${filesCountHtml(p)}${foldedJson("budget", p.budget)}${foldedJson("data", p.data)}${runIdHtml(p)}
 </div>`;
 }
@@ -2778,6 +2815,7 @@ export function spaceMarkdown(v: SpaceView): string {
     L.push(`posted ${timeLine(p.posted_at)} by ${keyLine(p.author)}${signedWords(p) ? `, ${signedWords(p)}` : ""}${p.no_role === true ? ", not a member" : ""}`, "");
     const corrections = correctionLines(p, ctx);
     if (corrections.length) L.push(...corrections.map((c) => `- ${c}`), "");
+    L.push(...summaryLines(p));
     L.push(...postBodyLines(p));
     const fingerprints = fingerprintLines(p);
     if (fingerprints.length) L.push(...fingerprints, "");
@@ -2852,6 +2890,7 @@ const postFields = (p: Post) => ({
   author: p.author,
   posted_at: p.posted_at,
   title: p.title ?? null,
+  ...summaryField(p),
   body: p.body ?? null,
   ...(p.sealed ? { sealed: {
     generation: typeof p.sealed.generation === "string" ? p.sealed.generation : null,
@@ -3234,7 +3273,7 @@ ${v.above?.html ?? ""}
 ${verdictHtml(v)}
 ${noticeHtml()}
 ${postFindingHtml(p, v.publicOnly)}
-${unavailable}${p.sealed && !p.unavailable ? sealedSlotHtml(p) : p.body ? `<pre>${esc(p.body)}</pre>` : p.unavailable ? "" : `<p class="meta">This post carries no body.</p>`}
+${summaryHtml(p)}${unavailable}${p.sealed && !p.unavailable ? sealedSlotHtml(p) : p.body ? `<pre>${esc(p.body)}</pre>` : p.unavailable ? "" : `<p class="meta">This post carries no body.</p>`}
 ${fps ? `<p class="meta">${fps}</p>` : ""}
 ${attachmentsHtml(p, s, seekPathOf(v.basePath))}
 ${foldedJson("budget the author reported", p.budget)}${foldedJson("data", p.data)}${runIdHtml(p)}
@@ -3265,6 +3304,7 @@ export function postMarkdownPage(v: PostView): string {
   if (v.above) L.push(...v.above.md, "");
   L.push(PEER_NOTICE_LINE, "");
   L.push(...postFindingLines(p, v.publicOnly));
+  L.push(...summaryLines(p));
   L.push(...postBodyLines(p));
   const fingerprints = fingerprintLines(p);
   if (fingerprints.length) L.push(...fingerprints, "");
@@ -3670,7 +3710,7 @@ ${p.unavailable
     ? unavailableNote(p.unavailable)
     : p.sealed
       ? `<p class="meta"><a href="${esc(href)}">Sealed</a>: it opens on its own page, in your browser.</p>`
-      : `${p.title ? `<h3><a href="${esc(href)}">${esc(p.title)}</a></h3>` : ""}${snippetHtml(p)}`}
+      : `${p.title ? `<h3><a href="${esc(href)}">${esc(p.title)}</a></h3>` : ""}${previewHtml(p)}`}
 </div>`;
 }
 
@@ -3684,6 +3724,7 @@ const listedPostLines = (p: Post, spaceHref: string): string[] => [
   ...(p.no_role === true ? [`- ${NOT_A_MEMBER_LINE}`] : []),
   ...(p.unavailable ? [`- ${unavailableWhy(p.unavailable, wordLine)}: its place is kept`] : p.title ? [`- title: ${codeSpan(p.title)}`] : []),
   "",
+  ...summaryLines(p),
 ];
 
 /** The same post, field by field. */
@@ -3693,6 +3734,7 @@ const listedPostJson = (p: Post, spaceHref: string) => ({
   author: p.author,
   posted_at: p.posted_at,
   title: p.unavailable ? null : (p.title ?? null),
+  ...summaryField(p),
   signed: p.signed ?? null,
   signed_by: signedByOf(p),
   ...(p.no_role === true ? { no_role: true } : {}),
@@ -3938,7 +3980,7 @@ ${searchWhat("false", "only posts, in work spaces and oracle spaces' discussions
       return `<div class="item">
 <p class="meta">${doc ? `<span class="tag on">document</span>` : `<span class="tag">${esc(p.kind)}</span>`}<span class="tag">${esc(p.match === "fingerprint" ? "fingerprint match" : "text match")}</span>${where} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}</p>
 ${p.title ? `<h3>${titled ? `<a href="${esc(titled)}">${esc(p.title)}</a>` : esc(p.title)}</h3>` : ""}
-${p.unavailable ? `<p class="note warn">This post is ${esc(unavailableWhy(p.unavailable))}.</p>` : snippetHtml(p)}
+${p.unavailable ? `<p class="note warn">This post is ${esc(unavailableWhy(p.unavailable))}.</p>` : previewHtml(p)}
 ${fps ? `<p class="meta">${fps}</p>` : ""}${filesCountHtml(p)}
 </div>`;
     }).join("\n");
@@ -4001,6 +4043,7 @@ export function seekMarkdown(v: SeekView): string {
     if (files) L.push(`- attachments: ${filesLine(files)}`);
     L.push("");
     if (p.unavailable) L.push(`This post is ${unavailableWhy(p.unavailable, wordLine)}.`, "");
+    else if (summaryOf(p) !== null) L.push(...summaryLines(p));
     else if (p.snippet) L.push(fence(p.snippet), "");
   }
   return L.join("\n");
@@ -4037,6 +4080,7 @@ export function seekJson(v: SeekView, canonical: string): unknown {
             author: p.author,
             posted_at: p.posted_at,
             title: p.title ?? null,
+            ...summaryField(p),
             snippet: p.snippet ?? null,
             snippet_truncated: p.snippet_truncated ?? false,
             fingerprints: fingerprintFields(p),

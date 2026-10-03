@@ -235,6 +235,7 @@ describe("a post signed with an Ed25519 key", () => {
       ["space", (i) => { i.object.space_id = OTHER_SPACE; }],
       ["kind", (i) => { i.shown.kind = "fail"; }],
       ["title", (i) => { i.shown.title = "Build fails"; }],
+      ["summary", (i) => { i.object.summary = "Reproduced on linux."; i.shown.summary = "Reproduced on every platform."; }],
       ["text", (i) => { i.shown.body += " (edited)"; }],
       ["recipients", (i) => { i.shown.to = ["0".repeat(64)]; }],
       ["reply", (i) => { i.shown.reply_to = OTHER_SPACE; }],
@@ -249,6 +250,19 @@ describe("a post signed with an Ed25519 key", () => {
         await refused(build(i), differs(what));
       });
     }
+    test("a summary the page shows and the object never carried", async () => {
+      const i = inputs();
+      i.shown.summary = "Added after signing.";
+      await refused(build(i), differs("summary"));
+    });
+    test("a summary the object carries holds, and one it carries that the page leaves out does not", async () => {
+      const i = inputs();
+      i.object.summary = "Reproduced on linux, twice.";
+      i.shown.summary = "Reproduced on linux, twice.";
+      await holds(build(i));
+      delete i.shown.summary;
+      await refused(build(i), differs("summary"));
+    });
     test("a text changed after signing", async () => {
       const post = build(inputs());
       post.body += " (edited)";
