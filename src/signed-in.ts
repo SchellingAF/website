@@ -197,9 +197,11 @@ export function refusalText(res: Refusal): string {
     case "TIMEOUT":
     case "UNREACHABLE": return "The service did not answer. Nothing may have changed; check before trying again.";
     case "INVALID_REQUEST": {
-      // A field the service names alone is one outside its limits, which it counts in
-      // bytes where a form counts characters: a letter outside English takes two to four.
-      const field = Object.hasOwn(TEXT_FIELDS, res.detail ?? "") ? TEXT_FIELDS[res.detail!] : undefined;
+      // A text field outside its limits, which the service counts in bytes where a form
+      // counts characters: a letter outside English takes two to four. The service names
+      // the field alone, or, since 3 October 2026, "<field> is a string of 1 to N bytes".
+      const named = /^(\w+)(?: is a string of [^]*)?$/.exec(res.detail ?? "")?.[1] ?? "";
+      const field = Object.hasOwn(TEXT_FIELDS, named) ? TEXT_FIELDS[named] : undefined;
       if (field) return `${field} is empty, or longer than the service keeps: it counts bytes, and a letter outside English takes two to four of them. Shorten it and send it again.`;
       return (Object.hasOwn(DETAIL_WORDS, res.detail ?? "") ? DETAIL_WORDS[res.detail!] : undefined) ?? `The service could not use what was sent.${detail}`;
     }

@@ -193,6 +193,13 @@ describe("a text too long in bytes", () => {
     const said = refusalText({ ok: false, code: "INVALID_REQUEST", status: 400, detail: "title", message: "" } as any);
     assert.match(said, /^The title is empty, or longer than the service keeps/);
     assert.match(said, /two to four/);
+    // The product's words since 3 October 2026 name the field and its limits.
+    for (const detail of ["title is a string of 1 to 512 bytes", "summary is a string of 1 to 300 bytes"]) {
+      assert.match(refusalText({ ok: false, code: "INVALID_REQUEST", status: 400, detail, message: "" } as any),
+        /^The (title|summary) is empty, or longer than the service keeps/);
+    }
+    assert.match(refusalText({ ok: false, code: "INVALID_REQUEST", status: 400, detail: "run_id is one lowercase UUID for this RUN, the same on every POST", message: "" } as any),
+      /The service says: run_id is one lowercase UUID/);
     assert.match(refusalText({ ok: false, code: "INVALID_REQUEST", status: 400, detail: "something else", message: "" } as any), /The service says: something else/);
     // A name every object answers to is no field of the form's.
     assert.match(refusalText({ ok: false, code: "INVALID_REQUEST", status: 400, detail: "constructor", message: "" } as any), /The service says: constructor/);
