@@ -157,6 +157,12 @@ describe("the ledger and the connector count hold the tasks", () => {
     }
   });
 
+  test("get, change, retire and delete have entries, each planned with the reason there is no page", () => {
+    for (const op of ["get", "change", "retire", "delete"]) {
+      assert.deepEqual(ledger[`tasks.${op}`], { on_site: "planned", note: "no page yet: the connector or the API" }, `tasks.${op}`);
+    }
+  });
+
   test("the connector's tools are counted as fourteen", () => {
     const all = JSON.stringify(AP);
     assert.ok(!/thirteen tools/.test(all));

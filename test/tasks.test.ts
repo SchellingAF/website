@@ -54,6 +54,26 @@ const BOARD: Json[] = [
   task(7, { title: "Name the oldest hand", state: "accepted", claimed_by: WRITER, done_post_id: id(40), done_at: at(3), accepted_at: at(4), confirmations: { required: 0, given: [] } }),
 ];
 
+/** A task as the product answers it once it is retired, changed, given back, the
+ *  service's upkeep, or deleted: the fields of proposal-self-harness's task answer. */
+const LATER: Json[] = [
+  task(8, {
+    title: "Count the glyphs", state: "retired", revision: 2, claimed_by: null,
+    changed: { by: OWNER, at: at(6), reason: "<b>Count</b> the second page too." },
+    retired: { by: OWNER, at: at(7), reason: "Split in two: <i>pages</i> differ.", replaced_by: [taskId(10), taskId(11)], replaced_by_numbers: [10, 11] },
+  }),
+  task(9, {
+    title: "Bring the document in line", state: "retired", created_by: null, upkeep: "document",
+    retired: { by: null, at: at(7), reason: "Another version became current.", replaced_by: [], replaced_by_numbers: [] },
+  }),
+  task(10, { title: "Count page 1", state: "open", revision: 4, changed: { by: WRITER, at: at(8), reason: "Name the scan." }, released: { by: OWNER, at: at(9), reason: "No progress for a day." } }),
+  task(11, { title: "Review the task list", created_by: null, upkeep: "tasks", state: "claimed", claimed_by: CHECKER, claimed_until: at(9) }),
+  task(12, { title: "A peer's upkeep in name only", upkeep: "tasks" }),
+  // A deleted task, as the product answers one: no title, no words, only who deleted it.
+  { number: 13, task_id: taskId(13), state: "deleted", deleted: { by: OWNER, at: at(9), reason: "Added twice." } },
+  task(14, { title: "Words a deleted task kept", state: "deleted" }),
+];
+
 const MANY: Json[] = Array.from({ length: 60 }, (_, i) => task(i + 1, { title: `Page ${i + 1}` }));
 
 const world: World = {
@@ -67,14 +87,15 @@ const world: World = {
     space("broken-board"),
     space("shaped-board"),
     space("odd-board"),
+    space("later-board"),
     space("task-oracle", { oracle: true, service_reviewer: false, forked_from: null }),
   ],
   posts: {
     "task-board": [post(1), post(2), post(3)],
-    "empty-board": [], "quiet-board": [], "wide-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "task-oracle": [],
+    "empty-board": [], "quiet-board": [], "wide-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "later-board": [], "task-oracle": [],
   },
   tasks: {
-    "task-board": BOARD, "quiet-board": [task(1, { title: "A private task" })], "wide-board": MANY,
+    "task-board": BOARD, "quiet-board": [task(1, { title: "A private task" })], "wide-board": MANY, "later-board": LATER,
     "odd-board": [
       task(1, { x_secret: "SENTINEL-TASK-FIELD", claimed_by: "not a key", done_at: "yesterday", confirmations: { required: 2, given: [OWNER, "not a key"] } }),
     ],
@@ -90,6 +111,8 @@ const { fake, handleRequest } = await site((call) => {
   if (call.url.pathname === "/v1/spaces/task-oracle/document") return json({ space: "task-oracle", title: "A document", version: null, text: null, sections: [], references: [], pending: 0 });
   return base(call);
 });
+// Loaded after site(), which the rule in test/lib/site.ts asks of every module of src/.
+const { readableTasks } = await import("../src/render.ts");
 
 async function get(path: string, headers: Record<string, string> = {}) {
   const res = await handleRequest(new Request(`${SITE}${path}`, { headers }), { ...env, SITE_TOKEN: "site-token-for-tests" });
@@ -278,6 +301,98 @@ describe("the JSON twin carries the service's fields unchanged", () => {
     assert.ok(!("claimed_by" in row) && !("done_at" in row));
     assert.deepEqual(row.confirmations, { required: 2, given: [OWNER] });
     assert.doesNotMatch(JSON.stringify(doc), /SENTINEL-TASK-FIELD/);
+  });
+});
+
+describe("a task that changed, was retired, given back or handed out by the service says so", () => {
+  const later = async () => section((await get("/spaces/later-board")).text);
+
+  test("a deleted task is left out of every format, with or without its words", async () => {
+    const page = await get("/spaces/later-board");
+    assert.deepEqual(htmlProblems(page.text), []);
+    const text = section(page.text);
+    assert.equal((text.match(/<div class="item">/g) ?? []).length, 5);
+    assert.doesNotMatch(text, /task-13|task-14|deleted|Added twice|Words a deleted task kept/);
+    const md = (await get("/spaces/later-board.md")).text;
+    assert.deepEqual(markdownProblems(md), []);
+    assert.deepEqual([...md.matchAll(/^### Task (\d+) (\w+)$/gm)].map((m) => `${m[1]} ${m[2]}`),
+      ["12 open", "11 claimed", "10 open", "9 retired", "8 retired"]);
+    assert.doesNotMatch(md, /Added twice|Words a deleted task kept/);
+    const doc = JSON.parse((await get("/spaces/later-board.json")).text) as Json;
+    assert.deepEqual(doc.tasks.items.map((x: Json) => x.number), [12, 11, 10, 9, 8]);
+  });
+
+  test("a retired task says who retired it, when, what replaced it and why, and the reason stays text", async () => {
+    const row = rowOf(await later(), 8);
+    assert.match(row, /<span class="tag">retired<\/span>/);
+    assert.match(row, new RegExp(`Retired by <a href="/peers/${OWNER}">[\\s\\S]*?</a>, 1 Oct 2026, 10:07 UTC\\. Replaced by tasks 10 and 11\\. Reason: Split in two: &lt;i&gt;pages&lt;/i&gt; differ\\.`));
+    assert.doesNotMatch(row, /<i>|<b>/);
+  });
+
+  test("a task the service retired says so, with its reason", async () => {
+    assert.match(rowOf(await later(), 9), /Retired by the service: Another version became current\./);
+  });
+
+  test("a changed task says how many times, by whom last, when and why", async () => {
+    const text = await later();
+    assert.match(rowOf(text, 8), new RegExp(`Changed once, by <a href="/peers/${OWNER}">[\\s\\S]*?</a>, 1 Oct 2026, 10:06 UTC\\. Reason: &lt;b&gt;Count&lt;/b&gt; the second page too\\.`));
+    assert.match(rowOf(text, 10), new RegExp(`Changed 3 times; last by <a href="/peers/${WRITER}">[\\s\\S]*?</a>, 1 Oct 2026, 10:08 UTC\\. Reason: Name the scan\\.`));
+    assert.doesNotMatch(rowOf(text, 11), /Changed/, "a task at its first revision has not changed");
+  });
+
+  test("a task another key gave back says who, when and why", async () => {
+    assert.match(rowOf(await later(), 10), new RegExp(`Open\\. Given back by <a href="/peers/${OWNER}">[\\s\\S]*?</a>, 1 Oct 2026, 10:09 UTC\\. Reason: No progress for a day\\.`));
+  });
+
+  test("an upkeep task is said to be the service's only when it has no author", async () => {
+    const text = await later();
+    const says = /Upkeep task: the service handed it out from its counts\. Its words are the service(?:'|&#39;)s, not a member(?:'|&#39;)s\./;
+    assert.match(rowOf(text, 9), says);
+    assert.match(rowOf(text, 11), says);
+    assert.doesNotMatch(rowOf(text, 12), /Upkeep task/, "a task with an author is a member's, whatever it says it is");
+  });
+
+  test("the markdown says the same, each reason in a code span", async () => {
+    const md = (await get("/spaces/later-board.md")).text;
+    assert.match(md, new RegExp(`Retired by ${OWNER}, 2026-10-01T10:07:00.000Z\\. Replaced by tasks 10 and 11\\. Reason: \`Split in two: <i>pages</i> differ\\.\``));
+    assert.match(md, /Retired by the service: `Another version became current\.`/);
+    assert.match(md, new RegExp(`Changed once, by ${OWNER}, 2026-10-01T10:06:00.000Z\\. Reason: \`<b>Count</b> the second page too\\.\``));
+    assert.match(md, new RegExp(`Changed 3 times; last by ${WRITER}, 2026-10-01T10:08:00.000Z\\. Reason: \`Name the scan\\.\``));
+    assert.match(md, new RegExp(`Given back by ${OWNER}, 2026-10-01T10:09:00.000Z\\. Reason: \`No progress for a day\\.\``));
+    assert.equal(md.split("Upkeep task: the service handed it out from its counts. Its words are the service's, not a member's.").length - 1, 2);
+  });
+
+  test("the JSON carries the new fields as the service sent them", async () => {
+    const doc = JSON.parse((await get("/spaces/later-board.json")).text) as Json;
+    assert.deepEqual(doc.tasks.items, LATER.slice(0, 5).reverse());
+  });
+
+  test("a new field in a shape the service does not write is left out", async () => {
+    const odd = readableTasks({ items: [{
+      number: 1, title: "Odd", state: "retired", revision: 0, upkeep: "<b>", changed: "yes",
+      retired: { by: "not a key", at: "today", reason: 7, replaced_by: ["x", taskId(2)], replaced_by_numbers: [0, 2, "3"] },
+      released: { by: OWNER, at: at(1), reason: null },
+    }] })!.items[0]!;
+    assert.ok(!("revision" in odd) && !("upkeep" in odd) && !("changed" in odd));
+    assert.deepEqual(odd.retired, { replaced_by: [taskId(2)], replaced_by_numbers: [2] });
+    assert.deepEqual(odd.released, { by: OWNER, at: at(1), reason: null });
+  });
+});
+
+describe("the Vocabulary page explains the words a changed task brings", () => {
+  test("retired, upkeep task and revision are entries in the page and its markdown and JSON twins", async () => {
+    const html = (await get("/vocabulary")).text;
+    const md = (await get("/vocabulary.md")).text;
+    const doc = JSON.parse((await get("/vocabulary.json")).text) as { words: { word: string; meaning: string }[] };
+    for (const w of ["retired", "upkeep task", "revision"]) {
+      assert.ok(html.includes(`<dt>${w}</dt>`), `${w} in the page`);
+      assert.ok(md.includes(`- ${w}: `), `${w} in the markdown`);
+      assert.ok(doc.words.some((x) => x.word === w && x.meaning.length > 40), `${w} in the JSON`);
+    }
+    const meaning = (w: string) => doc.words.find((x) => x.word === w)!.meaning;
+    assert.match(meaning("retired"), /before it was accepted/);
+    assert.match(meaning("upkeep task"), /the service(?:'|&#39;)s fixed brief/);
+    assert.match(meaning("revision"), /keeps the words before it/);
   });
 });
 

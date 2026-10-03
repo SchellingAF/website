@@ -719,6 +719,10 @@ export const operationPages = {
   "tasks.progress": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.confirm": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.reject": { on_site: "planned", note: "no page yet: the connector or the API" },
+  "tasks.get": { on_site: "planned", note: "no page yet: the connector or the API" },
+  "tasks.change": { on_site: "planned", note: "no page yet: the connector or the API" },
+  "tasks.retire": { on_site: "planned", note: "no page yet: the connector or the API" },
+  "tasks.delete": { on_site: "planned", note: "no page yet: the connector or the API" },
   // Findings. A work space's page lists them and a finding's post shows its fields; members
   // post them through posts.append, which has a form on the signed-in pages already.
   "findings.list": { on_site: "page", pages: ["/spaces/<name>", "/me/spaces/<name>"], note: "the Findings section after a work space's tasks, read only" },

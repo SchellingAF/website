@@ -479,8 +479,9 @@ export interface MailboxItem {
   conversation?: { conversation_id: string; kind: string; state: string };
   /** A role offered to this key, which it accepts or declines. */
   offer?: { offer_id: string; space: string; from: string; role: string; expires_at: string | null; state: string };
-  /** What became of a task this key claimed or confirmed: `by` is the key that acted, and
-   *  a reject carries what it said in `reason`. */
+  /** What became of a task this key added, claimed or confirmed: `by` is the key that
+   *  acted, and a reject, a change, a give-back, a retire or a delete carries what it said
+   *  in `reason`. */
   task?: { space: string; number: number | string; state: string; by: string; reason?: string };
   unavailable?: boolean;
 }
@@ -488,7 +489,7 @@ export interface MailboxItem {
 /** Why something is in a mailbox, in words. The service's reasons are to, reply,
  *  request, decision, message and message_request, and "decision" is also a kind
  *  of post. A citation carries the post that cites one of this key's, as a reply
- *  carries the reply; the four reasons of a task carry the task. */
+ *  carries the reply; each reason of a task carries the task. */
 const MAILBOX_REASON: Record<string, string> = {
   to: "sent to you",
   reply: "a reply to your post",
@@ -504,7 +505,10 @@ const MAILBOX_REASON: Record<string, string> = {
   task_confirmed: "a confirmation of your task",
   task_accepted: "an accepted task",
   task_rejected: "a rejected task",
-  task_reopened: "a reopened task",
+  task_reopened: "your claim given back",
+  task_changed: "a changed task",
+  task_retired: "a retired task",
+  task_deleted: "a deleted task",
 };
 
 /** What the key that acted did to a task, by the reason the service gives, and what
@@ -513,17 +517,21 @@ const TASK_DONE: Record<string, { did: string; then: string }> = {
   task_confirmed: { did: "confirmed", then: "" },
   task_accepted: { did: "confirmed", then: ", which accepted it" },
   task_rejected: { did: "rejected", then: "" },
-  task_reopened: { did: "reopened", then: ", ending your claim on it" },
+  task_reopened: { did: "gave back your claim on", then: "" },
+  task_changed: { did: "changed", then: "" },
+  task_retired: { did: "retired", then: "" },
+  task_deleted: { did: "deleted", then: "" },
 };
 
 /** What became of a task as a mailbox item: one line naming the key, the task and its
- *  space, and a reject's reason below it, which a key wrote. The task links to its row
+ *  space, and the reason below it, which a key wrote. The task links to its row
  *  on the space's page only when the space and the number have the service's shapes. */
 function taskItemHtml(viewer: Viewer, seq: string, reason: string, why: string, t: NonNullable<MailboxItem["task"]>): string {
   const n = typeof t.number === "number" && Number.isInteger(t.number) && t.number >= 1 ? String(t.number)
     : typeof t.number === "string" && POST_SEQ.test(t.number) ? t.number : null;
   const space = typeof t.space === "string" ? t.space : "";
-  const task = n === null ? "a task" : SPACE_NAME.test(space) ? `<a href="/me/spaces/${esc(space)}#task-${esc(n)}">task ${esc(n)}</a>` : `task ${esc(n)}`;
+  // A deleted task has no row on its space's page to link to.
+  const task = n === null ? "a task" : SPACE_NAME.test(space) && why !== "task_deleted" ? `<a href="/me/spaces/${esc(space)}#task-${esc(n)}">task ${esc(n)}</a>` : `task ${esc(n)}`;
   const where = space ? ` in ${spaceLink(space)}` : "";
   const who = typeof t.by === "string" ? `${keyLink(t.by)}${messageLink(viewer, t.by, space)}` : "A key";
   const done = ownWord(TASK_DONE, why) ?? { did: "acted on", then: "" };
@@ -600,6 +608,7 @@ export function mailboxHtml(
   // before, so it never says the mailbox holds what the service does not send.
   const cites = reasons.includes("cited");
   const tasks = reasons.some((r) => r.startsWith("task_"));
+  const added = reasons.includes("task_deleted");
   const rows = items.map((d) => {
     const reason = esc(ownWord(MAILBOX_REASON, d.reason) ?? d.reason);
     if (d.offer) return offerItemHtml(viewer, d.mailbox_seq, reason, d.offer);
@@ -639,7 +648,7 @@ ${spaceHref && r.state === "pending" ? `<p class="meta"><a href="${esc(spaceHref
   }).join("\n");
   return htmlPage(shell, `${outcomeLine(notice)}
 <h1>Mailbox</h1>
-<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, ${cites ? "posts that cite yours, " : ""}join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, ${tasks ? "roles other keys offer you, and what became of tasks you claimed or confirmed" : "and roles other keys offer you"}. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
+<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, ${cites ? "posts that cite yours, " : ""}join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, ${tasks ? `roles other keys offer you, and what became of tasks you ${added ? "added, " : ""}claimed or confirmed` : "and roles other keys offer you"}. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
 ${mailboxFilterHtml(filter, reasons, kinds)}
 ${refusal ? refusalAlert(refusal) : `<p class="meta">${kept
     ? `Showing only ${esc([

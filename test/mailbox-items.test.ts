@@ -17,7 +17,7 @@ import { SITE, env, signedIn, site } from "./lib/site.ts";
 const ACTOR = "e5f6".repeat(16);
 const SHORT = "e5f6e5f6…e5f6";
 const REASONS = ["to", "reply", "request", "decision", "message", "message_request", "proposal", "out_of_date", "changed", "hand_over",
-  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "cited"];
+  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "task_changed", "task_retired", "task_deleted", "cited"];
 /** A field as a hostile service fills it: markup, a quote that ends an attribute, and a line break. */
 const X = (n: number) => `<script>alert(${n})</script>" onmouseover="alert(${n})' x='\n# injected ${n}`;
 const REJECTED = "<b>Wrong</b> total.\nThe sum in #12 leaves out row 4.";
@@ -36,13 +36,18 @@ const ITEMS = [
   // A reject with no reason, and a task the key can no longer read.
   { mailbox_seq: "8", reason: "task_rejected", task: task({ number: "9", state: "open" }) },
   { mailbox_seq: "9", reason: "task_confirmed", unavailable: true },
+  // A claim given back by a coordinator, with its reason; a change, a retire and a delete, each with theirs.
+  { mailbox_seq: "10", reason: "task_reopened", task: task({ number: 5, state: "open", reason: "<i>No</i> progress for a day." }) },
+  { mailbox_seq: "11", reason: "task_changed", task: task({ number: 6, state: "claimed", reason: "Name the scan <b>too</b>." }) },
+  { mailbox_seq: "12", reason: "task_retired", task: task({ number: 7, state: "retired", reason: "Split in two." }) },
+  { mailbox_seq: "13", reason: "task_deleted", task: task({ number: 8, state: "deleted", reason: "Added twice." }) },
 ];
 
 const base = service(hostileWorld());
 const { handleRequest } = await site((call) => {
   const p = call.url.pathname;
   if (p === "/v1/capabilities") return json({ ...CAPABILITIES, mailbox_reasons: REASONS });
-  if (p === "/v1/mailbox") return json({ items: ITEMS, next_after: "9", has_more: false, head_seq: "9" });
+  if (p === "/v1/mailbox") return json({ items: ITEMS, next_after: "13", has_more: false, head_seq: "13" });
   return base(call);
 });
 const { cookie } = await signedIn(SECOND, "mailbox-items-token", "192.0.2.94");
@@ -93,10 +98,26 @@ describe("the mailbox's items about a task and about a citation", () => {
     assert.equal(read(item("8")), `Item 8, a rejected task · ${SHORT} message rejected task 9 in build-notes.`, "a reject with no reason ends the line");
   });
 
-  test("a task given back by the owner or an admin says the claim ended", () => {
+  test("a claim another key gave back says who gave it back, and its reason when the service sends one", () => {
     const html = item("4");
-    assert.equal(read(html), `Item 4, a reopened task · ${SHORT} message reopened task 4 in build-notes, ending your claim on it.`);
+    assert.equal(read(html), `Item 4, your claim given back · ${SHORT} message gave back your claim on task 4 in build-notes.`);
     assert.ok(links(html).some(([href]) => href === "/me/spaces/build-notes#task-4"));
+    const said = item("10");
+    assert.equal(read(said.slice(0, said.indexOf("</p>"))), `Item 10, your claim given back · ${SHORT} message gave back your claim on task 5 in build-notes:`);
+    assert.ok(said.includes("<pre>&lt;i&gt;No&lt;/i&gt; progress for a day.</pre>"), "the reason is not shown as text");
+  });
+
+  test("a changed, retired or deleted task says so, with its reason below the line as text", () => {
+    const line = (seq: string) => { const html = item(seq); return read(html.slice(0, html.indexOf("</p>"))); };
+    assert.equal(line("11"), `Item 11, a changed task · ${SHORT} message changed task 6 in build-notes:`);
+    assert.ok(item("11").includes("<pre>Name the scan &lt;b&gt;too&lt;/b&gt;.</pre>"));
+    assert.ok(!tags(item("11")).some((t) => t.name === "b"), "the reason became markup");
+    assert.equal(line("12"), `Item 12, a retired task · ${SHORT} message retired task 7 in build-notes:`);
+    assert.ok(item("12").includes("<pre>Split in two.</pre>"));
+    assert.ok(links(item("12")).some(([href]) => href === "/me/spaces/build-notes#task-7"), "a retired task is on its space's page");
+    assert.equal(line("13"), `Item 13, a deleted task · ${SHORT} message deleted task 8 in build-notes:`);
+    assert.ok(item("13").includes("<pre>Added twice.</pre>"));
+    assert.ok(!links(item("13")).some(([href]) => href.includes("#task-")), "a deleted task has no row to link to");
   });
 
   test("a citation is drawn as a reply is, with its own word", () => {
@@ -121,13 +142,14 @@ describe("the mailbox's items about a task and about a citation", () => {
 
   test("the filter offers each new reason in words, and the lead names what they hold", () => {
     for (const [value, words] of [["task_confirmed", "a confirmation of your task"], ["task_accepted", "an accepted task"],
-      ["task_rejected", "a rejected task"], ["task_reopened", "a reopened task"], ["cited", "a post that cites yours"]]) {
+      ["task_rejected", "a rejected task"], ["task_reopened", "your claim given back"], ["task_changed", "a changed task"],
+      ["task_retired", "a retired task"], ["task_deleted", "a deleted task"], ["cited", "a post that cites yours"]]) {
       assert.ok(page.includes(`<option value="${value}">${words}</option>`), `the filter does not offer ${value} in words`);
     }
     const lead = read(/<p class="lead">([\s\S]*?)<\/p>/.exec(page)![1]!);
     assert.equal(lead, "What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, posts that cite yours, " +
       "join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, " +
       "your own proposals that went out of date, new versions of documents you watch, roles other keys offer you, and what became of " +
-      "tasks you claimed or confirmed. Messages shows the conversations themselves.");
+      "tasks you added, claimed or confirmed. Messages shows the conversations themselves.");
   });
 });
