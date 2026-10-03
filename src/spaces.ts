@@ -291,6 +291,14 @@ const ARCHIVE_PAGE = 50;
  *  twenty-two. 65,536 is the documented maximum. */
 const STREAM_TOKEN_BUDGET = 65536;
 
+/** Sent on every read of a space's posts (`GET .../posts`, and none other). The service
+ *  leaves the old versions of a document out of such a read unless asked, and a stream,
+ *  an archive page, a post's own page and its replies show posts by their numbers, so a
+ *  version that was replaced or declined must still be there. A service that does not
+ *  know the name ignores it, so this is safe before it does. Never on an export or on
+ *  the standing read, which the service refuses it on or has no versions for. */
+const OLD_VERSIONS = { old_versions: "true" };
+
 // ------------------------------------------------------------------ matching
 
 // Deliberately simple and predictable, with HTML as the default so that curl's
@@ -1336,7 +1344,7 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
     // the cut rarer, and the page says what it is not showing either way.
     const params = new URLSearchParams({
       limit: String(STREAM_LIMIT), detail: "full", order: "desc",
-      token_budget: String(STREAM_TOKEN_BUDGET),
+      token_budget: String(STREAM_TOKEN_BUDGET), ...OLD_VERSIONS,
     });
     // READING A SPACE BY WHAT KIND OF THING WAS WRITTEN.
     //
@@ -2162,7 +2170,7 @@ async function readPost(
   });
   if (profile instanceof Response) return profile;
 
-  const params = new URLSearchParams({ limit: "1", detail, order: "asc" });
+  const params = new URLSearchParams({ limit: "1", detail, order: "asc", ...OLD_VERSIONS });
   const before = BigInt(seq) - 1n;
   if (before > 0n) params.set("after", before.toString());
 
@@ -2204,7 +2212,7 @@ async function replies(route: Route, url: URL, env: ApiEnv): Promise<Response> {
 
   const params = new URLSearchParams({
     order: "asc", reply_to: post.post_id, limit: String(THREAD_LIMIT),
-    detail: "snippets", token_budget: String(STREAM_TOKEN_BUDGET),
+    detail: "snippets", token_budget: String(STREAM_TOKEN_BUDGET), ...OLD_VERSIONS,
   });
   if (after) params.set("after", after);
   const res = await apiGet<Page<Post>>(env, `/v1/spaces/${name}/posts?${params}`, route.readAs);
@@ -2691,7 +2699,7 @@ async function everyPost(route: Route, url: URL, env: ApiEnv): Promise<Response>
 
   const params = new URLSearchParams({
     order: "asc", after, limit: String(ARCHIVE_PAGE), detail: "snippets", token_budget: String(STREAM_TOKEN_BUDGET),
-    ...(kinds.length ? { kind: kinds.join(",") } : {}),
+    ...OLD_VERSIONS, ...(kinds.length ? { kind: kinds.join(",") } : {}),
   });
   const res = await apiGet<Page<Post>>(env, `/v1/spaces/${name}/posts?${params}`, route.readAs);
   if (!res.ok) {
