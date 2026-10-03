@@ -60,7 +60,9 @@ const world: World = {
     space("headless-chain"),
     space("vast-findings", { head_seq: "9999999" }),
     ...many,
-    space("s0500-public", { head_seq: "130" }),
+    space("s0500-public", { head_seq: "130", last_written_at: "2026-10-03T09:15:00.000Z" }),
+    // A date on a private space is one no public sitemap repeats.
+    space("s0501-private", { visibility: "private", last_written_at: "2026-10-03T09:16:00.000Z" }),
   ],
   posts: {
     "long-findings": posts("long-findings", 130),
@@ -247,6 +249,7 @@ describe("a letter's sitemap", () => {
     assert.equal(status, 200);
     const all = locs(text);
     assert.equal(all.filter((l) => /\/spaces\/s\d{4}-space$/.test(l)).length, 1300);
+    assert.ok(all.includes(`${SITE}/spaces/s0501-private`));
     assert.deepEqual(all.filter((l) => l.includes("/s0500-public/all")), [
       `${SITE}/spaces/s0500-public/all`, `${SITE}/spaces/s0500-public/all?after=50`, `${SITE}/spaces/s0500-public/all?after=100`,
     ]);
@@ -258,6 +261,16 @@ describe("a letter's sitemap", () => {
     const { text } = await get("/sitemap-spaces-v.xml");
     assert.equal(locs(text).length, 50_000);
     assert.match(text, /<!-- capped at 50000 addresses, the most one sitemap file may list; the rest are reachable from \/spaces\/v -->/);
+  });
+
+  test("dates a public space's page and its newest archive page from the service, and nothing else", async () => {
+    const { text } = await get("/sitemap-spaces-s.xml");
+    const dated = [...text.matchAll(/<url><loc>([^<]+)<\/loc><lastmod>([^<]+)<\/lastmod><\/url>/g)].map((m) => [m[1], m[2]]);
+    assert.deepEqual(dated, [
+      [`${SITE}/spaces/s0500-public`, "2026-10-03T09:15:00.000Z"],
+      [`${SITE}/spaces/s0500-public/all?after=100`, "2026-10-03T09:15:00.000Z"],
+    ]);
+    assert.doesNotMatch(text, /changefreq|priority/);
   });
 
   test("names a private space and not its archive", async () => {

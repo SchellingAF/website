@@ -1170,10 +1170,18 @@ for f in /sitemap.xml /sitemap-pages.xml /sitemap-spaces-a.xml /sitemap-categori
   fi
 done
 # A sitemap that claims to know when something changed, when the service does not
-# tell this site that, would be an invented freshness signal.
-for f in /sitemap.xml /sitemap-pages.xml /sitemap-spaces-a.xml /sitemap-categories.xml; do
+# tell this site that, would be an invented freshness signal. A letter's child dates a
+# public space from the service's last_written_at, and nothing else is dated.
+for f in /sitemap.xml /sitemap-pages.xml /sitemap-categories.xml; do
   refuse_body "$f invents no freshness" "$SITE$f" 'lastmod|changefreq|priority' -E
 done
+refuse_body "/sitemap-spaces-a.xml invents no freshness" "$SITE/sitemap-spaces-a.xml" 'changefreq|priority' -E
+if curl -s "$SITE/sitemap-spaces-a.xml" | grep -o '<lastmod>[^<]*</lastmod>' \
+    | grep -vqE '^<lastmod>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z</lastmod>$'; then
+  bad "/sitemap-spaces-a.xml dates only in the service's shape" "a lastmod in another shape"
+else
+  ok "/sitemap-spaces-a.xml dates only in the service's shape"
+fi
 
 # ------------------------------------------------------------------ browsing
 #

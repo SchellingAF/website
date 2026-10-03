@@ -255,7 +255,9 @@ const TTL: Record<RouteKind, number> = {
   compare: 1800,
   // What stands changes with every post that replaces or retracts another.
   standing: 300,
-  sitemap: 3600,
+  // A new post's date reaches a search engine through a letter's child, so it is held
+  // no longer than the directory it is read from.
+  sitemap: 600,
   // Held at all mainly so that many visitors asking the same thing cost one
   // search. See seekPage for why that matters more here than anywhere.
   seek: 300,
@@ -3154,13 +3156,18 @@ async function categoryPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
     counts === null);
 }
 
+/** One address in a sitemap child, with when it last changed where the service says. */
+type SitemapEntry = string | { loc: string; lastmod: string };
+
 /** A sitemap child's document: its addresses, after a comment saying what it leaves out
  *  when it leaves something out. A 503 asks to be tried again in a minute. */
-function urlset(locs: string[], note: string | null = null, status = 200): Response {
+function urlset(locs: SitemapEntry[], note: string | null = null, status = 200): Response {
   const body = `<?xml version="1.0" encoding="UTF-8"?>\n` +
     (note ? `<!-- ${note} -->\n` : "") +
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
-    locs.map((l) => `  <url><loc>${l}</loc></url>`).join("\n") +
+    locs.map((l) => (typeof l === "string"
+      ? `  <url><loc>${l}</loc></url>`
+      : `  <url><loc>${l.loc}</loc><lastmod>${l.lastmod}</lastmod></url>`)).join("\n") +
     `\n</urlset>\n`;
   return new Response(body, {
     status,
@@ -3190,13 +3197,15 @@ const SITEMAP_MAX = 50_000;
  *  walk would make `npm run build` require the product to be running -- and this
  *  site must build, and deploy, whether or not the product is up.
  *
- *  No lastmod. The listing a child is built from carries no date, and inventing one
- *  is a freshness signal nobody is entitled to. A public space's profile gives its
- *  updated_at to anyone, so a real date could be had, at one read per space per
- *  sitemap, which this site does not spend. */
+ *  A lastmod only where the service gives a date: a public space's last_written_at,
+ *  its last post or an oracle space's last new version, on the space's page and on
+ *  the archive page that holds its newest post. That date is how a search engine
+ *  learns a new post is there to fetch. The archive pages before it are full and do
+ *  not change, and a private space has no date to give, so neither carries one:
+ *  inventing one is a freshness signal nobody is entitled to. */
 async function sitemapChild(route: Route, env: ApiEnv): Promise<Response> {
   const c = route.value as string;
-  const locs: string[] = [`${SITE_ORIGIN}/spaces/${c}`];
+  const locs: SitemapEntry[] = [`${SITE_ORIGIN}/spaces/${c}`];
   let cursor = sentinel(c);
   let capped = false;
 
@@ -3206,7 +3215,7 @@ async function sitemapChild(route: Route, env: ApiEnv): Promise<Response> {
   // that says what it covers. Every directory page but the last adds at least one
   // address for each of its two hundred spaces, so the walk is at most a page more
   // than the limit's worth of them.
-  const add = (loc: string): boolean => {
+  const add = (loc: SitemapEntry): boolean => {
     if (locs.length >= SITEMAP_MAX) {
       capped = true;
       return false;
@@ -3228,14 +3237,20 @@ async function sitemapChild(route: Route, env: ApiEnv): Promise<Response> {
     for (const s of mine) {
       // An address only for a name this site can address.
       if (!SPACE_NAME.test(s.name)) continue;
-      if (!add(`${SITE_ORIGIN}/spaces/${s.name}`)) break walk;
+      const written = s.visibility === "public" && typeof s.last_written_at === "string" && ISO_TIME.test(s.last_written_at)
+        ? s.last_written_at : null;
+      const dated = (loc: string): SitemapEntry => (written ? { loc, lastmod: written } : loc);
+      if (!add(dated(`${SITE_ORIGIN}/spaces/${s.name}`))) break walk;
       // A public space's archive is the pages that reach every one of its posts: every
       // one of them, fifty posts apiece, counted from the head_seq the directory gives
-      // any reader of a public space, and the first page alone when it gives none.
+      // any reader of a public space, and the first page alone when it gives none. The
+      // last of them holds the newest post, and carries the date.
       if (s.visibility !== "public") continue;
       const head = typeof s.head_seq === "string" && POSITION.test(s.head_seq) ? BigInt(s.head_seq) : 0n;
-      for (let after = 0n; after === 0n || after < head; after += BigInt(ARCHIVE_PAGE)) {
-        if (!add(`${SITE_ORIGIN}/spaces/${s.name}/all${after === 0n ? "" : `?after=${after}`}`)) break walk;
+      const size = BigInt(ARCHIVE_PAGE);
+      for (let after = 0n; after === 0n || after < head; after += size) {
+        const loc = `${SITE_ORIGIN}/spaces/${s.name}/all${after === 0n ? "" : `?after=${after}`}`;
+        if (!add(head > 0n && after + size >= head ? dated(loc) : loc)) break walk;
       }
     }
     if (mine.length < res.data.items.length || !res.data.has_more || !res.data.next_after) break;
