@@ -238,6 +238,26 @@ try {
     await alice.waitFor(`[...document.querySelectorAll('[data-field=body]')].some(e => e.textContent.includes(${JSON.stringify(CANARY_POST)}))`, "her own post to open on its page");
   });
 
+  // The service cannot see a sealed title, so where it names the kinds that need none, the
+  // browser is the one place that refuses a post of any other kind without one. Left out of
+  // the run, not passed, where the service names none.
+  await alice.goto(`/me/spaces/${SPACE}`);
+  const namesUntitled = await alice.evaluate("document.querySelector('form[data-seal=post]')?.dataset.untitledKinds !== undefined");
+  if (namesUntitled) {
+    await step("alice's browser refuses a sealed post with no title, where its kind needs one, before it seals anything", async () => {
+      const posts = () => alice.requests.filter((r) => r.method === "POST" && /\/posts$/.test(r.url)).length;
+      const before = posts();
+      await alice.fill("form[data-seal=post] [name=kind]", "obs");
+      await alice.fill("form[data-seal=post] [data-plain=title]", "");
+      await alice.fill("form[data-seal=post] [data-plain=body]", "A sealed post with no title.");
+      await alice.press("form[data-seal=post] button[type=submit]");
+      await alice.waitFor("(document.querySelector('form[data-seal=post] [data-seal-status]') || {}).textContent?.includes('needs a title')", "the browser to say the post needs a title", 20000);
+      if (posts() !== before) throw new Error("a post was sent");
+      if (!(await alice.path()).startsWith(`/me/spaces/${SPACE}`) || /\/\d+$/.test((await alice.path()).split("?")[0])) throw new Error("the page moved on");
+      return "refused, nothing sent";
+    });
+  }
+
   await step("bob reads it opened in his browser, with his own lock", async () => {
     await bob.goto(`/me/spaces/${SPACE}`);
     await bob.waitFor(`[...document.querySelectorAll('[data-field=body]')].some(e => e.textContent.includes(${JSON.stringify(CANARY_POST)}))`, "the post to open", 20000);

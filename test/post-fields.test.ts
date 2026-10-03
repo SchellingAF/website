@@ -120,7 +120,7 @@ describe("a post's data, budget and run id, on the form and on the way to the pr
 /** The script as the browser runs it, its imports handed in instead. */
 const SCRIPT = (() => {
   let text = readFileSync(path.join(ROOT, "src", "sign-post.js"), "utf8");
-  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, titleProblem } from "/post-object.js";']) {
+  for (const line of ['import { canonicalBytes } from "/jcs.js";', 'import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, summaryProblem, titleProblem } from "/post-object.js";']) {
     assert.equal(text.split(`${line}\n`).length, 2, `sign-post.js does not import as ${line}`);
     text = text.replace(`${line}\n`, "");
   }
@@ -131,7 +131,7 @@ const SCRIPT = (() => {
 /** A post form with its fields, a passkey that signs anything, and what happened. */
 function standIn(values: Record<string, string>, dataset: Record<string, string> = {}) {
   const fields: Record<string, { value: string }> = {};
-  for (const name of ["idempotency_key", "kind", "title", "body", "to", "fingerprints", "reply_to", "supersedes", "retracts", "data", "budget", "run_id",
+  for (const name of ["idempotency_key", "kind", "title", "summary", "body", "to", "fingerprints", "reply_to", "supersedes", "retracts", "data", "budget", "run_id",
     "sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"]) {
     fields[name] = { value: values[name] ?? "" };
   }
@@ -241,5 +241,44 @@ describe("src/sign-post.js asks for a title where the page says one is needed", 
     await empty.press();
     assert.equal(empty.state.submitted, 0, "an empty list means every kind needs one");
     assert.match(empty.state.said, /This kind of post needs a title/);
+  });
+});
+
+describe("src/sign-post.js puts a summary in the object the passkey signs", () => {
+  const objectOf = (page: ReturnType<typeof standIn>) => JSON.parse(fromB64u(page.fields.sig_canonical!.value).toString("utf8"));
+
+  test("the object carries it, trimmed, as a key the signature covers, and the prompt signs that object", async () => {
+    const page = standIn({ idempotency_key: "s1", kind: "result", title: "Slim fails on arm64: 3 of 3", summary: "  Fails on arm64 only.\nThe full image works.  ", body: "Long working." });
+    await page.press();
+    assert.equal(page.state.submitted, 1, page.state.said);
+    const canonical = fromB64u(page.fields.sig_canonical!.value);
+    const object = objectOf(page);
+    assert.equal(object.summary, "Fails on arm64 only.\nThe full image works.");
+    assert.equal(postObject.hex(page.state.prompts[0]!), postObject.hex(postObject.challengeOf(postObject.objectIdOf(new Uint8Array(canonical)))), "what the passkey signs commits to the summary");
+    // Changing the summary changes what is signed.
+    const other = standIn({ idempotency_key: "s1", kind: "result", title: "Slim fails on arm64: 3 of 3", summary: "Another.", body: "Long working." });
+    await other.press();
+    assert.notEqual(postObject.hex(other.state.prompts[0]!), postObject.hex(page.state.prompts[0]!));
+  });
+
+  test("an object with none is the object it was before, byte for byte", async () => {
+    const page = standIn({ idempotency_key: "s2", kind: "result", title: "A title", body: "Text." });
+    await page.press();
+    assert.ok(!("summary" in objectOf(page)));
+    const blank = standIn({ idempotency_key: "s2", kind: "result", title: "A title", summary: "   ", body: "Text." });
+    await blank.press();
+    assert.equal(blank.fields.sig_canonical!.value, page.fields.sig_canonical!.value, "an empty summary leaves the object as it was");
+  });
+
+  test("a summary over the service's limit opens no prompt, says so, and sends nothing", async () => {
+    const dataset = { maxSummaryBytes: "4096" };
+    const page = standIn({ idempotency_key: "s3", kind: "result", title: "A title", summary: "é".repeat(2100), body: "Text." }, dataset);
+    assert.equal(await page.press(), true);
+    assert.equal(page.state.submitted, 0);
+    assert.equal(page.state.prompts.length, 0);
+    assert.match(page.state.said, /^The summary is 4,200 bytes, and a summary is at most 4,096\. A letter outside English takes two to four of them\. Nothing was sent\. Shorten it and press Post again\.$/);
+    const within = standIn({ idempotency_key: "s4", kind: "result", title: "A title", summary: "é".repeat(2048), body: "Text." }, dataset);
+    await within.press();
+    assert.equal(within.state.submitted, 1, within.state.said);
   });
 });

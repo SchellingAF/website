@@ -120,7 +120,11 @@ const document = (index: number) => ({ version: { post_id: id(index, 3), seq: "3
 const finding = { number: 1, post_id: id(1, 8), claim: "Slim fails on arm64", status: "supported", confidence: "high", author: ALICE, seq: "8", posted_at: at(8), sources: [id(1, 2)], cited_by: 0, source_withdrawn: false, supersedes: null, superseded_by: null, retracted_by: null };
 
 const world: World = {
-  capabilities: { ...CAPABILITIES, modules: { ...CAPABILITIES.modules, tasks: { status: "available" }, findings: { status: "available" } } },
+  capabilities: {
+    ...CAPABILITIES, modules: { ...CAPABILITIES.modules, tasks: { status: "available" }, findings: { status: "available" } },
+    // A service that keeps summaries, so a form that must never carry one shows it.
+    limits: { ...CAPABILITIES.limits, summary_bytes: 4096 },
+  },
   categories: CATEGORIES,
   spaces: [
     space("field-notes", { document: document(1) }),
@@ -511,6 +515,19 @@ describe("proposing a version from the site", () => {
     const deciding = [...history.matchAll(/<form [^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]).filter((f) => /name="kind" value="(go|veto)"/.test(f));
     assert.ok(deciding.length >= 2, "Approve and Decline are there");
     for (const form of deciding) assert.equal(inputs(form, "title").length, 0, "a decision has no title to ask for");
+  });
+
+  test("has no summary, where the plain post form beside it has one, and no decision does", async () => {
+    // A version's title says what changed, so a summary has no place on a proposal.
+    const { text } = await get("/me/spaces/field-notes", true);
+    assert.ok(!/name="summary"/.test(formOf(text)), "no summary on the proposal");
+    assert.ok(/<textarea name="summary"/.test(text), "the plain post form offers one");
+    const history = (await get("/me/spaces/field-notes/history", true)).text;
+    const deciding = [...history.matchAll(/<form [^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]).filter((f) => /name="kind" value="(go|veto)"/.test(f));
+    assert.ok(deciding.length >= 2);
+    for (const form of deciding) assert.ok(!/name="summary"/.test(form));
+    const undo = [...history.matchAll(/<form [^>]*>[\s\S]*?<\/form>/g)].map((m) => m[0]).filter((f) => /name="kind" value="version"/.test(f));
+    for (const form of undo) assert.ok(!/name="summary"/.test(form));
   });
 
   test("a writer proposes, and the sentence names who decides in a work space", async () => {

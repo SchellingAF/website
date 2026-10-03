@@ -18,7 +18,7 @@ import {
   csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
-import { KIND_MEANING, heldKindsWithoutTitle, type LinkRules } from "./capabilities.ts";
+import { KIND_MEANING, heldKindsWithoutTitle, heldSummaryLimit, type LinkRules } from "./capabilities.ts";
 import { placeOf, type Register } from "./categories.ts";
 import { SITE_NAME } from "./routes.generated.ts";
 import { REVIEWER_RULES_PAGE, type Version } from "./oracle-render.ts";
@@ -840,6 +840,25 @@ export const filesFor = (role: string | null | undefined, signing: Signing | nul
 
 const SIGNATURE_FIELDS = ["sig_alg", "sig_canonical", "sig_private", "sig_credential_id", "sig_client_data_json", "sig_authenticator_data", "sig_signature"];
 
+/** How long a summary may be, in bytes, for src/sign-post.js, which says so before it asks the
+ *  passkey to sign one that is longer. From the capability document as the page read it, like
+ *  the kinds that need no title, and nothing where the service states none. */
+function summaryAttribute(): string {
+  const max = heldSummaryLimit();
+  return max === null ? "" : ` data-max-summary-bytes="${esc(String(max))}"`;
+}
+
+/** The summary field of a post form, only where the service states how long a summary may be,
+ *  so a site deployed before its service offers none, and never on a version, whose title says
+ *  what changed. A sealed post's form is another function and has none: a sealed post's words
+ *  are sealed together. */
+function summaryFieldHtml(typed: PostValues | null): string {
+  const max = heldSummaryLimit();
+  if (max === null || typed?.kind === "version") return "";
+  return `<label>Summary, if you give one: what a reader needs before the text, in a few sentences. At most ${max.toLocaleString("en-US")} bytes.
+<textarea name="summary" rows="3" maxlength="${max}">${typedText(typed?.summary ?? "")}</textarea></label>`;
+}
+
 /** The kinds that need no title, for src/sign-post.js and src/sealed-page.js, which refuse
  *  every other kind with none before they sign or seal. From the capability document as the
  *  page read it a moment ago (a page that draws a form has just asked for it), so no form
@@ -858,7 +877,7 @@ function signAttributes(viewer: Viewer, signing: Signing | null): string {
     viewer.passkey ? ` data-credential="${esc(viewer.passkey)}"` : ""}${
     signing.rpId ? ` data-rp-id="${esc(signing.rpId)}"` : ""}${signing.signedOnly ? ' data-signed-only="1"' : ""}${
     signing.limits ? ` data-max-fingerprints="${esc(String(signing.limits.fingerprints))}" data-max-recipients="${esc(String(signing.limits.recipients))}"` : ""}${
-    untitledAttribute()}`;
+    summaryAttribute()}${untitledAttribute()}`;
 }
 
 /** The form's way of sending files, and the limits src/sign-post.js holds them to before the
@@ -906,6 +925,8 @@ export const signScript = (signing: Signing | null): string =>
 export interface PostValues {
   kind: string;
   title: string;
+  /** As typed, where the service takes a summary; empty otherwise. */
+  summary?: string;
   body: string;
   fingerprints: string;
   to: string;
@@ -1005,6 +1026,7 @@ ${hiddenFields(hidden)}
 <select name="kind" required>${options}</select></label>
 <label>Title
 <input type="text" name="title" maxlength="512" value="${esc(typed?.title ?? "")}"></label>
+${summaryFieldHtml(typed)}
 <label>Text
 <textarea name="body" maxlength="65536" required>${typedText(typed?.body ?? "")}</textarea></label>
 <label>Fingerprints, one per line, written type:value, such as git.commit:3f9a2c1e
@@ -1280,6 +1302,7 @@ export function replyActionsHtml(
     out.push(postForm(base, viewer, kinds, { heading: "Correct your post: what replaces it", button: "Post the correction" }, signing, {
       kind: post.kind,
       title: post.title ?? "",
+      summary: typeof post.summary === "string" ? post.summary : "",
       body: post.body ?? "",
       fingerprints: (post.fingerprints ?? []).map((f) => `${f.scheme}:${f.value}`).join("\n"),
       to: (post.to ?? []).filter((id) => KEY_ID.test(id)).join("\n"),

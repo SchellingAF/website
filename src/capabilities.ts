@@ -126,6 +126,14 @@ export function kindsWithoutTitle(caps: Capabilities): string[] | null {
 }
 
 /**
+ * The most bytes a post's summary may be, from the service's own document, or null when it
+ * states none: a service without summaries yet, or the fallback. A form offers a summary
+ * only when this is a number, so a site deployed before its service never sends one to a
+ * service that would drop it or refuse it.
+ */
+export const summaryLimit = (caps: Capabilities): number | null => whole(caps.limits?.summary_bytes);
+
+/**
  * What a post's files may be, from the service's own document: how many a post carries and
  * how large each is, and only when the document lists the module `attachments` as
  * available. Never the fallback's guess: a site deployed before its product, or a product
@@ -292,6 +300,10 @@ export function heldKinds(): Set<string> {
  *  after the page read it, which then needs nothing handed in. Null when it was never read,
  *  or names none. */
 export const heldKindsWithoutTitle = (): string[] | null => (held ? kindsWithoutTitle(held.caps) : null);
+
+/** The summary's limit, from the document as it was last read: for a form drawn after the page
+ *  read it. Null when it was never read, or states none. */
+export const heldSummaryLimit = (): number | null => (held ? summaryLimit(held.caps) : null);
 
 let heldRules: { text: string; at: string; until: number } | undefined;
 

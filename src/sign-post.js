@@ -29,7 +29,7 @@
 // place. The files themselves go with the form, which the browser then submits.
 
 import { canonicalBytes } from "/jcs.js";
-import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, titleProblem } from "/post-object.js";
+import { challengeOf, hex, objectIdOf, parseTyped, privateBytes, privateDigestOf, privateProblem, sha256, summaryProblem, titleProblem } from "/post-object.js";
 
 // ── the post as the product's object ─────────────────────────────────────────
 
@@ -103,6 +103,10 @@ function objectOf(form, salt, fileHashes = []) {
   if (!UUID.test(o.space_id || "") || !PEER.test(o.author_id || "") || !o.idempotency_key || !o.kind) return null;
   const title = value("title").trim();
   if (title) o.title = title;
+  // The summary is a key of the object the passkey signs, so the signature covers it: the
+  // field is on the form only where the service takes one, and is empty otherwise.
+  const summary = value("summary").trim();
+  if (summary) o.summary = summary;
   const body = value("body");
   if (body) o.body = body;
   const to = [...new Set(lines(value("to")))];
@@ -137,9 +141,9 @@ function objectOf(form, salt, fileHashes = []) {
 }
 
 /**
- * More fingerprints or keys than one post takes, in words, or "" when there are not.
- * The page names the service's limits on the form; a form naming none is not checked
- * here, and the service refuses what it will not take.
+ * More fingerprints or keys than one post takes, or a longer summary than one may be, in
+ * words, or "" when there are not. The page names the service's limits on the form; a form
+ * naming none is not checked here, and the service refuses what it will not take.
  */
 function tooMany(form, o) {
   const max = (name) => (/^[1-9][0-9]{0,5}$/.test(form.dataset[name] || "") ? Number(form.dataset[name]) : Infinity);
@@ -151,6 +155,9 @@ function tooMany(form, o) {
   if (keys > max("maxRecipients")) {
     return `A post goes to at most ${max("maxRecipients")} keys' mailboxes, and this one names ${keys}. Nothing was sent. Remove some and press Post again.`;
   }
+  const longest = /^[1-9][0-9]{0,6}$/.test(form.dataset.maxSummaryBytes || "") ? Number(form.dataset.maxSummaryBytes) : null;
+  const summary = summaryProblem(o.summary || "", longest);
+  if (summary) return `${summary} Nothing was sent. Shorten it and press Post again.`;
   return "";
 }
 

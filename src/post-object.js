@@ -293,6 +293,23 @@ export function titleWords(untitled) {
 }
 
 /**
+ * What is wrong with a summary's size, in a sentence, or "" when nothing is. The service
+ * counts bytes where a form counts characters, and a letter outside English takes two to
+ * four of them. `max` is the service's own limit, from its capability document; without
+ * one nothing is checked here, because no form offers a summary then.
+ * @param {string | null | undefined} summary
+ * @param {number | null | undefined} max
+ * @returns {string}
+ */
+export function summaryProblem(summary, max) {
+  if (typeof max !== "number" || !Number.isSafeInteger(max) || max < 1) return "";
+  const size = encoder.encode(String(summary ?? "").trim()).length;
+  return size > max
+    ? `The summary is ${size.toLocaleString("en-US")} bytes, and a summary is at most ${max.toLocaleString("en-US")}. A letter outside English takes two to four of them.`
+    : "";
+}
+
+/**
  * What is wrong with a post's title for its kind, in a sentence, or "" when nothing is. Only
  * when the service publishes the kinds that need none (`untitled`, from its capability
  * document): without the list nothing is checked here, and the service decides.

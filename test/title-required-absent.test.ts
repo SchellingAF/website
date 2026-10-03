@@ -43,8 +43,22 @@ describe("a service that publishes no kinds without a title", () => {
     assert.ok(!("title" in JSON.parse(sent[0]!.body!)));
 
     const page = await handleRequest(new Request(`${SITE}/me/spaces/work-space`, { headers: { Cookie: cookie } }), env);
-    const forms = tags(await page.text()).filter((t) => t.name === "form" && t.attributes.some(([k]) => k === "data-sign"));
+    const text = await page.text();
+    const forms = tags(text).filter((t) => t.name === "form" && t.attributes.some(([k]) => k === "data-sign"));
     assert.ok(forms.length >= 1);
     for (const form of forms) assert.ok(!form.attributes.some(([k]) => k === "data-untitled-kinds"), "no list, no check in the browser");
+    for (const form of forms) assert.ok(!form.attributes.some(([k]) => k === "data-max-summary-bytes"));
+    assert.ok(!tags(text).some((t) => t.attributes.some(([k, v]) => k === "name" && v === "summary")), "no summary field before the service states a limit");
+  });
+
+  test("is sent no summary, even from a form that carries one, since it would drop it or refuse it", async () => {
+    const res = await handleRequest(new Request(`${SITE}/me/spaces/work-space/posts`, {
+      method: "POST",
+      headers: { Origin: SITE, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ csrf, kind: "obs", title: "A title", summary: "A summary nobody offered.", body: "Text." }).toString(),
+    }), env);
+    assert.equal(res.status, 303, await res.text());
+    const sent = fake.calls.filter((c) => c.method === "POST" && c.url.pathname === "/v1/spaces/work-space/posts");
+    assert.ok(!("summary" in JSON.parse(sent.at(-1)!.body!)));
   });
 });

@@ -28,7 +28,7 @@
 //      kept by no cache and listed by no search engine; see src/grammar.ts.
 
 import { apiGet, apiSignIn, apiUpload, apiWrite, classifyRefusal, type ApiEnv, type ApiResult, type Refusal } from "./api.ts";
-import { attachmentLimits, capabilities, itemLimits, kindGroups, kindsWithoutTitle, knownKinds, linkRules, signInUnavailable } from "./capabilities.ts";
+import { attachmentLimits, capabilities, itemLimits, kindGroups, kindsWithoutTitle, knownKinds, linkRules, signInUnavailable, summaryLimit } from "./capabilities.ts";
 import {
   EVENTS_PAGE, MAILBOX_PAGE, MEMBER_ROLES, rolesBelow, eventsHtml, formShell, invitesHtml, joinLinkHtml, joinRequestsHtml, mailboxHtml, meHtml, sealingPanelHtml,
   membersHref, membersHtml, newSpaceHtml, postAgainHtml, removalHtml, resultHtml, settingsHtml, signInHtml, tokensHtml, watchingHtml,
@@ -55,7 +55,7 @@ import { actOnConnect, connectArrivalError, readConnect } from "./connect.ts";
 import { LINK_WORDS, linkKind, type LinkKind } from "./join-render.ts";
 import { CANONICAL_HOST } from "./routes.generated.ts";
 import { EXPORT_FILE, readExport } from "./export.ts";
-import { parseTyped, privateProblem, titleProblem, titleWords } from "./post-object.js";
+import { parseTyped, privateProblem, summaryProblem, titleProblem, titleWords } from "./post-object.js";
 import { NOT_A_SIGN_IN_CHALLENGE, signInChallenge } from "./sign-in-challenge.js";
 import {
   BROWSER_CHANGE_MEMBERS, handAndActivate, handLocks, keepersHtml, passkeyFields, readCommitments, readLocks, requestIdOf, sealedPart, sealedSpaceContext, sealingHost,
@@ -1215,7 +1215,7 @@ async function spaceAction(
       const caps = await capabilities();
       const notPosted = (why: string): Response => {
         const typed: PostValues = {
-          kind: String(body.kind), title: form.get("title") ?? "", body: String(body.body),
+          kind: String(body.kind), title: form.get("title") ?? "", summary: form.get("summary") ?? "", body: String(body.body),
           fingerprints: form.get("fingerprints") ?? "", to: form.get("to") ?? "", idempotencyKey: idem, hidden,
           data: typedData, budget: typedBudget, runId: typedRun,
         };
@@ -1226,6 +1226,14 @@ async function spaceAction(
       // kinds need none, and a service that does not say is not asked to be checked.
       const noTitle = titleProblem(String(body.kind), title, kindsWithoutTitle(caps));
       if (noTitle) return notPosted(`${noTitle} Nothing was posted.`);
+      // A summary only where the service states how long one may be: a form offers the field
+      // on no other terms, and a service that does not state it is sent none, since it would
+      // drop it or refuse it.
+      const summaryMax = summaryLimit(caps);
+      const summary = summaryMax === null ? "" : (form.get("summary") ?? "").trim();
+      const summaryTooLong = summaryProblem(summary, summaryMax);
+      if (summaryTooLong) return notPosted(`${summaryTooLong} Nothing was posted.`);
+      if (summary) body.summary = summary;
       const limits = itemLimits(caps);
       const fingerprints = lines(form.get("fingerprints")).map((line) => {
         const at = line.indexOf(":");

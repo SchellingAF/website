@@ -81,6 +81,7 @@ export function statusFor(res: Refusal): number {
  *  in the words a form labels them with. */
 const TEXT_FIELDS: Record<string, string> = {
   title: "The title",
+  summary: "The summary",
   description: "What it is for",
   message: "The note",
   body: "The text",

@@ -53,7 +53,11 @@ const status = (keeper: boolean) => ({
 const writes: Call[] = [];
 const world: World = {
   ...hostileWorld(),
-  capabilities: { ...hostileWorld().capabilities, kinds_without_title: ["ack", "hold", "go", "veto", "stop"] },
+  capabilities: {
+    ...hostileWorld().capabilities, kinds_without_title: ["ack", "hold", "go", "veto", "stop"],
+    // A service that keeps summaries: a sealed post still carries none, its words being sealed together.
+    limits: { ...hostileWorld().capabilities.limits, summary_bytes: 4096 },
+  },
   spaces: [...hostileWorld().spaces, vault("writer"), vault("owner"), { ...vault("owner"), name: "staged-vault" }],
   posts: { ...hostileWorld().posts, vault: [sealedPost], "owned-vault": [], "staged-vault": [] },
 };
@@ -149,6 +153,8 @@ describe("a sealed space's pages", () => {
       assert.match(form, /name="sealed_header"/);
     }
     assert.match(text, /Sealing needs this page's script, which is not running, so nothing can be posted from here/);
+    // Not a summary either, where the service takes them: it would have to be sealed too, and is not offered.
+    for (const form of forms) assert.doesNotMatch(form, /(name|data-plain)="summary"/, "no summary field on a sealed post");
   });
 
   test("its post form names the kinds that need no title, so the script can refuse the rest before it seals", async () => {
