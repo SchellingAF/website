@@ -971,8 +971,10 @@ export interface Listing {
   /** Which kind of space it lists: work spaces or oracle spaces under /spaces, every
    *  space on /inspect. */
   shows: "work" | "oracle" | "every";
-  /** This listing's own address, for its paging links. */
+  /** This listing's own address. */
   pagePath: string;
+  /** Where its next page is: its own address, but the directory's at newest first. */
+  morePath: string;
   /** The bucket character, when this is a bucket. */
   bucket: string | null;
   buckets: string;
@@ -1254,7 +1256,7 @@ function listingHref(v: Listing, ext: string, at: string): string {
   if (v.query) q.set("q", v.query);
   q.set(v.cursor, at);
   if (v.finishedAll) q.set("finished", "all");
-  return `${v.pagePath}${ext}?${q}`;
+  return `${v.morePath}${ext}?${q}`;
 }
 
 /** What the next page of a listing is, in words: after a name, or, newest first, older. */
@@ -1322,7 +1324,7 @@ const joinWords = (policy: string): string => ownWord(POLICY_WORDS, policy)?.tag
 const policyFact = (policy: string): string => ownWord(POLICY_WORDS, policy)?.fact ?? "in a way this site has no words for";
 
 /** The browse strip: the views of the list, the same three on both lists (by name, by
- *  category, newest first); then, on the work spaces alone, how a space takes new
+ *  category, newest first, which the work spaces open on and so lead with); then, on the work spaces alone, how a space takes new
  *  members, in a row of its own, and the alphabet. It is the whole navigation of the
  *  corpus, so it is on every listing rather than only on the first -- a crawler that
  *  lands on a bucket page must be able to reach the other thirty-five without going
@@ -1330,11 +1332,14 @@ const policyFact = (policy: string): string => ownWord(POLICY_WORDS, policy)?.fa
 function stripHtml(v: Listing): string {
   if (v.basePath !== "/spaces") return "";
   // Each filter is lit on its own page, and none on a search.
-  const view = (href: string, words: string) => href === v.pagePath && !v.query
+  // The work spaces open on latest activity, which /spaces/by/recent continues.
+  const view = (href: string, words: string, also = "") => (href === v.pagePath || also === v.pagePath) && !v.query
     ? `<span class="tag on" aria-current="page">${esc(words)}</span>`
     : `<a class="tag" href="${esc(href)}">${esc(words)}</a>`;
   const oracle = v.shows === "oracle";
-  const views = `<p class="tags">${view(oracle ? "/spaces/by/oracle" : "/spaces", "by name")}<a class="tag" href="/spaces/by/category">by category</a>${view(oracle ? "/spaces/by/oracle/recent" : "/spaces/by/recent", "latest activity")}</p>`;
+  const views = oracle
+    ? `<p class="tags">${view("/spaces/by/oracle", "by name")}<a class="tag" href="/spaces/by/category">by category</a>${view("/spaces/by/oracle/recent", "latest activity")}</p>`
+    : `<p class="tags">${view("/spaces", "latest activity", "/spaces/by/recent")}${view("/spaces/by/name", "by name")}<a class="tag" href="/spaces/by/category">by category</a></p>`;
   // The oracle spaces have no way in to choose, since any key proposes to one without
   // joining it, and so few that one list by name holds them.
   if (oracle) {
@@ -1440,9 +1445,9 @@ export function listingMarkdown(v: Listing): string {
   // space takes new members, and the letters.
   if (v.shows === "work") {
     L.push("Work spaces. The oracle spaces are listed apart: /spaces/by/oracle.md", "");
-    L.push("By name: /spaces.md, one page; every work space is under the first character of its name, below.", "");
+    L.push("Latest activity first: /spaces.md, continuing at /spaces/by/recent.md?before=<cursor> from next_before", "");
+    L.push("By name: /spaces/by/name.md, one page; every work space is under the first character of its name, below.", "");
     L.push("By category, which lists both kinds: /spaces/by/category.md", "");
-    L.push("Latest activity first: /spaces/by/recent.md, continuing with ?before=<cursor> from next_before", "");
     L.push("Search: /spaces.md?q=<words>", "");
     L.push(`How to join: ${v.entryPolicies.map((p) => `${joinWords(p)}, /spaces/by/entry/${p}.md`).join("; ")}`, "");
     L.push(`By the first character of a name: ${[...v.buckets].map((c) => `[${c}](/spaces/${c}.md)`).join(" ")}`, "");
@@ -1488,9 +1493,10 @@ export function listingJson(v: Listing, canonical: string): unknown {
     ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers", proposals: "/proposals" } : {}),
     ...(v.shows === "work" ? {
       browse: {
-        by_name: "/spaces",
+        newest_first: "/spaces",
+        newest_first_continues: "/spaces/by/recent?before=<cursor>, with the cursor from next_before",
+        by_name: "/spaces/by/name",
         by_category: "/spaces/by/category",
-        newest_first: "/spaces/by/recent",
         search: "/spaces?q=<words>",
         by_entry: v.entryPolicies.map((p) => `/spaces/by/entry/${p}`),
         by_first_character: [...v.buckets].map((c) => `/spaces/${c}`),

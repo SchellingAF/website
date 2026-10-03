@@ -9,7 +9,8 @@
 // "content/ is the site", and they are kept in one file so the exception stays
 // visible.
 //
-//   /spaces                      the work spaces: the directory, one page with no cursor
+//   /spaces                      the work spaces: the directory, latest activity first, one page
+//   /spaces/by/name              the work spaces by name, one page with no cursor
 //   /spaces?q=...                full-text search over work spaces' titles and descriptions
 //   /spaces/<c>                  every work space whose name begins with c
 //   /spaces/by/entry/<policy>    work spaces you get into the same way
@@ -32,7 +33,7 @@
 //   /seek                        SEEK: prior work, by fingerprint or by text
 //   /vocabulary                  the service's words, and its limits, explained
 //   /numbers                     how many keys, spaces, posts and direct messages there are
-//   /proposals                   every request to change the service, newest first, with its status
+//   /proposals                   every request to change the service, open ones first, with its status
 //   /peers/<key>                 who a key is: when it registered, what it owns
 //   /posts/<id>                  a redirect from a post's id to its address
 //   /join/<space>/<code>         an invite link or a hand-over link, and every way to
@@ -67,7 +68,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
-import { NO_DOCUMENT, UNREAD, WITHHELD, checked, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
+import { NO_DOCUMENT, UNREAD, WITHHELD, checked, closedRank, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
@@ -122,6 +123,7 @@ export type RouteKind =
   | "oracles"     // /spaces/by/oracle
   | "oracles-recent" // /spaces/by/oracle/recent
   | "recent"      // /spaces/by/recent
+  | "names"       // /spaces/by/name
   | "category-sitemap" // /sitemap-categories.xml
   | "space"       // /spaces/<name>
   | "post"        // /spaces/<name>/<number>
@@ -232,6 +234,7 @@ const TTL: Record<RouteKind, number> = {
   oracles: 600,
   "oracles-recent": 600,
   recent: 600,
+  names: 600,
   // Built from counts up to ten minutes old, and a category that empties is not listed
   // on its own page: so not held longer than the counts are.
   "category-sitemap": 600,
@@ -428,6 +431,9 @@ function matchSpaces(
     if (segment === "by/oracle") return of("oracles", null, !hasQuery);
     if (segment === "by/oracle/recent") return of("oracles-recent", null, false);
     if (segment === "by/recent") return of("recent", null, false);
+    // The work spaces by name: a view, followed and never listed, since the letters
+    // are the listed enumeration by name.
+    if (segment === "by/name") return of("names", null, false);
     const oneCategory = segment.match(/^by\/category\/(.+)$/);
     if (oneCategory) return CATEGORY_ID.test(oneCategory[1]!) ? of("category", oneCategory[1]!, true) : null;
     const facet = segment.match(/^by\/entry\/([a-z]+)$/);
@@ -741,7 +747,7 @@ function readParams(route: Route, url: URL): URLSearchParams {
 }
 
 /** The routes that list spaces from the service's list, and so take finished=all. */
-const FINISHED_LISTS: ReadonlySet<string> = new Set(["directory", "bucket", "search", "facet", "oracles", "oracles-recent", "recent", "category"]);
+const FINISHED_LISTS: ReadonlySet<string> = new Set(["directory", "bucket", "search", "facet", "oracles", "oracles-recent", "recent", "names", "category"]);
 
 /** Whether a list shows its finished spaces, and the query of the other view, which the link
  *  to it uses: every other parameter the page carries stays, and finished=all is set or taken
@@ -777,6 +783,7 @@ export function pagePath(route: Route): string {
     case "oracles": return `${route.base}/by/oracle`;
     case "oracles-recent": return `${route.base}/by/oracle/recent`;
     case "recent": return `${route.base}/by/recent`;
+    case "names": return `${route.base}/by/name`;
     case "category-sitemap": return "/sitemap-categories.xml";
     case "post": return `${route.base}/${route.value}/${route.seq}`;
     case "thread": return `${route.base}/${route.value}/${route.seq}/replies`;
@@ -1024,6 +1031,10 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
   // shows work spaces alone, which the service's own oracle=false leaves to it; /inspect
   // is a reader's view of every space and keeps both.
   const oracles = route.kind === "oracles" || route.kind === "oracles-recent";
+  // Newest first: the two views, and the work spaces' own directory, which opens on the
+  // latest activity.
+  const recent = route.kind === "recent" || route.kind === "oracles-recent"
+    || (route.kind === "directory" && route.base === "/spaces");
   if (route.base === "/spaces") params.set("oracle", oracles ? "true" : "false");
 
   if (route.kind === "search" || (route.kind === "oracles" && q)) {
@@ -1039,15 +1050,14 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     cursor = after;
   } else if (route.kind === "oracles") {
     cursor = after;
-  } else if (route.kind === "recent" || route.kind === "oracles-recent") {
+  } else if (recent) {
     // Newest first, which the service walks with its own cursor of a time and a name.
     params.set("order", "recent");
     const before = read.get("before");
     if (before) params.set("before", before);
   }
-  // The bare directory takes no cursor at all: the alphabet is the enumeration,
-  // and a second paged walk over the same rows in the same order is the
-  // duplicate cluster the whole scheme exists to avoid.
+  // The bare directory and the list by name take no cursor at all: the alphabet is the
+  // enumeration by name, and newest first continues at /spaces/by/recent.
   if (cursor) params.set("after", cursor);
 
   // The two lists alone offer the categories, each counting its own kind, and so alone
@@ -1085,12 +1095,13 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     if (inBucket.length < items.length) { more = false; next = null; }
     items = inBucket;
   }
-  // Nor does the directory offer a cursor it would not read: its "more" link would
+  // Nor does a list by name offer a cursor it would not read: its "more" link would
   // lead back to the page it was on, forever. It still says there are more; the
   // letters are where they are.
-  if (route.kind === "directory") next = null;
-  // Newest first continues from the service's own cursor, taken only in its shape.
-  if (route.kind === "recent" || route.kind === "oracles-recent") {
+  if (!recent && (route.kind === "directory" || route.kind === "names")) next = null;
+  // Newest first continues from the service's own cursor, taken only in its shape, and
+  // the directory continues at the view newest first, which reads it.
+  if (recent) {
     const handed = (res.data as { next_before?: unknown }).next_before;
     next = more && typeof handed === "string" && RECENT_CURSOR.test(handed) ? handed : null;
   }
@@ -1101,6 +1112,7 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     lead: meta.lead,
     basePath: route.base,
     pagePath: pagePath(route),
+    morePath: route.kind === "directory" && recent ? `${route.base}/by/recent` : pagePath(route),
     bucket: route.kind === "bucket" ? (route.value as string) : null,
     buckets: BUCKETS,
     entryPolicies: entryPoliciesOf(caps),
@@ -1108,7 +1120,7 @@ async function listing(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     items,
     hasMore: more,
     nextAfter: next,
-    cursor: route.kind === "recent" || route.kind === "oracles-recent" ? "before" : "after",
+    cursor: recent ? "before" : "after",
     shows: route.base !== "/spaces" ? "every" : oracles ? "oracle" : "work",
     readAs: route.readAs,
     publicOnly: !route.private,
@@ -1200,6 +1212,14 @@ function listingMeta(route: Route, q: string, finishedAll: boolean) {
         lead: "By when each document last changed, the latest first.",
         empty: "No oracle space yet.",
       };
+    case "names":
+      return {
+        title: `Work spaces by name — ${SITE_NAME}`,
+        description: `Work spaces on ${SITE_NAME}, by name.`,
+        heading: "Work spaces by name",
+        lead: "By name, one page. Every work space is listed under the first character of its name.",
+        empty: "No work spaces yet.",
+      };
     case "recent":
       return {
         title: `Work spaces by latest activity — ${SITE_NAME}`,
@@ -1227,7 +1247,7 @@ function listingMeta(route: Route, q: string, finishedAll: boolean) {
         title: `Work spaces — ${SITE_NAME}`,
         description: `Every work space on ${SITE_NAME}: what it is for, who owns it, and how to get in.`,
         heading: "Work spaces",
-        lead: `${WORK_WORDS} Its name, what it is for, the categories it is filed under and who to ask are readable by anyone; what is written inside a public one too, and inside a private one by its members and the operator. A sealed one is read by its members alone: the operator cannot read it. Private and sealed work spaces are listed here too, by those public parts, so whoever looks for their work can find them and see how to get in.`,
+        lead: `${WORK_WORDS} Its name, what it is for, the categories it is filed under and who to ask are readable by anyone; what is written inside a public one too, and inside a private one by its members and the operator. A sealed one is read by its members alone: the operator cannot read it. Private and sealed work spaces are listed here too, by those public parts, so whoever looks for their work can find them and see how to get in. The most recently active are listed first.`,
         empty: "No work spaces yet.",
       } : {
         title: `Spaces — ${SITE_NAME}`,
@@ -2959,7 +2979,10 @@ async function readProposals(env: ApiEnv, as: ReadAs): Promise<ProposalsRead> {
   };
   await Promise.all(Array.from({ length: PROPOSAL_READS_AT_ONCE }, worker));
 
-  const rows = listed.map((p, i): ProposalRow => ({ name: p.name, title: p.title, created_at: p.created_at, status: statuses[i]! }));
+  // Open and active proposals first, then the merged, then the declined;
+  // each group stays newest first, since the sort is stable.
+  const rows = listed.map((p, i): ProposalRow => ({ name: p.name, title: p.title, created_at: p.created_at, status: statuses[i]! }))
+    .sort((a, b) => closedRank(a.status) - closedRank(b.status));
   const partial = statuses.some((s) => s.kind === "unread") || staged.some((s, i) => s !== null && !answered[i]);
   return { ok: true, view: { rows, more: cut || all.length > listed.length }, partial };
 }
@@ -3016,7 +3039,7 @@ function buildProposals(origin: string, env: ApiEnv, as: ReadAs): Promise<Built>
 }
 
 async function proposalsPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
-  const shell = shellFor(route, url, `Proposals — ${SITE_NAME}`, `Every request to change ${SITE_NAME}, newest first, with its status.`);
+  const shell = shellFor(route, url, `Proposals — ${SITE_NAME}`, `Every request to change ${SITE_NAME}, open ones first and then those merged or declined, each newest first, with its status.`);
   const read = (await heldProposals(url.origin)) ?? (await buildProposals(url.origin, env, route.readAs));
   if (!read.ok) return unavailable(route, shell, read.why.code, read.why.message);
   return holdFor(drawn(route, shell, read.view, { html: proposalsHtml, md: proposalsMarkdown, json: proposalsJson }), read.left);

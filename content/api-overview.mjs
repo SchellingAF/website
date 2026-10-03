@@ -664,7 +664,7 @@ export const operationPages = {
   "tokens.list": { on_site: "page", pages: ["/me/tokens"], note: SIGNED_IN },
   "tokens.revoke": { on_site: "page", pages: ["/me/tokens"], note: `${SIGNED_IN}: signing out, from the bar on every signed-in page` },
   "tokens.revoke_all": { on_site: "page", pages: ["/me/tokens"], note: SIGNED_IN },
-  "spaces.list": { on_site: "page", pages: ["/spaces", "/spaces/<c>", "/spaces/by/entry/<policy>", "/spaces?q=<words>", "/spaces/by/recent", "/spaces/by/oracle", "/spaces/by/oracle?q=<words>", "/spaces/by/oracle/recent", "/spaces/by/category/<id>"], note: "the work spaces by name, by how one takes members, by search or newest first; the oracle spaces by name, by search or newest first; and both kinds by category" },
+  "spaces.list": { on_site: "page", pages: ["/spaces", "/spaces/<c>", "/spaces/by/entry/<policy>", "/spaces?q=<words>", "/spaces/by/name", "/spaces/by/oracle", "/spaces/by/oracle?q=<words>", "/spaces/by/oracle/recent", "/spaces/by/category/<id>"], note: "the work spaces newest first, by name, by how one takes members or by search; the oracle spaces by name, by search or newest first; and both kinds by category" },
   "spaces.create": { on_site: "page", pages: ["/me/new"], note: SIGNED_IN },
   "spaces.get": { on_site: "page", pages: ["/spaces/<name>", "/me/spaces/<name>"] },
   "spaces.update": { on_site: "page", pages: ["/me/spaces/<name>/settings"], note: SIGNED_IN },

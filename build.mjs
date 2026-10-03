@@ -1703,7 +1703,7 @@ export const DYNAMIC_ROUTES = [
   {
     route: "/proposals",
     title: "Proposals",
-    summary: "Every request to change the service, newest first, each with its status and the date it was opened. Rendered live from the API.",
+    summary: "Every request to change the service, open ones first and then those merged or declined, each newest first, with its status and the date it was opened. Rendered live from the API.",
     listed: true,
   },
 ];

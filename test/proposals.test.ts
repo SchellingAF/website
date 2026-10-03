@@ -49,7 +49,7 @@ const LEAD_HTML = `A proposal is a request to change the service, kept in a publ
 const LEAD_TEXT = "A proposal is a request to change the service, kept in a public work space whose name starts with proposal- and that is filed under the category this-service. To open one, start with the space proposals. Opening one takes four calls. The first two go together: a Seek for subject:proposal, and a read of the space proposals, which names its owner. The third is one create that makes the space with its admin, its document and its three tasks, all or nothing. The fourth is the entry in proposals. The steps are in the reference.";
 const LEAD_MARKDOWN = `A proposal is a request to change the service, kept in a public work space whose name starts with \`proposal-\` and that is filed under the category [this-service](/spaces/by/category/this-service.md). To open one, start with the space [proposals](/spaces/proposals.md). Opening one takes four calls. The first two go together: a Seek for \`subject:proposal\`, and a read of the space [proposals](/spaces/proposals.md), which names its owner. The third is one create that makes the space with its admin, its document and its three tasks, all or nothing. The fourth is the entry in [proposals](/spaces/proposals.md). The steps are in the reference (${REFERENCE}).`;
 const NOT_OWNERS = "(not set by the service's owner)";
-const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document.";
+const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document. Open proposals are listed first, then the merged ones, then the declined ones, each newest first.";
 const MORE = "More proposals exist than this page lists.";
 
 describe("the list", () => {
@@ -60,7 +60,7 @@ describe("the list", () => {
     withStatus("proposal-gamma", "in progress: a pull request is open", at(1, 3), { last_written_at: "2026-10-09T00:00:00.000Z" }),
   ];
 
-  test("is every proposal, newest first by when it was opened, each title linked to its space, with its status and the date", async () => {
+  test("is every proposal, open ones first and merged after, each newest first by when it was opened, each title linked to its space, with its status and the date", async () => {
     answer = service(proposalWorld(set));
     const { res, text, h } = await ask(`${host()}/proposals`);
     assert.equal(res.status, 200, text.slice(0, 300));
@@ -68,7 +68,7 @@ describe("the list", () => {
     assert.equal(h("X-Robots-Tag"), "index, follow, max-snippet:-1");
     assert.match(text, /<link rel="canonical" href="https:\/\/schellingaf\.com\/proposals">/);
     assert.match(text, /<title>Proposals — Schelling Add Forward<\/title>/);
-    assert.deepEqual(rows(text).map(nameOf), ["proposal-beta", "proposal-alpha", "proposal-gamma"]);
+    assert.deepEqual(rows(text).map(nameOf), ["proposal-beta", "proposal-gamma", "proposal-alpha"]);
     assert.ok(text.includes('<h3><a href="/spaces/proposal-beta">Title of proposal-beta</a></h3>'));
     assert.ok(text.includes('<h3><a href="/spaces/proposal-alpha">Title of proposal-alpha</a></h3>'));
     assert.equal(statusOf(rowFor(text, "proposal-beta")), "proposed");
@@ -885,10 +885,12 @@ describe("what a proposal's words are made of", () => {
     const text = (await ask(`${host()}/proposals.json`)).text;
     const doc = JSON.parse(text);
     assert.equal(doc.items.length, 6, "the three names that are not a space's are not listed");
-    assert.deepEqual(doc.items.map((i: Json) => i.name), ["proposal-hostile-title", "proposal-backticks", "proposal-attribute", "proposal-status-markup", "proposal-newline", "proposal-bad-time"]);
-    assert.ok(doc.items[0].title.startsWith("Hostile <script>alert(1)</script>"));
-    assert.ok(doc.items[0].title.includes(" ## a heading after the break"), "a title is one line in every format");
-    assert.equal(doc.items[0].reason, "line one <script>alert(77)</script> line two [[proposal-routine]] `code` [a link](https://x.invalid)");
+    // Open first, then merged, then declined, each newest first.
+    assert.deepEqual(doc.items.map((i: Json) => i.name), ["proposal-status-markup", "proposal-newline", "proposal-bad-time", "proposal-backticks", "proposal-attribute", "proposal-hostile-title"]);
+    const hostileItem = doc.items.at(-1);
+    assert.ok(hostileItem.title.startsWith("Hostile <script>alert(1)</script>"));
+    assert.ok(hostileItem.title.includes(" ## a heading after the break"), "a title is one line in every format");
+    assert.equal(hostileItem.reason, "line one <script>alert(77)</script> line two [[proposal-routine]] `code` [a link](https://x.invalid)");
   });
 
   test("a status is one of the six words however the document spells it, and markup in its place says no status", async () => {
@@ -909,8 +911,9 @@ describe("what a proposal's words are made of", () => {
     assert.equal(doc.items.find((i: Json) => i.name === "proposal-bad-time").created_at, null);
     const md = (await ask(`${host()}/proposals.md`)).text;
     assert.ok(!md.split(/^## /m).find((p) => p.startsWith("proposal-bad-time\n"))!.includes("opened"));
-    // And it is last: a proposal with no date is the oldest.
-    assert.equal(doc.items.at(-1).name, "proposal-bad-time");
+    // And it is the last of the open ones: a proposal with no date is the oldest.
+    assert.equal(doc.items[2].name, "proposal-bad-time");
+    assert.equal(doc.items[3].status, "merged");
   });
 });
 
@@ -1346,7 +1349,7 @@ describe("where the page is registered", () => {
     const listed = (DYNAMIC_ROUTES as { route: string; title: string; listed: boolean; summary: string }[]).find((r) => r.route === "/proposals");
     assert.equal(listed?.listed, true);
     assert.equal(listed?.title, "Proposals");
-    assert.equal(listed?.summary, "Every request to change the service, newest first, each with its status and the date it was opened. Rendered live from the API.");
+    assert.equal(listed?.summary, "Every request to change the service, open ones first and then those merged or declined, each newest first, with its status and the date it was opened. Rendered live from the API.");
     assert.match(reservation("/proposals") ?? "", /belong to the server or to the build/);
     assert.match(reservation("/proposals/extra") ?? "", /belong to the server or to the build/);
   });

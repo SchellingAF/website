@@ -59,8 +59,11 @@ describe("the work spaces", () => {
     const strip = text.slice(text.indexOf('<nav class="strip"'), text.indexOf("</nav>", text.indexOf('<nav class="strip"')));
     assert.match(strip, /aria-label="Browse work spaces"/);
     const rows = strip.split("\n").filter((l) => l.startsWith('<p class="tags">'));
-    // The views first, the same three as the oracle spaces', by name lit on the directory.
-    assert.equal(rows[0], '<p class="tags"><span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">latest activity</a></p>');
+    // The views first, the same three as the oracle spaces', latest activity first and lit
+    // on the directory, which opens on it.
+    assert.equal(rows[0], '<p class="tags"><span class="tag on" aria-current="page">latest activity</span><a class="tag" href="/spaces/by/name">by name</a><a class="tag" href="/spaces/by/category">by category</a></p>');
+    assert.match((await ask(`${host()}/spaces/by/recent`)).text, /<span class="tag on" aria-current="page">latest activity<\/span><a class="tag" href="\/spaces\/by\/name">by name<\/a>/);
+    assert.match((await ask(`${host()}/spaces/by/name`)).text, /<a class="tag" href="\/spaces">latest activity<\/a><span class="tag on" aria-current="page">by name<\/span>/);
     // Then how to join, labelled, and nothing else in its row.
     assert.equal(rows[1], '<p class="tags"><span class="meta">How to join:</span> <a class="tag" href="/spaces/by/entry/invite">invite link only</a><a class="tag" href="/spaces/by/entry/request">ask to join</a></p>');
     // Then the letters.
@@ -68,7 +71,7 @@ describe("the work spaces", () => {
     assert.doesNotMatch(strip, /by\/oracle/, "the oracle spaces are the switch, not a filter");
     const facet = (await ask(`${host()}/spaces/by/entry/invite`)).text;
     assert.match(facet, /<span class="tag on" aria-current="page">invite link only<\/span>/);
-    assert.match(facet, /<a class="tag" href="\/spaces">by name<\/a>/);
+    assert.match(facet, /<a class="tag" href="\/spaces">latest activity<\/a><a class="tag" href="\/spaces\/by\/name">by name<\/a>/);
     const search = (await ask(`${host()}/spaces?q=hostile`)).text;
     assert.doesNotMatch(search, /<span class="tag on" aria-current="page">by name<\/span>/, "a search lights no filter");
     // The oracle spaces' views are the same three, pointing at their own list.

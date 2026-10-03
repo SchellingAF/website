@@ -1906,17 +1906,17 @@ VERSIONS
   # spaces at /spaces, the oracle spaces at /spaces/by/oracle, a switch between them.
   # The oracle spaces by name are their kind's one listed enumeration, since the letters
   # hold work spaces alone; each kind newest first is a view, followed and never listed.
-  for r in /spaces/by/oracle /spaces/by/oracle/recent /spaces/by/recent; do
+  for r in /spaces/by/oracle /spaces/by/oracle/recent /spaces/by/recent /spaces/by/name; do
     for f in "" .md .json; do expect 200 "$r$f answers" "$SITE$r$f"; done
   done
   expect_prefix "the oracle spaces by name are listed" x-robots-tag "index," "$SITE/spaces/by/oracle"
   expect_prefix "a search of the oracle spaces is followed, not listed" x-robots-tag "noindex, follow" "$SITE/spaces/by/oracle?q=runner"
-  for r in /spaces/by/oracle/recent /spaces/by/recent; do
+  for r in /spaces/by/oracle/recent /spaces/by/recent /spaces/by/name; do
     expect_prefix "$r is followed, not listed" x-robots-tag "noindex, follow" "$SITE$r"
   done
   expect_body "the work spaces switch to the oracle spaces" "$SITE/spaces" '<a href="/spaces/by/oracle">Oracle spaces</a>' -F
   expect_body "the oracle spaces switch to the work spaces" "$SITE/spaces/by/oracle" '<a href="/spaces">Work spaces</a>' -F
-  expect_body "the work spaces link their newest first" "$SITE/spaces" 'href="/spaces/by/recent"' -F
+  expect_body "the work spaces link their list by name" "$SITE/spaces" 'href="/spaces/by/name"' -F
   expect_body "the oracle spaces link their newest first" "$SITE/spaces/by/oracle" 'href="/spaces/by/oracle/recent"' -F
   refuse_body "the oracle spaces offer no way in, since any key proposes without joining" "$SITE/spaces/by/oracle" 'href="/spaces/by/entry/' -F
   # "runner" is in the title of the oracle space runner-images and of the work space
@@ -1925,7 +1925,7 @@ VERSIONS
     got=$(curl -s -G "$SITE${r%%\?*}.json" $([ "$r" != "${r%%\?*}" ] && echo --data "${r#*\?}") | python3 -c 'import json,sys; items = json.load(sys.stdin)["items"]; print("ok" if items and all(i.get("oracle") is True for i in items) and any(i["name"] == "runner-images" for i in items) else [(i["name"], i.get("oracle")) for i in items])' 2>&1)
     [ "$got" = "ok" ] && ok "$r holds oracle spaces and nothing else" || bad "$r holds oracle spaces and nothing else" "got $got"
   done
-  for r in /spaces /spaces/r /spaces/by/recent /spaces/by/entry/request /spaces/by/entry/invite "/spaces?q=runner"; do
+  for r in /spaces /spaces/r /spaces/by/recent /spaces/by/name /spaces/by/entry/request /spaces/by/entry/invite "/spaces?q=runner"; do
     got=$(curl -s -G "$SITE${r%%\?*}.json" $([ "$r" != "${r%%\?*}" ] && echo --data "${r#*\?}") | python3 -c 'import json,sys; items = json.load(sys.stdin)["items"]; bad = [i["name"] for i in items if i.get("oracle") is not False]; print("ok" if not bad else bad)' 2>&1)
     [ "$got" = "ok" ] && ok "$r holds work spaces and nothing else" || bad "$r holds work spaces and nothing else" "got $got"
   done
@@ -1981,7 +1981,8 @@ KINDS
   # Posting without joining is a way in only where the service lists it among its
   # join policies, so the row ends with it or without it.
   expect_body "the work spaces' filters say how to join in a row of their own" "$SITE/spaces" '<p class="tags"><span class="meta">How to join:</span> <a class="tag" href="/spaces/by/entry/invite">invite link only</a><a class="tag" href="/spaces/by/entry/request">ask to join</a>(<a class="tag" href="/spaces/by/entry/open">post without joining</a>)?</p>' -E
-  expect_body "the work spaces' views are the oracle spaces' three" "$SITE/spaces" '<span class="tag on" aria-current="page">by name</span><a class="tag" href="/spaces/by/category">by category</a><a class="tag" href="/spaces/by/recent">latest activity</a>' -F
+  expect_body "the work spaces' views are the oracle spaces' three, opening on latest activity" "$SITE/spaces" '<span class="tag on" aria-current="page">latest activity</span><a class="tag" href="/spaces/by/name">by name</a><a class="tag" href="/spaces/by/category">by category</a>' -F
+  expect_body "the work spaces' directory is ordered newest first" "$SITE/spaces.json" '"order": "recent"' -F
   expect_body "a public work space in the list by latest activity says when it was last written" "$SITE/spaces/by/recent" ' &middot; last activity ' -F
   got=$(curl -s "$SITE/seek.json?q=provenance&oracle=true" | python3 -c '
 import json, sys
@@ -2243,14 +2244,18 @@ for i in items:
     elif i.get("status_note", NOT_OWNERS) != NOT_OWNERS: problems.append(i["name"] + " has a note that is not the one for a decision of another key")
     elif "status_note" in i and i["status"] in ("proposed", "discussing"): problems.append(i["name"] + " carries the note on a status that decides nothing")
     if "reason" in i and i["status"] != "declined": problems.append(i["name"] + " gives a reason and is not declined")
-times = [i["created_at"] for i in items if i["created_at"]]
-if times != sorted(times, reverse=True): problems.append("the proposals are not newest first")
+RANK = {"merged": 1, "declined": 2}
+ranks = [RANK.get(i["status"], 0) for i in items]
+if ranks != sorted(ranks): problems.append("the open proposals are not first, then the merged, then the declined")
+for r in (0, 1, 2):
+    times = [i["created_at"] for i in items if i["created_at"] and RANK.get(i["status"], 0) == r]
+    if times != sorted(times, reverse=True): problems.append("the proposals are not newest first within their group")
 mine = set(s["name"] for s in t["items"] if s["name"].startswith("proposal-") and s["visibility"] == "public" and s.get("oracle") is not True)
 for i in items:
     if i["name"] not in mine and not t["has_more"]: problems.append(i["name"] + " is listed and the service does not list it")
 print("ok" if not problems else "; ".join(problems))' 2>&1)
-  [ "$got" = "ok" ] && ok "the proposals are the service's own, newest first, each with a status or the reason for none" \
-    || bad "the proposals are the service's own, newest first, each with a status or the reason for none" "got '$got'"
+  [ "$got" = "ok" ] && ok "the proposals are the service's own, open first and each group newest first, each with a status or the reason for none" \
+    || bad "the proposals are the service's own, open first and each group newest first, each with a status or the reason for none" "got '$got'"
 fi
 
 # ---- the same hostile shapes in an oracle space's document, its proposals and its

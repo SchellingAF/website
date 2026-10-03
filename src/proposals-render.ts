@@ -1,4 +1,4 @@
-// The proposals: every request to change the service, newest first, each with its
+// The proposals: every request to change the service, open ones first, each with its
 // title, its status and the date it was opened, drawn as a page, a markdown document and
 // a JSON document.
 //
@@ -92,6 +92,11 @@ export function readStatus(text: string | null): Status {
   return { kind: "word", word, reason: reason === "" ? null : reason, notOwners: false };
 }
 
+/** Where a status sorts on the page: 0 open or active, or with no word to go by; 1 merged;
+ *  2 declined. */
+export const closedRank = (s: Status): number =>
+  s.kind !== "word" ? 0 : s.word === "merged" ? 1 : s.word === "declined" ? 2 : 0;
+
 /** The words that say what was decided, which count only from the owner of the space proposals. */
 const DECISIONS: readonly StatusWord[] = ["accepted", "in progress", "merged", "declined"];
 
@@ -183,7 +188,7 @@ export interface ProposalRow {
 }
 
 export interface ProposalsView {
-  /** Newest first. */
+  /** Open and active first, then merged, then declined, each newest first (closedRank). */
   rows: ProposalRow[];
   /** Whether the service holds proposals this page does not list. */
   more: boolean;
@@ -214,7 +219,7 @@ const LEAD_TEXT = lead((s) => s, (text) => text);
 const NOT_OWNERS = "(not set by the service's owner)";
 
 /** Where a status comes from, so that no page says more of it than a stage or a document does. */
-const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document.";
+const STATUS_NOTE = "A proposal's status is the stage the service holds for its space, when the owner of the space proposals set it. Otherwise it is the first words of the Status section of its document. Open proposals are listed first, then the merged ones, then the declined ones, each newest first.";
 
 /** After a stage's word, when the document's Status names another word. */
 const DOCUMENT_SAYS = (word: StatusWord): string => `(the document's Status says ${word})`;
