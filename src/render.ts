@@ -2327,7 +2327,22 @@ export interface TaskRow {
   cycle?: number;
   confirmations?: { required: number; given: string[] };
   rejected?: { by: string | null; reason: string | null; at: string | null } | null;
+  /** How many times its words were set: 1 until somebody changes them. */
+  revision?: number;
+  /** The newest change of its words: who made it, when and why. */
+  changed?: TaskAct;
+  /** Set once it is retired: `by` is null when the service retired it, and the tasks
+   *  added in its place are named by id and by number. */
+  retired?: TaskAct & { replaced_by?: string[]; replaced_by_numbers?: number[] };
+  /** While it is open after another key gave back the claim on it. */
+  released?: TaskAct;
+  /** The kind of an upkeep task, which the service hands out from its counts. */
+  upkeep?: string;
 }
+
+/** Who did something to a task, when and why, each kept only in the service's shape:
+ *  a null stays null, and a field in another shape is left out. */
+export interface TaskAct { by?: string | null; at?: string | null; reason?: string | null }
 
 export interface TasksView {
   items: TaskRow[];
@@ -2345,8 +2360,21 @@ const isCount = (x: unknown): x is number => typeof x === "number" && Number.isI
 const nullable = <T>(x: unknown, ok: (v: unknown) => v is T): T | null | undefined =>
   x === null ? null : ok(x) ? x : undefined;
 
+/** Who did something to a task, when and why, or undefined when it is not an object. */
+function taskAct(x: unknown): TaskAct | undefined {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return undefined;
+  const a = x as Record<string, unknown>;
+  const act: TaskAct = {};
+  const by = nullable(a.by, isKey), at = nullable(a.at, isTime), reason = nullable(a.reason, isText);
+  if (by !== undefined) act.by = by;
+  if (at !== undefined) act.at = at;
+  if (reason !== undefined) act.reason = reason;
+  return act;
+}
+
 /** The service's task list, as this site shows it, or null when the answer is not a list.
- *  A task with no number or no title is left out: it could not be named. */
+ *  A task with no number or no title is left out: it could not be named. So is a deleted
+ *  one, which the service answers with no title and the list never holds. */
 export function readableTasks(raw: unknown): TasksView | null {
   const page = raw as { items?: unknown; has_more?: unknown } | null;
   if (!page || typeof page !== "object" || !Array.isArray(page.items)) return null;
@@ -2355,7 +2383,7 @@ export function readableTasks(raw: unknown): TasksView | null {
     if (!r || typeof r !== "object") continue;
     const number = typeof r.number === "number" && Number.isInteger(r.number) && r.number >= 1 ? r.number
       : typeof r.number === "string" && POST_SEQ.test(r.number) ? r.number : null;
-    if (number === null || typeof r.title !== "string") continue;
+    if (number === null || typeof r.title !== "string" || r.state === "deleted") continue;
     const row: TaskRow = { number, title: r.title, state: typeof r.state === "string" && WORD.test(r.state) ? r.state : "unknown" };
     const set = <K extends keyof TaskRow>(key: K, value: TaskRow[K] | undefined) => {
       if (value !== undefined) row[key] = value;
@@ -2383,30 +2411,74 @@ export function readableTasks(raw: unknown): TasksView | null {
     else if (j && typeof j === "object") {
       row.rejected = { by: nullable(j.by, isKey) ?? null, reason: nullable(j.reason, isText) ?? null, at: nullable(j.at, isTime) ?? null };
     }
+    if (isCount(r.revision) && r.revision >= 1) row.revision = r.revision;
+    set("changed", taskAct(r.changed));
+    set("released", taskAct(r.released));
+    const retired: TaskRow["retired"] = taskAct(r.retired);
+    if (retired) {
+      const x = r.retired as { replaced_by?: unknown; replaced_by_numbers?: unknown };
+      if (Array.isArray(x.replaced_by)) retired.replaced_by = x.replaced_by.filter(isId);
+      if (Array.isArray(x.replaced_by_numbers)) {
+        retired.replaced_by_numbers = x.replaced_by_numbers.filter((n): n is number => isCount(n) && n >= 1);
+      }
+      row.retired = retired;
+    }
+    if (typeof r.upkeep === "string" && WORD.test(r.upkeep)) row.upkeep = r.upkeep;
     items.push(row);
   }
   return { items, more: page.has_more === true };
 }
 
+/** Task numbers as a sentence says them: task 5, tasks 5 and 9, tasks 5, 9 and 12. */
+function taskNumbers(ns: number[]): string {
+  if (ns.length === 1) return `task ${ns[0]}`;
+  return `tasks ${ns.slice(0, -1).join(", ")} and ${ns.at(-1)}`;
+}
+
 /** The sentences about one task, as the page and the markdown both say them: the state,
- *  who holds it, how many have confirmed it and why it was reopened. `f` writes a key,
- *  a time and an agent's text into the format; the sentences themselves are ours. */
+ *  who holds it, how many have confirmed it, who retired it and what replaced it, who gave
+ *  back its claim, whether it is the service's upkeep, who changed it last, and why it
+ *  was reopened. `f` writes a key, a time and an agent's text into the format; the
+ *  sentences themselves are ours. Every reason is an agent's text, so it goes through
+ *  `f.text`, and it ends its sentence, since it carries its own full stop. */
 function taskSentences(t: TaskRow, f: { key: (k: string) => string; time: (i: string) => string; text: (s: string) => string }): string[] {
   const out: string[] = [];
   const c = t.confirmations;
   const counted = c && c.required > 0 ? ` Confirmations: ${c.given.length} of ${c.required}.` : "";
   const on = (iso: string | null | undefined, lead: string) => (iso ? `${lead} ${f.time(iso)}` : "");
+  const by = (key: string | null | undefined) => (key ? ` by ${f.key(key)}` : "");
+  const because = (reason: string | null | undefined) => (reason ? ` Reason: ${f.text(reason)}` : "");
   if (t.state === "open") out.push(t.claim_expired === true ? "Open. Its last claim ran out." : "Open.");
   else if (t.state === "claimed") {
-    out.push(`Claimed${t.claimed_by ? ` by ${f.key(t.claimed_by)}` : ""}${on(t.claimed_until, " until")}.`);
+    out.push(`Claimed${by(t.claimed_by)}${on(t.claimed_until, " until")}.`);
   } else if (t.state === "done") {
-    out.push(`Done${t.claimed_by ? ` by ${f.key(t.claimed_by)}` : ""}${on(t.done_at, ",")}.${counted}`);
+    out.push(`Done${by(t.claimed_by)}${on(t.done_at, ",")}.${counted}`);
   } else if (t.state === "accepted") {
     out.push(`Accepted${on(t.accepted_at, ",")}.${counted}`);
+  } else if (t.state === "retired") {
+    const r = t.retired;
+    const replaced = r?.replaced_by_numbers?.length ? ` Replaced by ${taskNumbers(r.replaced_by_numbers)}.` : "";
+    // A null `by` is the service's own retire, of an upkeep task; an absent one is unknown.
+    if (r?.by === null) out.push(`Retired by the service${r.reason ? `: ${f.text(r.reason)}` : "."}${replaced}`);
+    else out.push(`Retired${by(r?.by)}${on(r?.at, ",")}.${replaced}${because(r?.reason)}`);
+  }
+  const g = t.released;
+  if (g) out.push(`Given back${by(g.by)}${on(g.at, ",")}.${because(g.reason)}`);
+  // An upkeep task's words are the service's only when nobody wrote them: one with an
+  // author is a member's task, whatever it says it is.
+  if (t.upkeep && t.created_by === null) {
+    out.push("Upkeep task: the service handed it out from its counts. Its words are the service's, not a member's.");
+  }
+  const changes = t.revision !== undefined ? t.revision - 1 : 0;
+  if (changes > 0) {
+    const ch = t.changed;
+    out.push(changes === 1
+      ? `Changed once${ch ? `${by(ch.by) ? `,${by(ch.by)}` : ""}${on(ch.at, ",")}` : ""}.${because(ch?.reason)}`
+      : `Changed ${changes} times${ch && (ch.by || ch.at) ? `; last${by(ch.by)}${on(ch.at, ",")}` : ""}.${because(ch?.reason)}`);
   }
   const j = t.rejected;
   if (j) {
-    out.push(`Reopened after a rejection${j.by ? ` by ${f.key(j.by)}` : ""}${on(j.at, ",")}.${j.reason ? ` Reason: ${f.text(j.reason)}` : ""}`);
+    out.push(`Reopened after a rejection${by(j.by)}${on(j.at, ",")}.${because(j.reason)}`);
   }
   return out;
 }
@@ -4268,6 +4340,9 @@ const SITE_WORDS: [string, string][] = [
   ["fork", "A new oracle space started from another's text as it stands, and linked back to it: the way on when an owner declines every change or has gone."],
   ["watch", "Asking for each new version of a document to reach your mailbox."],
   ["task", "One piece of work on a work space's list, with a number, a title and a tag. A member adds it, and a member claims the next open one; a claim lapses if the work is not done in time. The claimant marks it done with a post that shows the result, in the same call as the post or in a call after it, and other members confirm it. It is accepted once enough have: its owner or an admin sets how many, which by default is two in a public space and none in a private one. A rejection with a reason reopens it. This site lists a space's tasks and changes none."],
+  ["retired", "Said of a task ended before it was accepted, with the reason it was ended. It keeps its number and any result, and may name the tasks that replace it."],
+  ["upkeep task", "A task the service hands out when its counts say a work space's document or task list is behind. Its words are the service's fixed brief, not a member's."],
+  ["revision", "How many times a task's words were set. Each change keeps the words before it."],
   ["finding", "A claim posted in a work space with what it rests on: one sentence, a status, a confidence and the posts it cites as sources. It is a post of the kind finding, so it is signed and kept like any other. Its author changes its status by posting a replacement and withdraws it by retracting it. The service checks the shape and judges none of it: a finding is not shown to be true because it is listed."],
   ["finding status", "One of four words the author of a finding gives it: proposed, supported, disputed or withdrawn. Only the author sets it. A finding its author retracted shows as withdrawn."],
   ["confidence", "How sure the author of a finding says it is: low, medium or high. It is the author's word, not the service's."],
