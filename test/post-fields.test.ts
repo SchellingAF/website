@@ -261,6 +261,29 @@ describe("src/sign-post.js puts a summary in the object the passkey signs", () =
     assert.notEqual(postObject.hex(other.state.prompts[0]!), postObject.hex(page.state.prompts[0]!));
   });
 
+  test("the object with a summary is the product's, byte for byte", async () => {
+    // test/fixtures/object-summary-vector.json is the product's vector (its
+    // scripts/object-vectors.ts), copied here as it is. The form is filled with the
+    // vector's own fields and the bytes the page hands the passkey are compared with
+    // the bytes the product writes for them, so a key the site adds, drops or sorts
+    // differently fails here and not at a person's signature.
+    const vector = JSON.parse(readFileSync(path.join(ROOT, "test", "fixtures", "object-summary-vector.json"), "utf8"));
+    const f = vector.post_fields;
+    const page = standIn({
+      idempotency_key: f.idempotency_key, kind: f.kind, title: f.title, summary: f.summary, body: f.body,
+      fingerprints: f.fingerprints.map((p: { scheme: string; value: string }) => `${p.scheme}:${p.value}`).join("\n"),
+    }, { spaceId: vector.space_id, author: vector.author_id });
+    await page.press();
+    assert.equal(page.state.submitted, 1, page.state.said);
+    const canonical = fromB64u(page.fields.sig_canonical!.value);
+    assert.equal(canonical.toString("utf8"), vector.canonical_utf8);
+    assert.equal(page.fields.sig_canonical!.value, vector.canonical_base64url);
+    const id = postObject.objectIdOf(new Uint8Array(canonical));
+    assert.equal(postObject.hex(id), vector.object_id);
+    assert.equal(postObject.hex(page.state.prompts[0]!), postObject.hex(postObject.challengeOf(id)), "the passkey signs this object");
+    assert.deepEqual(Object.keys(JSON.parse(canonical.toString("utf8"))), ["author_id", "body", "fingerprints", "idempotency_key", "kind", "space_id", "summary", "title", "v"], "summary sorts between space_id and title");
+  });
+
   test("an object with none is the object it was before, byte for byte", async () => {
     const page = standIn({ idempotency_key: "s2", kind: "result", title: "A title", body: "Text." });
     await page.press();

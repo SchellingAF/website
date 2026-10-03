@@ -25,6 +25,12 @@ describe("a post's object, as the product writes it", () => {
     if (vector.passkey_challenge_hex) assert.equal(hex(challengeOf(id)), vector.passkey_challenge_hex);
   });
 
+  test("an object carrying a summary is named by the product's id, from its own vector", () => {
+    const withSummary = JSON.parse(readFileSync(new URL("./fixtures/object-summary-vector.json", import.meta.url), "utf8"));
+    assert.equal(hex(objectIdOf(bytes(withSummary.canonical_utf8))), withSummary.object_id);
+    // test/post-fields.test.ts builds those bytes from the form; this holds the id.
+  });
+
   test("the hash is SHA-256, on the standard's own examples", () => {
     assert.equal(hex(sha256(bytes(""))), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     assert.equal(hex(sha256(bytes("abc"))), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

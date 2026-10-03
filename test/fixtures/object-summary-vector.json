@@ -1,0 +1,25 @@
+{
+  "about": "A signed post object carrying a summary, from the published test seed (test/fixtures/protocol-v1-vectors.json, refused at registration). Written by the product's scripts/object-vectors.ts on branch posts-read-less (P5); the same object is test/fixtures/object-vectors.json object_with_summary. The object without a summary, object, is unchanged byte for byte.",
+  "test_only": true,
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "author_id": "e89af24c6f6ab546c38b9df66c5bf52aaf3300be990d6404be769c67651b3605",
+  "space_id": "0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee",
+  "post_fields": {
+    "kind": "result",
+    "title": "Build passes on linux: 2 of 2 runs",
+    "summary": "numpy 1.26.4 is pinned. Both runs passed on linux; macOS is untested.",
+    "body": "Reproduced on linux, twice.\nCommand and output follow.",
+    "fingerprints": [
+      {
+        "scheme": "git.commit",
+        "value": "b75e527ac4f1e0c2d8a3"
+      }
+    ],
+    "idempotency_key": "vector-2"
+  },
+  "canonical_utf8": "{\"author_id\":\"e89af24c6f6ab546c38b9df66c5bf52aaf3300be990d6404be769c67651b3605\",\"body\":\"Reproduced on linux, twice.\\nCommand and output follow.\",\"fingerprints\":[{\"scheme\":\"git.commit\",\"value\":\"b75e527ac4f1e0c2d8a3\"}],\"idempotency_key\":\"vector-2\",\"kind\":\"result\",\"space_id\":\"0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee\",\"summary\":\"numpy 1.26.4 is pinned. Both runs passed on linux; macOS is untested.\",\"title\":\"Build passes on linux: 2 of 2 runs\",\"v\":1}",
+  "canonical_base64url": "eyJhdXRob3JfaWQiOiJlODlhZjI0YzZmNmFiNTQ2YzM4YjlkZjY2YzViZjUyYWFmMzMwMGJlOTkwZDY0MDRiZTc2OWM2NzY1MWIzNjA1IiwiYm9keSI6IlJlcHJvZHVjZWQgb24gbGludXgsIHR3aWNlLlxuQ29tbWFuZCBhbmQgb3V0cHV0IGZvbGxvdy4iLCJmaW5nZXJwcmludHMiOlt7InNjaGVtZSI6ImdpdC5jb21taXQiLCJ2YWx1ZSI6ImI3NWU1MjdhYzRmMWUwYzJkOGEzIn1dLCJpZGVtcG90ZW5jeV9rZXkiOiJ2ZWN0b3ItMiIsImtpbmQiOiJyZXN1bHQiLCJzcGFjZV9pZCI6IjAxOTlhYWFhLWJiYmItN2NjYy04ZGRkLWVlZWVlZWVlZWVlZSIsInN1bW1hcnkiOiJudW1weSAxLjI2LjQgaXMgcGlubmVkLiBCb3RoIHJ1bnMgcGFzc2VkIG9uIGxpbnV4OyBtYWNPUyBpcyB1bnRlc3RlZC4iLCJ0aXRsZSI6IkJ1aWxkIHBhc3NlcyBvbiBsaW51eDogMiBvZiAyIHJ1bnMiLCJ2IjoxfQ",
+  "object_id": "d5748f7e5c0590755c5ab0c8d4400c408634174f89200b37988c8006be3d11d5",
+  "ed25519_signature_hex": "78e56b381114e6f4c6e2d996a6f6ca592b497c94cf609ddff73601c14c2601f4f527df5c607889408a720ff6aa217236ad666a2209ae87dbdb0105cb31beac0a",
+  "key_order_note": "RFC 8785: summary sorts between space_id and title. Omitted when absent, never null."
+}
