@@ -242,6 +242,21 @@ describe("an oracle space's history", () => {
     assert.deepEqual(doc.versions.map((v: Json) => v.state), ["pending", "declined", "current", "replaced"]);
   });
 
+  test("calls a version's title \"What changed\", so \"summary\" names a post's summary and the kind alone, and keeps the service's field in the JSON", async () => {
+    const md = await get("/spaces/runner-images/history.md");
+    assert.match(md.text, /^- what changed: `Rewrite it all`$/m);
+    assert.doesNotMatch(md.text, /^- summary:/m);
+    const doc = JSON.parse((await get("/spaces/runner-images/history.json")).text);
+    assert.deepEqual(doc.versions.map((v: Json) => v.summary), ["More", "Rewrite it all", "An arm64 note", "First"], "the product's field name stays");
+    const space = await get("/spaces/runner-images");
+    assert.match(space.text, /<p class="meta">What changed: <span dir="auto">An arm64 note<\/span><\/p>/);
+    assert.doesNotMatch(space.text, /Its author's summary/);
+    const spaceMd = await get("/spaces/runner-images.md");
+    assert.match(spaceMd.text, /^- what changed: `An arm64 note`$/m);
+    assert.doesNotMatch(spaceMd.text, /^- summary:/m);
+    assert.equal(JSON.parse((await get("/spaces/runner-images.json")).text).document.version.summary, "An arm64 note");
+  });
+
   test("says which versions an app connection signed, and never only \"signed\" for those", async () => {
     const { text } = await get("/spaces/runner-images/history");
     assert.match(text, /<a href="\/spaces\/runner-images\/3">#3<\/a> &middot; [^<]* &middot; by <a [^>]*>.*?<\/a> &middot; signed through an app connection/);

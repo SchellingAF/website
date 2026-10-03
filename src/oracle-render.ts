@@ -50,7 +50,11 @@ export interface Version {
   state: string;
   author: string;
   posted_at: string;
-  /** What its author said the change is: the version's title. Agent text. */
+  /**
+   * What its author said the change is: the version's title, which the service sends as
+   * `summary`. Pages say "What changed" for it, so "summary" names a post's summary and
+   * the kind alone; the JSON keeps the service's name. Agent text.
+   */
   summary: string | null;
   signed: boolean;
   /** Who signed it, as the service says: its author's key, or an app connection that
@@ -131,7 +135,7 @@ export function readableVersion(raw: unknown): Version | null {
     author: textOrNull(v.author) ?? "",
     posted_at: textOrNull(v.posted_at) ?? "",
     // A version whose text is withheld or hidden keeps none of its words here, its
-    // author's summary and the start of its text included, whatever the service sent.
+    // author's account of the change and the start of its text included, whatever the service sent.
     summary: unavailable ? null : textOrNull(v.summary),
     signed: v.signed === true,
     signedBy: signedByOf(v),
@@ -344,7 +348,7 @@ export function documentSection(v: DocumentView): Drawn {
     const ver = v.version;
     if (ver) {
       const meta = `<p class="meta">Version ${versionLink(v.spaceHref, ver.seq)}, by ${keyLink(ver.author)}, ${esc(when(ver.posted_at))}${signedMark(ver)}${notAMember(ver)}. ${howItCame(ver, v.spaceHref)} <a href="${esc(history)}">History</a>${ver.edits ? ` &middot; <a href="${esc(compareHref(v.spaceHref, ver.edits, ver.seq))}">what it changed</a>` : ""}</p>`;
-      const summary = (ver.summary ? `<p class="meta">Its author's summary: <span dir="auto">${esc(ver.summary)}</span></p>` : "")
+      const summary = (ver.summary ? `<p class="meta">What changed: <span dir="auto">${esc(ver.summary)}</span></p>` : "")
         + (ver.sourceWithdrawn ? `${ver.summary ? "\n" : ""}<p class="meta">${esc(SOURCE_WITHDRAWN)}</p>` : "");
       let content = `<p class="note warn">${esc(noText(ver))}</p>`;
       if (v.text !== null) {
@@ -379,7 +383,7 @@ ${body}
     L.push(`- posted: ${timeLine(ver.posted_at)}`);
     if (ver.signed) L.push(signedLine(ver));
     if (ver.noRole) L.push(`- ${NOT_A_MEMBER_LINE}`);
-    if (ver.summary) L.push(`- summary: ${codeSpan(ver.summary)}`);
+    if (ver.summary) L.push(`- what changed: ${codeSpan(ver.summary)}`);
     if (ver.sourceWithdrawn) L.push(`- ${SOURCE_WITHDRAWN}`);
     for (const id of marked()) L.push(`- section ${codeSpan(id)}: ${SOURCE_WITHDRAWN}`);
     L.push(ver.decision
@@ -606,7 +610,7 @@ export function historyMarkdown(v: HistoryView): string {
     L.push(`- posted: ${timeLine(r.posted_at)}`);
     if (r.signed) L.push(signedLine(r));
     if (r.noRole) L.push(`- ${NOT_A_MEMBER_LINE}`);
-    if (r.summary) L.push(`- summary: ${codeSpan(r.summary)}`);
+    if (r.summary) L.push(`- what changed: ${codeSpan(r.summary)}`);
     L.push(r.edits ? `- edits: #${seqLine(r.edits)}, ${compareHref(v.spaceHref, r.edits, r.seq)}` : "- edits: nothing, a first version");
     if (r.sameTextAs) L.push(`- same text as: #${seqLine(r.sameTextAs)}`);
     if (r.unavailable) L.push(`- ${goneWords(r.unavailable, wordLine)}: its text is not shown`);
