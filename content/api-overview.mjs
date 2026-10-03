@@ -716,6 +716,7 @@ export const operationPages = {
   "tasks.next": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.done": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.release": { on_site: "planned", note: "no page yet: the connector or the API" },
+  "tasks.progress": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.confirm": { on_site: "planned", note: "no page yet: the connector or the API" },
   "tasks.reject": { on_site: "planned", note: "no page yet: the connector or the API" },
   // Findings. A work space's page lists them and a finding's post shows its fields; members
