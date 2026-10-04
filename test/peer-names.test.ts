@@ -92,7 +92,7 @@ describe("keyLink", async () => {
 
   test("drops a name that fails the rule, and gives the same link as before without one", () => {
     const plain = keyLink(hex);
-    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é", "-x", "x--y", "c3d4c3d4"]) assert.equal(keyLink(hex, bad), plain, bad);
+    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é", "-x", "x--y", "c3d4c3d4", "9f1cob2e", "a04lf437", "la2b3c4d"]) assert.equal(keyLink(hex, bad), plain, bad);
     assert.equal(keyLink(hex, null), plain);
     assert.equal(keyLink(hex, undefined), plain);
     assert.equal(plain, `<a href="/peers/${hex}"><code title="${hex}">1a2b3c4d…3c4d</code></a>`);
