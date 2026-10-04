@@ -17,7 +17,7 @@ import { SITE, env, signedIn, site } from "./lib/site.ts";
 const ACTOR = "e5f6".repeat(16);
 const SHORT = "e5f6e5f6…e5f6";
 const REASONS = ["to", "reply", "request", "decision", "message", "message_request", "proposal", "out_of_date", "changed", "hand_over",
-  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "task_changed", "task_retired", "task_deleted", "cited"];
+  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "task_changed", "task_retired", "task_deleted", "cited", "contested"];
 /** A field as a hostile service fills it: markup, a quote that ends an attribute, and a line break. */
 const X = (n: number) => `<script>alert(${n})</script>" onmouseover="alert(${n})' x='\n# injected ${n}`;
 const REJECTED = "<b>Wrong</b> total.\nThe sum in #12 leaves out row 4.";
@@ -41,6 +41,16 @@ const ITEMS = [
   { mailbox_seq: "11", reason: "task_changed", task: task({ number: 6, state: "claimed", reason: "Name the scan <b>too</b>." }) },
   { mailbox_seq: "12", reason: "task_retired", task: task({ number: 7, state: "retired", reason: "Split in two." }) },
   { mailbox_seq: "13", reason: "task_deleted", task: task({ number: 8, state: "deleted", reason: "Added twice." }) },
+  // A finding of this key a check's reject and a member's warn contested; one whose causes are in no shape.
+  { mailbox_seq: "14", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000032", space: "build-notes", seq: "32", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Rests on 30", snippet: "The key is short." },
+    contested: [
+      { cause: "rejected", on: "30", task: 7, by: ACTOR, post: "36", reason: `Controls <script>alert(8)</script> do not match.` },
+      { cause: "warn", on: "32", by: ACTOR, post: "13", title: "<img src=x onerror=alert(9)>" },
+      { cause: "judged", on: "30", by: ACTOR }] },
+  { mailbox_seq: "15", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000033", space: "build-notes", seq: "33", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Cleared", snippet: "x" },
+    contested: [{ cause: "warn", on: X(1), by: X(2) }, { cause: "fail", on: "33", by: ACTOR, post: "14", title: X(3) }, { cause: "fail", on: "x", by: ACTOR, title: X(2) }] },
+  { mailbox_seq: "16", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000034", space: "build-notes", seq: "34", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Cleared", snippet: "x" },
+    contested: [{ cause: "warn", on: X(1), by: X(2) }] },
 ];
 
 const base = service(hostileWorld());
@@ -140,15 +150,43 @@ describe("the mailbox's items about a task and about a citation", () => {
     assert.deepEqual(links(html).map(([href]) => href), [], "a link built from a field in no shape");
   });
 
+  test("a contested finding names each cause in a sentence, the reject's reason and a title as text", () => {
+    const html = item("14");
+    const t = read(html);
+    assert.match(t, new RegExp(`^Item 14, a finding of yours contested · finding#32 in build-notes`));
+    assert.ok(t.includes(`A check by ${SHORT} rejected post 30 as the result of task 7. This finding rests on it.`), t);
+    assert.ok(t.includes(`A member's warn, post 13, cites this finding.`), t);
+    assert.ok(!t.includes("judged"), "a cause in no shape was shown");
+    assert.ok(html.includes("<pre>Controls &lt;script&gt;alert(8)&lt;/script&gt; do not match.</pre>"));
+    assert.ok(html.includes("<pre>&lt;img src=x onerror=alert(9)&gt;</pre>"));
+    assert.ok(!tags(html).some((x) => x.name === "script" || x.name === "img"), "PEER text became markup");
+    assert.ok(links(html).some(([href, text]) => href === "/me/spaces/build-notes/30" && text === "30"), "a post of the cause is linked");
+  });
+
+  test("a contested item keeps the one cause in shape, and no PEER text of the others", () => {
+    const html = item("15");
+    assert.ok(!html.includes("alert(1)") && !html.includes("alert(2)"));
+    assert.equal(html.match(/A member|A check/g)?.length, 1, "exactly one sentence");
+    assert.ok(html.includes(`A member's fail, post <a href="/me/spaces/build-notes/14">14</a>, cites this finding.`), html);
+    assert.ok(html.includes(`<pre>${X(3).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")}</pre>`), "its title is escaped in a block");
+  });
+
+  test("a contested item whose causes are all in no shape is drawn as an item with none, with no blank line added", () => {
+    const html = item("16");
+    assert.ok(!html.includes("A check") && !html.includes("A member") && !html.includes("alert(1)"));
+    const tail = (h: string) => h.slice(h.lastIndexOf("</pre>"));
+    assert.equal(tail(html), tail(item("5")), "an extra line was left below the item");
+  });
+
   test("the filter offers each new reason in words, and the lead names what they hold", () => {
     for (const [value, words] of [["task_confirmed", "a confirmation of your task"], ["task_accepted", "an accepted task"],
       ["task_rejected", "a rejected task"], ["task_reopened", "your claim given back"], ["task_changed", "a changed task"],
-      ["task_retired", "a retired task"], ["task_deleted", "a deleted task"], ["cited", "a post that cites yours"]]) {
+      ["task_retired", "a retired task"], ["task_deleted", "a deleted task"], ["cited", "a post that cites yours"], ["contested", "a finding of yours contested"]]) {
       assert.ok(page.includes(`<option value="${value}">${words}</option>`), `the filter does not offer ${value} in words`);
     }
     const lead = read(/<p class="lead">([\s\S]*?)<\/p>/.exec(page)![1]!);
     assert.equal(lead, "What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, posts that cite yours, " +
-      "join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, " +
+      "findings of yours a check or a member's warn or fail contested, join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, " +
       "your own proposals that went out of date, new versions of documents you watch, roles other keys offer you, and what became of " +
       "tasks you added, claimed or confirmed. Messages shows the conversations themselves.");
   });

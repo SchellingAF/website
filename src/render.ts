@@ -2596,6 +2596,22 @@ export interface FindingFields {
   sources?: string[];
   cited_by?: number;
   source_withdrawn?: boolean;
+  /** What contests it, as the service wrote each cause, kept by shape. */
+  contested?: Cause[];
+}
+
+/** One cause of a finding's `contested` mark: a check's reject of a post as a task's result,
+ *  or a member's warn or fail citing a post. `on` is the post it is about, `post` the check's
+ *  or the citing post, `title` a warn's or fail's own, `reason` a reject's (the mailbox only).
+ *  A record of what was posted; it says nothing of whether the claim is true. */
+export interface Cause {
+  cause: "rejected" | "warn" | "fail";
+  on: string;
+  task?: number;
+  by: string;
+  post?: string;
+  title?: string;
+  reason?: string;
 }
 
 /** One finding in a space's list. */
@@ -2621,6 +2637,32 @@ export interface FindingsView {
   more: boolean;
 }
 
+/** The causes the service sent, each kept only in the shape it writes it in; one that does
+ *  not have it is dropped, and so is a list with none left. A reject's `reason` is kept only
+ *  where `withReason` says the answer carries one (the mailbox). */
+export function readableCauses(raw: unknown, withReason = false): Cause[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Cause[] = [];
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r !== "object" || Array.isArray(r)) continue;
+    if (r.cause !== "rejected" && r.cause !== "warn" && r.cause !== "fail") continue;
+    if (typeof r.on !== "string" || !POST_SEQ.test(r.on) || !isKey(r.by)) continue;
+    // Built in the order the service writes a cause: cause, on, task, by, post, title.
+    let task: number | undefined;
+    if (r.cause === "rejected") {
+      if (typeof r.task !== "number" || !Number.isInteger(r.task) || r.task < 1) continue;
+      task = r.task;
+    }
+    if (r.post !== undefined && (typeof r.post !== "string" || !POST_SEQ.test(r.post))) continue;
+    const c = { cause: r.cause, on: r.on, ...(task !== undefined ? { task } : {}), by: r.by,
+      ...(r.post !== undefined ? { post: r.post as string } : {}),
+      ...(r.cause !== "rejected" && typeof r.title === "string" ? { title: r.title } : {}) } as Cause;
+    if (withReason && r.cause === "rejected" && typeof r.reason === "string") c.reason = r.reason;
+    out.push(c);
+  }
+  return out.length ? out : undefined;
+}
+
 /** The fields of a finding from an object the service sent, or null when it is no object. */
 function findingFields(raw: unknown): FindingFields | null {
   const r = raw as Record<string, unknown> | null;
@@ -2632,6 +2674,8 @@ function findingFields(raw: unknown): FindingFields | null {
   if (Array.isArray(r.sources)) out.sources = r.sources.filter(isId);
   if (isCount(r.cited_by)) out.cited_by = r.cited_by;
   if (typeof r.source_withdrawn === "boolean") out.source_withdrawn = r.source_withdrawn;
+  const contested = readableCauses(r.contested);
+  if (contested) out.contested = contested;
   return out;
 }
 
@@ -2674,15 +2718,64 @@ function postFinding(p: Post): FindingFields | null {
 
 const count = (n: number): string => `${n} ${n === 1 ? "post" : "posts"}`;
 
+/** How a sentence writes a key, a post's number and its own fixed words in one format. `own`
+ *  is the seq of the finding's own post, where it is known: a cause on that post reads as
+ *  about "this finding". */
+export interface SentenceFormat {
+  lit: (s: string) => string;
+  key: (k: string) => string;
+  post: (seq: string) => string;
+  own?: string;
+}
+
+/** Markdown: bare when the value has the service's shape, in a code span otherwise. */
+const markdownFormat = (own?: string): SentenceFormat => ({ lit: (s) => s, key: keyLine, post: seqLine, own });
+
+/** HTML: the key and each post linked, every fixed word escaped. */
+export const htmlFormat = (spaceHref: string | null, own?: string): SentenceFormat => ({
+  lit: esc, key: keyLink, post: (seq) => spaceHref === null ? esc(seq) : `<a href="${esc(postHref(spaceHref, seq))}">${esc(seq)}</a>`, own,
+});
+
+/** One cause as a sentence. It names what was posted and by which key, and says nothing of
+ *  whether the claim holds. */
+export function causeSentence(c: Cause, f: SentenceFormat): string {
+  const here = f.own !== undefined && c.on === f.own;
+  // With the finding's own post unknown, it is not said to rest on the post.
+  const rests = f.own === undefined ? "" : " This finding rests on it.";
+  if (c.cause === "rejected") {
+    return here
+      ? `A check by ${f.key(c.by)} rejected this finding as the result of task ${c.task}.`
+      : `A check by ${f.key(c.by)} rejected post ${f.post(c.on)} as the result of task ${c.task}.${rests}`;
+  }
+  const cites = c.post !== undefined ? `, post ${f.post(c.post)},` : "";
+  return here
+    ? `A member's ${c.cause}${cites} cites this finding.`
+    : `A member's ${c.cause}${cites} cites post ${f.post(c.on)}.${rests}`;
+}
+
+/** The titles of the warns and fails that contest a finding, each with the post it belongs to:
+ *  PEER text, which the caller puts in a block of its own. */
+const causeTitles = (cs: Cause[] | undefined): { post: string | undefined; title: string }[] =>
+  (cs ?? []).flatMap((c) => (c.title ? [{ post: c.post, title: c.title }] : []));
+
+/** A warn's or fail's title in HTML, as PEER text: a block, escaped. */
+const causeTitlesHtml = (cs: Cause[] | undefined): string =>
+  causeTitles(cs).map((t) => `\n<p class="meta">Title of ${t.post ? `post ${esc(t.post)}` : "that post"}:</p>\n<pre>${esc(t.title)}</pre>`).join("");
+
+/** The same in markdown: each title in a fence longer than anything inside it. */
+const causeTitlesLines = (cs: Cause[] | undefined): string[] =>
+  causeTitles(cs).flatMap((t) => [`title of ${t.post ? `post ${seqLine(t.post)}` : "that post"}:`, "", fence(t.title), ""]);
+
 /** The sentences about one finding that carry numbers or marks, as the page and the
  *  markdown both say them. */
-function findingSentences(x: FindingFields & { superseded_by?: string | null; retracted_by?: string | null }): string[] {
+function findingSentences(x: FindingFields & { superseded_by?: string | null; retracted_by?: string | null }, f: SentenceFormat): string[] {
   const out: string[] = [];
-  if (x.cited_by !== undefined) out.push(`Cited by ${count(x.cited_by)}.`);
-  if (x.sources !== undefined) out.push(x.sources.length ? `Rests on ${count(x.sources.length)}.` : "Cites no sources.");
-  if (x.source_withdrawn === true) out.push(SOURCE_WITHDRAWN);
-  if (x.superseded_by) out.push("Replaced by a later finding.");
-  if (x.retracted_by) out.push("Withdrawn by its author.");
+  if (x.cited_by !== undefined) out.push(f.lit(`Cited by ${count(x.cited_by)}.`));
+  if (x.sources !== undefined) out.push(f.lit(x.sources.length ? `Rests on ${count(x.sources.length)}.` : "Cites no sources."));
+  if (x.source_withdrawn === true) out.push(f.lit(SOURCE_WITHDRAWN));
+  for (const c of x.contested ?? []) out.push(causeSentence(c, f));
+  if (x.superseded_by) out.push(f.lit("Replaced by a later finding."));
+  if (x.retracted_by) out.push(f.lit("Withdrawn by its author."));
   return out;
 }
 
@@ -2712,10 +2805,11 @@ function findingsHtml(v: SpaceView, ctx: StreamContext): string {
   const rows = t.items.map((x) => {
     const n = esc(String(x.number));
     const href = findingPostHref(x, ctx);
+    const says = findingSentences(x, htmlFormat(ctx.spaceHref, x.seq ?? (x.post_id ? ctx.seqById.get(x.post_id) : undefined)));
     return `<div class="item">
 <p class="meta"><span class="tag">${esc(x.status)}</span><a href="#finding-${n}">Finding ${n}</a> &middot; confidence ${esc(x.confidence)}${x.author ? ` &middot; by ${keyLink(x.author)}` : ""}${x.posted_at ? ` &middot; ${esc(when(x.posted_at))}` : ""}${href ? ` &middot; <a href="${esc(href)}">its post</a>` : ""}</p>
 <h3 id="finding-${n}">${esc(x.claim)}</h3>
-${findingSentences(x).length ? `<p class="meta">${esc(findingSentences(x).join(" "))}</p>` : ""}
+${says.length ? `<p class="meta">${says.join(" ")}</p>` : ""}${causeTitlesHtml(x.contested)}
 </div>`;
   });
   return `${head}\n${t.more ? `<p class="note warn">${esc(findingsMore(t.items.length))}</p>\n` : ""}${rows.join("\n")}`;
@@ -2734,8 +2828,9 @@ function findingsMarkdown(v: SpaceView, ctx: StreamContext): string[] {
     if (x.posted_at) L.push(`posted: ${timeLine(x.posted_at)}`, "");
     const href = findingPostHref(x, ctx);
     if (href) L.push(`post: ${href}.md`, "");
-    const says = findingSentences(x).join(" ");
+    const says = findingSentences(x, markdownFormat(x.seq ?? (x.post_id ? ctx.seqById.get(x.post_id) : undefined))).join(" ");
     if (says) L.push(says, "");
+    L.push(...causeTitlesLines(x.contested));
   }
   return L;
 }
@@ -2747,14 +2842,14 @@ const findingsJson = (v: SpaceView): Record<string, unknown> =>
 /** One finding on its own post's page: its status, confidence, claim and sources, and what
  *  cites it. Sources are posts of the same space, linked on a public address by the id's
  *  redirect and shown by id on a private one. */
-function postFindingHtml(p: Post, publicOnly: boolean): string {
+function postFindingHtml(p: Post, publicOnly: boolean, spaceHref: string): string {
   const f = postFinding(p);
   if (!f) return "";
   const src = (id: string) => (publicOnly ? `<a href="/posts/${esc(id)}"><code>${esc(id)}</code></a>` : `<code>${esc(id)}</code>`);
   const bits = [f.status ? `status ${esc(f.status)}` : "", f.confidence ? `confidence ${esc(f.confidence)}` : ""].filter(Boolean).join(" &middot; ");
-  const says = findingSentences({ cited_by: f.cited_by, source_withdrawn: f.source_withdrawn });
+  const says = findingSentences({ cited_by: f.cited_by, source_withdrawn: f.source_withdrawn, contested: f.contested }, htmlFormat(spaceHref, p.seq));
   return `<h2 id="finding">Finding</h2>
-${bits ? `<p class="meta">${bits}</p>` : ""}${f.claim !== undefined ? `\n<p>${esc(f.claim)}</p>` : ""}${says.length ? `\n<p class="meta">${esc(says.join(" "))}</p>` : ""}${
+${bits ? `<p class="meta">${bits}</p>` : ""}${f.claim !== undefined ? `\n<p>${esc(f.claim)}</p>` : ""}${says.length ? `\n<p class="meta">${says.join(" ")}</p>` : ""}${causeTitlesHtml(f.contested)}${
     f.sources?.length ? `\n<p class="meta">Sources: ${f.sources.map(src).join(", ")}.</p>` : ""}`;
 }
 
@@ -2765,10 +2860,11 @@ function postFindingLines(p: Post, publicOnly: boolean): string[] {
   if (f.status) L.push(`- status: ${wordLine(f.status)}`);
   if (f.confidence) L.push(`- confidence: ${wordLine(f.confidence)}`);
   if (f.claim !== undefined) L.push(`- claim: ${codeSpan(f.claim)}`);
-  const says = findingSentences({ cited_by: f.cited_by, source_withdrawn: f.source_withdrawn });
+  const says = findingSentences({ cited_by: f.cited_by, source_withdrawn: f.source_withdrawn, contested: f.contested }, markdownFormat(p.seq));
   if (says.length) L.push(`- ${says.join(" ")}`);
   for (const id of f.sources ?? []) L.push(`- source: ${idLine(id)}${publicOnly ? `, /posts/${id}.md` : ""}`);
   L.push("");
+  L.push(...causeTitlesLines(f.contested));
   return L;
 }
 
@@ -3382,7 +3478,7 @@ ${corrections}
 ${v.above?.html ?? ""}
 ${verdictHtml(v)}
 ${noticeHtml()}
-${postFindingHtml(p, v.publicOnly)}
+${postFindingHtml(p, v.publicOnly, v.spaceHref)}
 ${summaryHtml(p)}${unavailable}${p.sealed && !p.unavailable ? sealedSlotHtml(p) : p.body ? `<pre>${esc(p.body)}</pre>` : p.unavailable ? "" : `<p class="meta">This post carries no body.</p>`}
 ${fps ? `<p class="meta">${fps}</p>` : ""}
 ${attachmentsHtml(p, s, seekPathOf(v.basePath))}
@@ -4380,6 +4476,7 @@ const SITE_WORDS: [string, string][] = [
   ["finding status", "One of four words the author of a finding gives it: proposed, supported, disputed or withdrawn. Only the author sets it. A finding its author retracted shows as withdrawn."],
   ["confidence", "How sure the author of a finding says it is: low, medium or high. It is the author's word, not the service's."],
   ["sources", "The posts of the same space that a finding or a result cites as what it rests on. A finding shows how many posts cite it, and a mark when a post it rests on was replaced or retracted."],
+  ["contested", "A mark the service puts on a finding, beside its author's status. A check rejected the finding, or a post it rests on, as a task's result. Or a member's warn or fail cites one of them. It records what was posted. It does not say the claim is false. It goes when its cause does."],
   ["label", "A fingerprint used to name what a post is about or rests on. A subject label, subject: and a name, says what the post is about, such as an image or a hypothesis. A source label, source: and an id, names an outside source. The labels are the author's own words, and Seek finds posts by them."],
   ["post", "One entry in a space: a kind, a text, and optionally a title and fingerprints. A post is never edited and never deleted."],
   ["post number", "A post's place in its space, shown as #4. It never changes."],

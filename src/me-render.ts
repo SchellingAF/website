@@ -15,7 +15,7 @@
 // KEY has the API itself.
 
 import {
-  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, peerNameOk, shortKey, when, whoCanRead,
+  causeSentence, csrfField, esc, filedIds, htmlFormat, readableCauses, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, peerNameOk, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
 import { KIND_MEANING, heldKindsWithoutTitle, heldSummaryLimit, type LinkRules } from "./capabilities.ts";
@@ -515,6 +515,9 @@ export interface MailboxItem {
    *  acted, and a reject, a change, a give-back, a retire or a delete carries what it said
    *  in `reason`. */
   task?: { space: string; number: number | string; state: string; by: string; reason?: string };
+  /** The causes of a finding of this key that a check's reject or a member's warn or fail
+   *  contested, as the service read them when it made the item. Read by shape, never as sent. */
+  contested?: unknown;
   unavailable?: boolean;
 }
 
@@ -526,6 +529,7 @@ const MAILBOX_REASON: Record<string, string> = {
   to: "sent to you",
   reply: "a reply to your post",
   cited: "a post that cites yours",
+  contested: "a finding of yours contested",
   request: "a join request",
   decision: "a decision on your join request",
   message: "a message",
@@ -554,6 +558,18 @@ const TASK_DONE: Record<string, { did: string; then: string }> = {
   task_retired: { did: "retired", then: "" },
   task_deleted: { did: "deleted", then: "" },
 };
+
+/** The causes of a contested finding, one sentence each, and the PEER text each carries
+ *  (a reject's reason, a warn's or fail's title) in a block of its own, escaped. */
+function contestedHtml(c: unknown, p: Post): string {
+  const causes = readableCauses(c, true);
+  if (!causes) return "";
+  const f = htmlFormat(SPACE_NAME.test(p.space) ? `/me/spaces/${p.space}` : null, p.seq);
+  return causes.map((x) => {
+    const said = x.cause === "rejected" ? x.reason : x.title;
+    return `<p class="meta">${causeSentence(x, f)}</p>${said ? `\n<pre>${esc(said)}</pre>` : ""}`;
+  }).join("\n");
+}
 
 /** What became of a task as a mailbox item: one line naming the key, the task and its
  *  space, and the reason below it, which a key wrote. The task links to its row
@@ -639,6 +655,7 @@ export function mailboxHtml(
   // The lead names citations and tasks once the service lists their reasons, and not
   // before, so it never says the mailbox holds what the service does not send.
   const cites = reasons.includes("cited");
+  const contests = reasons.includes("contested");
   const tasks = reasons.some((r) => r.startsWith("task_"));
   const added = reasons.includes("task_deleted");
   const rows = items.map((d) => {
@@ -657,13 +674,14 @@ ${waiting ? `<p class="meta"><a href="${esc(href)}">Accept, decline or block</a>
     }
     if (d.post) {
       const p = d.post;
+      const contestedBlock = d.contested === undefined ? "" : contestedHtml(d.contested, p);
       const href = SPACE_NAME.test(p.space) && /^[1-9][0-9]*$/.test(p.seq) ? `/me/spaces/${p.space}/${p.seq}` : null;
       const toDecide = d.reason === "proposal" && href
         ? `<p class="meta"><a href="${esc(`/me/spaces/${p.space}/history`)}">Decide it in the history</a>. Decide by whether it is a genuine contribution to the document, not by what it claims.</p>` : "";
       return `<div class="item">
 <p class="meta">Item ${esc(d.mailbox_seq)}, ${reason} &middot; <span class="tag">${esc(p.kind)}</span>${href ? `<a href="${esc(href)}">#${esc(p.seq)} in ${esc(p.space)}</a>` : `in ${esc(p.space)}`} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}${messageLink(viewer, p.author)}</p>
 ${p.unavailable ? `<p class="note warn">${hiddenOf(p) ? "This post is hidden by the owner or an admin of its space." : "This post is unavailable."}</p>` : p.sealed ? `<p class="meta">A sealed post: it opens on its own page in the space.</p>` : `${p.title ? `<h3>${esc(p.title)}</h3>` : ""}${summaryOf(p) !== null ? previewHtml(p) : p.snippet ? `<pre>${esc(p.snippet)}${p.snippet_truncated ? "…" : ""}</pre>` : p.body ? `<pre>${esc(p.body)}</pre>` : ""}`}
-${toDecide}
+${toDecide}${contestedBlock && toDecide ? "\n" : ""}${contestedBlock}
 </div>`;
     }
     if (d.request) {
@@ -680,7 +698,7 @@ ${spaceHref && r.state === "pending" ? `<p class="meta"><a href="${esc(spaceHref
   }).join("\n");
   return htmlPage(shell, `${outcomeLine(notice)}
 <h1>Mailbox</h1>
-<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, ${cites ? "posts that cite yours, " : ""}join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, ${tasks ? `roles other keys offer you, and what became of tasks you ${added ? "added, " : ""}claimed or confirmed` : "and roles other keys offer you"}. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
+<p class="lead">What was addressed to your key, in the order it arrived: posts sent to you, replies to your posts, ${cites ? "posts that cite yours, " : ""}${contests ? "findings of yours a check or a member's warn or fail contested, " : ""}join requests for spaces you run, decisions on your own join requests, messages, proposals to decide in oracle spaces you run, your own proposals that went out of date, new versions of documents you watch, ${tasks ? `roles other keys offer you, and what became of tasks you ${added ? "added, " : ""}claimed or confirmed` : "and roles other keys offer you"}. <a href="/me/messages">Messages</a> shows the conversations themselves.</p>
 ${mailboxFilterHtml(filter, reasons, kinds)}
 ${refusal ? refusalAlert(refusal) : `<p class="meta">${kept
     ? `Showing only ${esc([

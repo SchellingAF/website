@@ -57,12 +57,19 @@ const world: World = {
       post(7, { kind: "finding" }),
       // Eight: a result that cites sources, which is not a finding and shows no section.
       post(8, { data: { sources: [id(1)] } }),
+      // Nine: a finding the service marked contested, three causes and one in no shape.
+      post(9, { kind: "finding" }),
     ],
   },
   postFindings: {
     [id(3)]: finding(3, fields("The key is four letters long")),
     [id(5)]: finding(5, fields(`${XSS}\n# not a heading ${"`".repeat(3)}`, { status: "supported", sources: [id(1)] })),
     [id(6)]: finding(6, fields("A claim that was hidden")),
+    [id(9)]: finding(9, fields("A contested claim", { source_withdrawn: false, contested: [
+      { cause: "rejected", on: "2", task: 7, by: WRITER, post: "6" },
+      { cause: "warn", on: "9", by: OWNER, post: "5", title: `Wrong total ${XSS}` },
+      { cause: "fail", on: "1", by: OWNER },
+      { cause: "judged", on: "1", by: OWNER }] })),
     [id(7)]: { claim: "Odd fields", status: "<b>high</b>", confidence: "x y", sources: ["not an id", id(2)], cited_by: "3", source_withdrawn: "yes", x_secret: "SENTINEL-POST-FINDING" },
   },
   versions: {}, proofs: {}, checkpoints: { "findings-board": [] }, peers: {},
@@ -179,8 +186,46 @@ describe("a finding's post page", () => {
   });
 });
 
+describe("a contested finding's post page says what contests it", () => {
+  const KEY = (k: string) => `<a href="/peers/${k}"><code title="${k}">`;
+
+  test("one sentence for each cause, the posts and keys linked, and a title as text in its own block", async () => {
+    const page = await get("/spaces/findings-board/9");
+    assert.deepEqual(htmlProblems(page.text), []);
+    const text = block(page.text);
+    assert.ok(text.includes(`A check by ${KEY(WRITER)}c3d4c3d4…c3d4</code></a> rejected post <a href="/spaces/findings-board/2">2</a> as the result of task 7. This finding rests on it.`), text);
+    assert.match(text, /cites this finding\./);
+    assert.match(text, /A member.s fail cites post <a href="\/spaces\/findings-board\/1">1<\/a>\. This finding rests on it\./);
+    assert.ok(page.text.includes("<pre>Wrong total &lt;script&gt;alert(1)&lt;/script&gt;</pre>"), "the title is not shown as text");
+    assert.doesNotMatch(text, /judged/);
+    assert.doesNotMatch(page.text, /<script>alert\(1\)/);
+  });
+
+  test("the markdown says the same, the title in a fence", async () => {
+    const md = (await get("/spaces/findings-board/9.md")).text;
+    assert.deepEqual(markdownProblems(md), []);
+    assert.ok(md.includes(`- Cited by 3 posts. A check by ${WRITER} rejected post 2 as the result of task 7. This finding rests on it. A member's warn, post 5, cites this finding.`), md);
+    assert.ok(md.includes("```\nWrong total <script>alert(1)</script>\n```"));
+  });
+
+  test("the JSON keeps the causes in the shape the service wrote, the one in no shape dropped", async () => {
+    const doc = JSON.parse((await get("/spaces/findings-board/9.json")).text) as Json;
+    assert.deepEqual(doc.post.finding.contested, [
+      { cause: "rejected", on: "2", task: 7, by: WRITER, post: "6" },
+      { cause: "warn", on: "9", by: OWNER, post: "5", title: `Wrong total ${XSS}` },
+      { cause: "fail", on: "1", by: OWNER },
+    ]);
+  });
+
+  test("a signed-in member's page names the same causes, linked under the member's own address", async () => {
+    const { cookie } = await signedIn(WRITER, "writer-token", "192.0.2.72");
+    const text = block((await get("/me/spaces/findings-board/9", { Cookie: cookie })).text);
+    assert.match(text, /rejected post <a href="\/me\/spaces\/findings-board\/2">2<\/a> as the result of task 7/);
+  });
+});
+
 describe("the Vocabulary page explains a finding", () => {
-  const WORDS = ["finding", "finding status", "confidence", "sources", "label"];
+  const WORDS = ["finding", "finding status", "confidence", "sources", "contested", "label"];
 
   test("each word is an entry, in the page and in its markdown and JSON twins", async () => {
     const html = (await get("/vocabulary")).text;
@@ -191,6 +236,15 @@ describe("the Vocabulary page explains a finding", () => {
       assert.ok(md.includes(`- ${w}: `), `${w} in the markdown`);
       assert.ok(doc.words.some((x) => x.word === w && x.meaning.length > 40), `${w} in the JSON`);
     }
+  });
+
+  test("contested says it records a check or a member's warn or fail, never that the claim is false", async () => {
+    const doc = JSON.parse((await get("/vocabulary.json")).text) as { words: { word: string; meaning: string }[] };
+    const m = doc.words.find((x) => x.word === "contested")!.meaning;
+    assert.match(m, /A check rejected/);
+    assert.match(m, /a member's warn or fail/);
+    assert.match(m, /It does not say the claim is false\./);
+    assert.doesNotMatch(m, /judged|verified|ranked/);
   });
 
   test("the four status words and the three confidence words are said, and a finding is not called true", async () => {
