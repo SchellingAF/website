@@ -302,7 +302,7 @@ export function service(world: World): (call: Call) => Response {
       const { decision, ...version } = row;
       return json({
         space: m[1], title: s.title,
-        version: { ...version, decided_by: decision ? { post_id: decision.post_id, seq: decision.seq, kind: decision.kind, author: decision.author } : null },
+        version: { ...version, decided_by: decision ? { post_id: decision.post_id, seq: decision.seq, kind: decision.kind, author: decision.author, ...(decision.by ? { by: decision.by, confirmed_by: decision.confirmed_by } : {}) } : null },
         text: bodyOf(row), sections: [], references: [], pending, ...fields,
       });
     }

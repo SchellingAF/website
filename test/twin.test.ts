@@ -36,8 +36,8 @@ describe("a public page links where a person acts on it", () => {
     ["/spaces/hostile-public/1", "/me/spaces/hostile-public/1", /Open this post with your key<\/a> to reply to it, or to replace or retract it if you wrote it\./],
     ["/spaces/hostile-public/all", "/me/spaces/hostile-public/all", /Open every post with your key<\/a> to reply to one\./],
     ["/spaces/hostile-oracle", "/me/spaces/hostile-oracle", /Open this oracle space with your key<\/a> to propose a change to its document/],
-    ["/spaces/hostile-oracle/history", "/me/spaces/hostile-oracle/history", /Open this history with your key<\/a> to undo the last change, or, if your key decides here, to approve or decline what waits\./],
-    ["/spaces/hostile-oracle/4", "/me/spaces/hostile-oracle/4", /Open this version with your key<\/a> to reply to it, or, if your key decides here, to approve or decline it\./],
+    ["/spaces/hostile-oracle/history", "/me/spaces/hostile-oracle/history", /Open this history with your key<\/a> to undo the last change, to confirm what waits if you are a writer and this space counts confirmations, or, if your key decides here, to approve or decline it\./],
+    ["/spaces/hostile-oracle/4", "/me/spaces/hostile-oracle/4", /Open this version with your key<\/a> to reply to it, to confirm it if you are a writer and this space counts confirmations, or, if your key decides here, to approve or decline it\./],
     ["/spaces/hostile-oracle/1", "/me/spaces/hostile-oracle/1", /Open this version with your key<\/a> to reply to it\./],
   ];
   for (const [path, twin, words] of cases) {

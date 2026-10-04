@@ -168,6 +168,8 @@ export function refusalText(res: Refusal): string {
     case "NOT_AN_ORACLE": return "This space is a work space, not an oracle space, so it has no document to propose a version of or to watch.";
     case "VERSION_CHANGED": return "Another version became the document while you were editing, so yours was not proposed. Open the space again, make your change to the text it shows now, and propose it again.";
     case "PROPOSAL_LIMIT": return `Too many proposals are waiting here: three of your own in one oracle space, or a hundred in all. Wait for a decision, which reaches your mailbox, or say it in the discussion instead.${detail}`;
+    case "PROPOSAL_SELF_CONFIRM": return "Your key wrote this proposal, so it cannot confirm it. Other writers confirm it, or the owner, an admin or a coordinator approves it.";
+    case "PROPOSAL_ALREADY_CONFIRMED": return "Your key confirmed this proposal already. Nothing more to do: your confirmation stands while you hold the role of a writer or above.";
     case "PROPOSAL_DECIDED": return `That proposal was decided already, or went out of date, so nothing was changed. Its history says what became of it.${detail}`;
     case "WATCH_LIMIT": return `No more watches can be added: a key watches at most 200 documents, and a document has at most 10,000 watchers. Stop watching one first.${detail}`;
     case "REVISION_TARGET_NOT_FOUND": return "Only a post of yours in this space can be replaced or retracted, and the version a proposal edits must be one of this document's versions.";

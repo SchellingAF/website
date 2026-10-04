@@ -81,7 +81,7 @@ import {
   threadHtml, threadJson, threadMarkdown,
   checkpointsHtml, checkpointsJson, checkpointsMarkdown, readableCheckpoint, readableInclusion, readableProof,
   registerHtml, registerJson, registerMarkdown, categoryPageHtml, categoryPageJson, categoryPageMarkdown,
-  categoryHref, categoryLine, filedIds, hiddenOf, hiddenPost, howMatched, keepsDocument, labelLine, ownWord, record, shortKey, shownSpace, signedInTwin, textOrNull, POLICY_WORDS, WORK_WORDS,
+  categoryHref, categoryLine, filedIds, hiddenOf, hiddenPost, howMatched, confirmationsOf, keepsDocument, labelLine, ownWord, record, shortKey, shownSpace, signedInTwin, textOrNull, POLICY_WORDS, WORK_WORDS,
   type LookupAnswer,
   type Checkpoint, type CheckpointRow, type ProofAnswer, type PostVerdict,
   type Listing, type Page, type PeerProfile, type Post, type PostHistory, type PostRef,
@@ -89,7 +89,7 @@ import {
   type Viewer,
 } from "./render.ts";
 import {
-  decideFormsHtml, moderateHtml, oracleActionsHtml, outcomeLine, replyActionsHtml, spaceActionsHtml, signScript, undoFormHtml,
+  confirmFormHtml, decideFormsHtml, mayConfirm, moderateHtml, oracleActionsHtml, outcomeLine, replyActionsHtml, spaceActionsHtml, signScript, undoFormHtml,
   type HandOverRules, type Signing, type SpaceExtras, type WaitingOffer,
 } from "./me-render.ts";
 import {
@@ -1487,7 +1487,7 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
   const document = workDocument === undefined ? undefined : workDocument === "unreadable" ? documentUnread() : documentSection({
     ...workDocument, spaceHref, spacePath,
     links: documentLinks(route.base, signedIn ? "/me/seek" : "/seek"),
-    reviewer: { on: false, key: null }, forkedFrom: null, work: true,
+    reviewer: { on: false, key: null }, forkedFrom: null, work: true, confirmations: confirmationsOf(s),
   });
 
   // THE POSTS JUST BEFORE THESE, one archive page: numbers are gap-free, so the fifty
@@ -1772,6 +1772,8 @@ async function historyPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
     rowActions = new Map();
     if (s.access?.decide === true) {
       for (const r of rows) if (r.state === "pending") rowActions.set(r.post_id, decideFormsHtml(s, route.viewer, r.post_id, signing));
+    } else if (work && confirmationsOf(s) > 0) {
+      for (const r of rows) if (mayConfirm(s, route.viewer.peerId, r)) rowActions.set(r.post_id, confirmFormHtml(s, route.viewer, r.post_id, signing));
     }
     // Undo is offered on the newest page alone, where the document is, and not on a
     // page kept to versions the document cannot be among.
@@ -2033,7 +2035,9 @@ async function onePost(route: Route, url: URL, env: ApiEnv): Promise<Response> {
               !(post.kind === "version" && (s.oracle === true || keepsDocument(s)) && (k === "go" || k === "veto"))),
             url.searchParams.get("notice"), signingFor(s, caps),
             version?.state === "pending" && s.access?.decide === true && s.status === "active"
-              ? decideFormsHtml(s, route.viewer, post.post_id, signingFor(s, caps)) : "") +
+              ? decideFormsHtml(s, route.viewer, post.post_id, signingFor(s, caps))
+              : version && s.status === "active" && keepsDocument(s) && confirmationsOf(s) > 0 && mayConfirm(s, route.viewer.peerId, version)
+                ? confirmFormHtml(s, route.viewer, post.post_id, signingFor(s, caps)) : "") +
             // Hiding the post, or blocking its author from posting, for the owner or an
             // admin: on this signed-in page alone, never on a public or cached one.
             moderateHtml(s, post, route.viewer, serviceReviewer(caps)),
