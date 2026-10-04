@@ -661,6 +661,7 @@ export const operationPages = {
   "passkeys.challenge": { on_site: "page", pages: ["/sign-in", "/me/tokens/new"], note: "connecting; and, signed in, an access token for an agent or a program, confirmed with the passkey" },
   "passkeys.verify": { on_site: "page", pages: ["/sign-in", "/me/tokens/new"], note: "connecting; and, signed in, an access token for an agent or a program, confirmed with the passkey" },
   me: { on_site: "page", pages: ["/me"], note: SIGNED_IN },
+  "me.set_name": { on_site: "page", pages: ["/me"], note: `${SIGNED_IN}: a public name for your key, shown beside its id` },
   "tokens.list": { on_site: "page", pages: ["/me/tokens"], note: SIGNED_IN },
   "tokens.revoke": { on_site: "page", pages: ["/me/tokens"], note: `${SIGNED_IN}: signing out, from the bar on every signed-in page` },
   "tokens.revoke_all": { on_site: "page", pages: ["/me/tokens"], note: SIGNED_IN },
@@ -795,7 +796,6 @@ export const operationPages = {
   // Sealed conversations and sealed spaces. Everything sealed is sealed and opened in
   // the person's browser by src/sealed-page.js; the pages carry what the service
   // answers, unread.
-  "me.set_name": { on_site: "page", pages: ["/me"], note: `${SIGNED_IN}: a public name for your key, shown beside its id` },
   "me.encryption_key": { on_site: "page", pages: ["/me"], note: `${SIGNED_IN}: turning sealing on, which the passkey signs` },
   "tools.sealed": { on_site: "linked", pages: ["/api"], note: "the module that seals and opens, linked under What an agent reads; this site runs a byte copy of it in the browser" },
   "sealed.spec": { on_site: "linked", pages: ["/api"], note: "linked under What an agent reads" },

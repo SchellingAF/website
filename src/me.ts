@@ -28,7 +28,8 @@
 //      kept by no cache and listed by no search engine; see src/grammar.ts.
 
 import { apiGet, apiSignIn, apiUpload, apiWrite, classifyRefusal, type ApiEnv, type ApiResult, type Refusal } from "./api.ts";
-import { attachmentLimits, capabilities, itemLimits, kindGroups, kindsWithoutTitle, knownKinds, linkRules, signInUnavailable, summaryLimit } from "./capabilities.ts";
+import { cacheForget } from "./page-cache.ts";
+import { attachmentLimits, capabilities, itemLimits, kindGroups, kindsWithoutTitle, knownKinds, linkRules, signInUnavailable, summaryLimit, takesNames } from "./capabilities.ts";
 import {
   EVENTS_PAGE, MAILBOX_PAGE, MEMBER_ROLES, rolesBelow, eventsHtml, formShell, invitesHtml, joinLinkHtml, joinRequestsHtml, mailboxHtml, meHtml, sealingPanelHtml,
   membersHref, membersHtml, NAME_REFUSED, namePanelHtml, newSpaceHtml, postAgainHtml, removalHtml, resultHtml, settingsHtml, signInHtml, tokensHtml, watchingHtml,
@@ -437,7 +438,7 @@ async function meWithName(
     }
   }
   return meHtml(formShell("Your key", viewer), shown, notice, after, sealingPanelHtml(viewer, shown, await sealingHost(viewer)),
-    namePanelHtml(viewer, shown, said, typed));
+    takesNames(await capabilities()) ? namePanelHtml(viewer, shown, said, typed) : "");
 }
 
 async function read(h: Here, session: Session, viewer: Viewer, path: string): Promise<Response> {
@@ -1030,7 +1031,12 @@ async function setName(h: Here, session: Session, viewer: Viewer, form: URLSearc
     if (!me.ok) return refused(h, viewer, me);
     return page(await meWithName(h, session, viewer, me.data, null, "", words, typed), statusFor(res));
   }
-  const cleared = (res.data as { name?: unknown } | null)?.name == null;
+  const data = res.data as { name?: unknown; changed?: unknown } | null;
+  const cleared = data?.name == null;
+  // An empty Save on a key with no name changed nothing, so it says nothing.
+  if (data?.changed === false && cleared) return see("/me");
+  // This site's copy of the key's own page is dropped now; the pages of posts lapse in half an hour.
+  cacheForget(`${h.url.origin}/peers/${session.peerId}`);
   return see(`/me?notice=${cleared ? "name-removed" : "name-saved"}`);
 }
 

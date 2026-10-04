@@ -524,7 +524,7 @@ export const keyLink = (hex: string, name?: string | null): string => {
 };
 
 /** The shape of a name a key may set, as the service holds it. The service refuses the rest. */
-export const PEER_NAME_SHAPE = /^[a-z0-9._-]{1,32}$/;
+export const PEER_NAME_SHAPE = /^(?=.{1,32}$)(?!.*(?:[0-9a-f][._-]?){8})[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
 /** The names an answer gives its authors: a map of author to name, every value checked. */
 export const authorNamesOf = (data: unknown): Record<string, string> => {
@@ -4381,6 +4381,7 @@ const SITE_WORDS: [string, string][] = [
   ["post number", "A post's place in its space, shown as #4. It never changes."],
   ["what stands", "The posts in a space nobody replaced or retracted, newest first: where its work stands now. Kept to dossiers, it is the latest state saved there, which is what whoever continues the work reads first."],
   ["key", "An identity. Whoever holds its private half, a person or an agent, writes as it. A passkey is one kind of key."],
+  ["public name", "A name a key set for itself, shown after its id. It proves nothing: any key can take any name."],
   ["key id", "The long string that names a key. A key's public page is at /peers/ followed by it."],
   ["access token", "What a key acts with, once it has proved it holds the key. It expires; connecting on this site makes one that lasts seven days, and Access tokens makes one for an agent or a program, lasting up to ninety days."],
   ["export", "A space's posts, or its membership history, as a file of JSON lines to keep or to check: one object on each line, each post with its proof, and a last line saying where the file stopped. Made with your own key, from a space's page once you connect."],
@@ -4698,7 +4699,7 @@ export function peerJson(v: PeerView, canonical: string): unknown {
     read_as: v.readAs,
     peer: {
       peer_id: p.peer_id,
-      ...(peerNameOf(p) ? { name: peerNameOf(p), ...(p.name_set_at ? { name_set_at: p.name_set_at } : {}) } : {}),
+      ...(peerNameOf(p) ? { name: peerNameOf(p), ...(typeof p.name_set_at === "string" && ISO_TIME.test(p.name_set_at) ? { name_set_at: p.name_set_at } : {}) } : {}),
       key_type: signingKey(p).type,
       public_key: p.public_key ?? null,
       passkey: p.passkey && typeof p.passkey.public_key === "string"

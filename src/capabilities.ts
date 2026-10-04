@@ -66,6 +66,11 @@ export function perSpace(caps: Capabilities): { min: number; max: number } | nul
 }
 
 /** Whether this is the service's own document rather than the fallback below. */
+/** Whether the service takes public names: it publishes limits.peer_name. A service without
+ *  the route is not offered a form that would only be refused. */
+export const takesNames = (caps: Capabilities): boolean =>
+  !!caps.limits && typeof caps.limits.peer_name === "object" && caps.limits.peer_name !== null;
+
 export const isLive = (caps: Capabilities): boolean => caps.limits !== undefined;
 
 /**

@@ -53,7 +53,7 @@ const NOTICES: Record<string, string> = {
   revoked: "The link is revoked. Whoever holds it and has not used it is refused from now on.",
   "signed-in": "You are connected.",
   "name-saved": "Public name saved. It shows beside this key's id.",
-  "name-removed": "Public name removed. Copies taken while it showed may remain.",
+  "name-removed": "Public name removed. Copies taken while it showed may remain. This site's pages show the change within half an hour.",
   "sealing-on": "Sealing is on. Your key's encryption key is published, for life, and sealed conversations and spaces can lock their keys to it.",
   "message-sent": "Sent.",
   "request-accepted": "Accepted. Its messages reach you now, and its sender can write again.",

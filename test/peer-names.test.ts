@@ -13,6 +13,10 @@ const SET_AT = "2026-10-04T10:31:07.123Z";
 const PEER = "c3d4".repeat(16);
 const writes: Call[] = [];
 let named = true;
+/** With names off, answers that held the author may still carry an empty author_names. */
+let emptyNames = false;
+/** The next name write answers changed: false, as a clear on a key with no name does. */
+let unchanged = false;
 
 const world = hostileWorld();
 const base = service(world);
@@ -28,7 +32,7 @@ const { handleRequest } = await site((call) => {
       const sent = JSON.parse(call.body!).name as string;
       if (sent === "admin") return json({ error: { code: "PEER_NAME_RESERVED", message: "PEER_NAME_RESERVED", fix: "", doc: "", request_id: "t" } }, 400);
       if (sent === "a") return json({ error: { code: "PEER_NAME_INVALID", message: "PEER_NAME_INVALID", fix: "", doc: "", request_id: "t" } }, 400);
-      return json({ peer_id: PEER, name: sent === "" ? null : sent, set_at: sent === "" ? null : SET_AT, changed: true, notice: "n" });
+      return json({ peer_id: PEER, name: sent === "" ? null : sent, set_at: sent === "" ? null : SET_AT, changed: !unchanged, notice: "n" });
     }
     return json({ ok: true });
   }
@@ -38,11 +42,15 @@ const { handleRequest } = await site((call) => {
   if (path === "/v1/me") {
     return json({ peer_id: PEER, key_type: "passkey", registered_at: "2026-09-18T09:00:00.000Z", token: { expires_at: "2026-09-26T09:00:00.000Z" }, mailbox_head: "0", spaces_owned: [], memberships: [], ...(named ? { name: NAME } : {}) });
   }
+  if (path === "/v1/capabilities") {
+    const caps = world.capabilities as any;
+    return json({ ...caps, limits: { ...caps.limits, peer_name: { pattern: "^[a-z0-9._-]{1,32}$", max_characters: 32 } } });
+  }
   const res = base(call);
-  if (!named || !res.headers.get("content-type")?.includes("json") || !/\/v1\/(spaces\/[^/]+\/posts|seek|posts)$/.test(path)) return res;
+  if ((!named && !emptyNames) || !res.headers.get("content-type")?.includes("json") || !/\/v1\/(spaces\/[^/]+\/posts|seek|posts)$/.test(path)) return res;
   return res.text().then((t) => {
     const data = JSON.parse(t);
-    if (Array.isArray(data.items) && data.items.some((p: any) => p.author === SECOND)) data.author_names = { [SECOND]: NAME };
+    if (Array.isArray(data.items) && data.items.some((p: any) => p.author === SECOND)) data.author_names = named ? { [SECOND]: NAME } : {};
     return json(data);
   }) as unknown as Response;
 });
@@ -84,7 +92,7 @@ describe("keyLink", async () => {
 
   test("drops a name that fails the rule, and gives the same link as before without one", () => {
     const plain = keyLink(hex);
-    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é"]) assert.equal(keyLink(hex, bad), plain, bad);
+    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é", "-x", "x--y", "c3d4c3d4"]) assert.equal(keyLink(hex, bad), plain, bad);
     assert.equal(keyLink(hex, null), plain);
     assert.equal(keyLink(hex, undefined), plain);
     assert.equal(plain, `<a href="/peers/${hex}"><code title="${hex}">1a2b3c4d…3c4d</code></a>`);
@@ -100,10 +108,14 @@ describe("a name is never on a page without its key's id", () => {
   test("each name on a page of posts sits inside the link to its key, after its short key", async () => {
     named = true;
     let seen = 0;
+    // Every page that holds the author names it, as often as the author is drawn.
+    const holding = new Set(["/spaces/hostile-public", "/spaces/hostile-public/1", "/spaces/hostile-public/all", "/seek?q=hostile"]);
     for (const path of [...hostile, "/seek?q=hostile"]) {
       const { res, text } = await publicGet(path);
       assert.equal(res.status, 200, path);
       const names = named_in(text);
+      if (holding.has(path)) assert.ok(names.length >= 1, `${path} names its author`);
+      assert.equal(text.split(NAME).length - 1, names.length, `${path}: the name is only ever drawn as the span`);
       for (const m of names) {
         const at = m.index!;
         const open = text.lastIndexOf("<a href=", at);
@@ -112,7 +124,7 @@ describe("a name is never on a page without its key's id", () => {
       }
       seen += names.length;
     }
-    assert.ok(seen >= 3, `names seen: ${seen}`);
+    assert.ok(seen >= 4, `names seen: ${seen}`);
   });
 
   test("a key's page shows the name with its id, and its markdown and JSON carry it beside the id", async () => {
@@ -148,10 +160,15 @@ describe("a name is never on a page without its key's id", () => {
       assert.ok(!text.includes("peer-name") && !text.includes(NAME) && !text.includes("author_name") && !text.includes("Public name"), path + " " + [...text.matchAll(/.{30}(?:peer-name|author_name|Public name).{30}/g)].map((m) => m[0]).join(" | "));
       without.push(text);
     }
-    // And the same with every answer carrying an empty author_names: nothing changes.
+    // And the same with every answer carrying an empty author_names: the same bytes.
+    named = false;
+    emptyNames = true;
+    const paths = [...hostile, "/seek?q=hostile", `/peers/${SECOND}`, `/peers/${SECOND}.md`, `/peers/${SECOND}.json`, "/spaces/hostile-public.md", "/spaces/hostile-public.json"];
+    for (const [i, path] of paths.entries()) assert.equal((await publicGet(path)).text, without[i], path);
+    emptyNames = false;
     named = true;
-    const withNames = (await publicGet("/spaces/hostile-public.json")).text;
-    assert.ok(!withNames.includes(NAME), "post lists' JSON stays as it was");
+    // With the names present, the lists' JSON and markdown stay as they were.
+    assert.ok(!(await publicGet("/spaces/hostile-public.json")).text.includes(NAME), "post lists' JSON stays as it was");
     assert.ok(!(await publicGet("/spaces/hostile-public.md")).text.includes(NAME), "post lists' markdown stays as it was");
   });
 });
@@ -191,13 +208,29 @@ describe("the key's own page sets and clears its public name", () => {
     assert.match((await get("/me?notice=name-saved")).text, /Public name saved\. It shows beside this key(?:'|&#39;)s id\./);
   });
 
+  test("setting a name drops this site's copy of the key's own page", async () => {
+    const { cachePut, cacheGet } = await import("../src/page-cache.ts");
+    await cachePut(`${SITE}/peers/${PEER}?`, new Response("old"), 600);
+    assert.ok(cacheGet(`${SITE}/peers/${PEER}?`), "held before");
+    await post("/me/name", { name: "cipher-opus-a" });
+    assert.equal(cacheGet(`${SITE}/peers/${PEER}?`), undefined, "dropped after");
+  });
+
+  test("an empty Save on a key with no name says nothing", async () => {
+    unchanged = true;
+    const { res } = await post("/me/name", { name: "" });
+    unchanged = false;
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("Location"), "/me");
+  });
+
   test("Remove sends an empty name and redirects with its notice", async () => {
     const before = writes.length;
     const { res } = await post("/me/name", { remove: "1", name: NAME });
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("Location"), "/me?notice=name-removed");
     assert.deepEqual(JSON.parse(writes[before]!.body!), { name: "" });
-    assert.match((await get("/me?notice=name-removed")).text, /Public name removed\. Copies taken while it showed may remain\./);
+    assert.match((await get("/me?notice=name-removed")).text, /Public name removed\. Copies taken while it showed may remain\. This site(?:'|&#39;)s pages show the change within half an hour\./);
   });
 
   test("a refused name comes back on the page in the page's words, with what was typed", async () => {
@@ -209,5 +242,27 @@ describe("the key's own page sets and clears its public name", () => {
     const invalid = await post("/me/name", { name: "a" });
     assert.equal(invalid.res.status, 400);
     assert.match(invalid.text, /That name does not fit the rule above, or reads like a key id\. Nothing was changed\./);
+  });
+});
+
+describe("the service's own say on names", () => {
+  test("the panel is drawn only for a service that publishes limits.peer_name", async () => {
+    const { takesNames } = await import("../src/capabilities.ts");
+    assert.equal(takesNames({ limits: { body_bytes: 1 } }), false);
+    assert.equal(takesNames({}), false);
+    assert.equal(takesNames({ limits: { peer_name: { max_characters: 32 } } }), true);
+  });
+
+  test("Vocabulary defines a public name", async () => {
+    const { text } = await publicGet("/vocabulary");
+    assert.match(text, /public name/);
+    assert.match(text, /any key can take any name/);
+  });
+
+  test("a key's JSON carries a name_set_at only when it is a time", async () => {
+    const { peerJson } = await import("../src/render.ts");
+    const view = (at: unknown) => ({ readAs: "x", peer: { peer_id: SECOND, name: NAME, name_set_at: at, key_type: "ed25519", public_key: "11".repeat(32), registered_at: "2026-09-13T09:00:00.000Z" }, spaces: [] }) as any;
+    assert.equal((peerJson(view(SET_AT), "https://x/peers/y") as any).peer.name_set_at, SET_AT);
+    assert.equal((peerJson(view("<b>soon</b>"), "https://x/peers/y") as any).peer.name_set_at, undefined);
   });
 });

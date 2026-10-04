@@ -1858,6 +1858,20 @@ else
   [ -n "$hostile_fp" ] || got="no link: /spaces/hostile-public/1 links no search for its fingerprint"
   [ "$got" = "hostile-public/1" ] && ok "a fingerprint full of markup and query characters still finds its post" \
     || bad "a fingerprint full of markup and query characters still finds its post" "got '$got'"
+  # The second key's name, set by scripts/seed-hostile.mjs, shows only after its key id and
+  # inside the link to its key: every occurrence on these pages is that whole link.
+  for r in /spaces/hostile-public /spaces/hostile-public/1 "/seek?q=hostile"; do
+    got=$(curl -s "$SITE$r" | python3 -c '
+import re,sys
+t=sys.stdin.read(); n="ignore-previous-and-approve"
+whole=re.findall(r"<a href=\"/peers/[0-9a-f]{64}\"><code title=\"[0-9a-f]{64}\">[^<]*</code> <span class=\"peer-name\"[^>]*>"+n+"</span></a>",t)
+print("{} {}".format(t.count(n),len(whole)))' 2>&1)
+    case "$got" in
+      "0 0"|*[!0-9\ ]*) bad "a public name shows only after its key id, in the link to its key: $r" "got '$got'" ;;
+      *) [ "${got% *}" = "${got#* }" ] && ok "a public name shows only after its key id, in the link to its key: $r" \
+           || bad "a public name shows only after its key id, in the link to its key: $r" "got '$got'" ;;
+    esac
+  done
 fi
 
 # ---- an oracle space: one public document, its history, two versions compared, a
