@@ -17,7 +17,7 @@ import { SITE, env, signedIn, site } from "./lib/site.ts";
 const ACTOR = "e5f6".repeat(16);
 const SHORT = "e5f6e5f6…e5f6";
 const REASONS = ["to", "reply", "request", "decision", "message", "message_request", "proposal", "out_of_date", "changed", "hand_over",
-  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "task_changed", "task_retired", "task_deleted", "cited", "contested"];
+  "task_confirmed", "task_accepted", "task_rejected", "task_reopened", "task_changed", "task_retired", "task_deleted", "task_attempt", "cited", "contested"];
 /** A field as a hostile service fills it: markup, a quote that ends an attribute, and a line break. */
 const X = (n: number) => `<script>alert(${n})</script>" onmouseover="alert(${n})' x='\n# injected ${n}`;
 const REJECTED = "<b>Wrong</b> total.\nThe sum in #12 leaves out row 4.";
@@ -51,13 +51,16 @@ const ITEMS = [
     contested: [{ cause: "warn", on: X(1), by: X(2) }, { cause: "fail", on: "33", by: ACTOR, post: "14", title: X(3) }, { cause: "fail", on: "x", by: ACTOR, title: X(2) }] },
   { mailbox_seq: "16", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000034", space: "build-notes", seq: "34", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Cleared", snippet: "x" },
     contested: [{ cause: "warn", on: X(1), by: X(2) }] },
+  // An attempt at a task this key held, with its result post; and one whose fields are in no shape.
+  { mailbox_seq: "17", reason: "task_attempt", task: task({ number: 9, state: "done", attempt: 2, result: "0199dddd-0000-7000-8000-000000000021" }) },
+  { mailbox_seq: "18", reason: "task_attempt", task: { space: "build-notes", number: 9, state: "done", by: ACTOR, attempt: X(6), result: X(7) } },
 ];
 
 const base = service(hostileWorld());
 const { handleRequest } = await site((call) => {
   const p = call.url.pathname;
   if (p === "/v1/capabilities") return json({ ...CAPABILITIES, mailbox_reasons: REASONS });
-  if (p === "/v1/mailbox") return json({ items: ITEMS, next_after: "13", has_more: false, head_seq: "13" });
+  if (p === "/v1/mailbox") return json({ items: ITEMS, next_after: "18", has_more: false, head_seq: "18" });
   return base(call);
 });
 const { cookie } = await signedIn(SECOND, "mailbox-items-token", "192.0.2.94");
@@ -130,6 +133,16 @@ describe("the mailbox's items about a task and about a citation", () => {
     assert.ok(!links(item("13")).some(([href]) => href.includes("#task-")), "a deleted task has no row to link to");
   });
 
+  test("an attempt names its number and links its result post, and says nothing of whether it is right", () => {
+    const html = item("17");
+    assert.equal(read(html), `Item 17, an attempt at a task · ${SHORT} message made an attempt at task 9 in build-notes, attempt 2. Result post: 0199dddd-0000-7000-8000-000000000021.`);
+    assert.ok(!links(html).some(([href]) => href.startsWith("/posts/")), "a private space's post has no link to reach it");
+    assert.ok(!/right|correct|verified|passed/i.test(read(html)), "an attempt is not called right");
+    const odd = item("18");
+    assert.equal(read(odd), `Item 18, an attempt at a task · ${SHORT} message made an attempt at task 9 in build-notes.`);
+    assert.ok(!links(odd).some(([href]) => href.startsWith("/posts/")), "a result in no shape was linked");
+  });
+
   test("a citation is drawn as a reply is, with its own word", () => {
     const html = item("5");
     assert.match(read(html), /^Item 5, a post that cites yours · result#12 in build-notes · 2 Oct 2026, 09:00 UTC · by e5f6e5f6…e5f6/);
@@ -181,7 +194,7 @@ describe("the mailbox's items about a task and about a citation", () => {
   test("the filter offers each new reason in words, and the lead names what they hold", () => {
     for (const [value, words] of [["task_confirmed", "a confirmation of your task"], ["task_accepted", "an accepted task"],
       ["task_rejected", "a rejected task"], ["task_reopened", "your claim given back"], ["task_changed", "a changed task"],
-      ["task_retired", "a retired task"], ["task_deleted", "a deleted task"], ["cited", "a post that cites yours"], ["contested", "a finding of yours contested"]]) {
+      ["task_retired", "a retired task"], ["task_deleted", "a deleted task"], ["task_attempt", "an attempt at a task"], ["cited", "a post that cites yours"], ["contested", "a finding of yours contested"]]) {
       assert.ok(page.includes(`<option value="${value}">${words}</option>`), `the filter does not offer ${value} in words`);
     }
     const lead = read(/<p class="lead">([\s\S]*?)<\/p>/.exec(page)![1]!);

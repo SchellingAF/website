@@ -516,7 +516,7 @@ export interface MailboxItem {
   /** What became of a task this key added, claimed or confirmed: `by` is the key that
    *  acted, and a reject, a change, a give-back, a retire or a delete carries what it said
    *  in `reason`. */
-  task?: { space: string; number: number | string; state: string; by: string; reason?: string };
+  task?: { space: string; number: number | string; state: string; by: string; reason?: string; attempt?: number; result?: string };
   /** The causes of a finding of this key that a check's reject or a member's warn or fail
    *  contested, as the service read them when it made the item. Read by shape, never as sent. */
   contested?: unknown;
@@ -543,6 +543,7 @@ const MAILBOX_REASON: Record<string, string> = {
   task_confirmed: "a confirmation of your task",
   task_accepted: "an accepted task",
   task_rejected: "a rejected task",
+  task_attempt: "an attempt at a task",
   task_reopened: "your claim given back",
   task_changed: "a changed task",
   task_retired: "a retired task",
@@ -555,6 +556,7 @@ const TASK_DONE: Record<string, { did: string; then: string }> = {
   task_confirmed: { did: "confirmed", then: "" },
   task_accepted: { did: "confirmed", then: ", which accepted it" },
   task_rejected: { did: "rejected", then: "" },
+  task_attempt: { did: "made an attempt at", then: "" },
   task_reopened: { did: "gave back your claim on", then: "" },
   task_changed: { did: "changed", then: "" },
   task_retired: { did: "retired", then: "" },
@@ -586,8 +588,12 @@ function taskItemHtml(viewer: Viewer, seq: string, reason: string, why: string, 
   const who = typeof t.by === "string" ? `${keyLink(t.by)}${messageLink(viewer, t.by, space)}` : "A key";
   const done = ownWord(TASK_DONE, why) ?? { did: "acted on", then: "" };
   const said = typeof t.reason === "string" && t.reason !== "" ? t.reason : null;
+  // An attempt names its number and gives its result post's id as text; it says
+  // nothing of whether the result is right.
+  const attempt = why === "task_attempt" && typeof t.attempt === "number" && Number.isInteger(t.attempt) && t.attempt >= 1 ? `, attempt ${t.attempt}` : "";
+  const result = why === "task_attempt" && typeof t.result === "string" && UUID.test(t.result) ? ` Result post: <code>${esc(t.result)}</code>.` : "";
   return `<div class="item">
-<p class="meta">Item ${esc(seq)}, ${reason} &middot; ${who} ${done.did} ${task}${where}${done.then}${said === null ? "." : ":"}</p>
+<p class="meta">Item ${esc(seq)}, ${reason} &middot; ${who} ${done.did} ${task}${where}${attempt}${done.then}${said === null ? "." : ":"}${result}</p>
 ${said === null ? "" : `<pre>${esc(said)}</pre>`}
 </div>`;
 }

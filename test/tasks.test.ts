@@ -74,6 +74,30 @@ const LATER: Json[] = [
   task(14, { title: "Words a deleted task kept", state: "deleted" }),
 ];
 
+/** Tasks as the product answers them once a task has several claims and attempts. */
+const ATTEMPTS: Json[] = [
+  task(1, { title: "Three hold it", state: "claimed", claimed_by: WRITER, claimed_until: at(5),
+    claimants: [{ by: WRITER, until: at(5) }, { by: CHECKER, until: at(7) }, { by: OWNER, until: at(6) }] }),
+  task(2, { title: "Two attempts", state: "done", claimed_by: WRITER, done_post_id: id(2), done_at: at(2), attempt: 1,
+    confirmations: { required: 2, given: [CHECKER] },
+    attempts: [
+      { attempt: 1, by: WRITER, post_id: id(2), at: at(2), state: "pending", confirmations: [CHECKER] },
+      { attempt: 2, by: OWNER, author: WRITER, post_id: id(3), at: at(3), state: "rejected", confirmations: [], rejected: { by: CHECKER, reason: "Wrong total.", at: at(4) } },
+    ] }),
+  task(3, { title: "Settled", state: "accepted", claimed_by: CHECKER, done_post_id: id(3), done_at: at(2), accepted_at: at(5), attempt: 2,
+    confirmations: { required: 1, given: [OWNER] },
+    attempts: [
+      { attempt: 1, by: WRITER, post_id: id(2), at: at(2), state: "passed", confirmations: [] },
+      { attempt: 2, by: CHECKER, post_id: id(3), at: at(3), state: "accepted", confirmations: [OWNER] },
+    ] }),
+  task(4, { title: "Reopened with cleared", state: "open", cycle: 2, rejected: { by: CHECKER, reason: "Not the page asked for.", at: at(5), attempt: 2, result: id(2), cleared: [OWNER, WRITER] } }),
+  task(5, { title: "Reopened, none cleared", state: "open", cycle: 2, rejected: { by: CHECKER, reason: "Empty.", at: at(5), result: id(40), cleared: [] } }),
+  task(6, { title: "Old shape", state: "open", cycle: 2, rejected: { by: CHECKER, reason: "Old.", at: at(5) } }),
+  task(7, { title: "Retired with an attempt", state: "retired", retired: { by: OWNER, at: at(7), reason: "Not needed.", replaced_by: [], replaced_by_numbers: [] },
+    confirmations: { required: 2, given: [] },
+    attempts: [{ attempt: 1, by: WRITER, post_id: id(2), at: at(2), state: "pending", confirmations: [] }, { attempt: 2, by: OWNER, post_id: id(3), at: at(3), state: "pending", confirmations: [] }] }),
+];
+
 const MANY: Json[] = Array.from({ length: 60 }, (_, i) => task(i + 1, { title: `Page ${i + 1}` }));
 
 const world: World = {
@@ -88,14 +112,15 @@ const world: World = {
     space("shaped-board"),
     space("odd-board"),
     space("later-board"),
+    space("attempt-board"),
     space("task-oracle", { oracle: true, service_reviewer: false, forked_from: null }),
   ],
   posts: {
     "task-board": [post(1), post(2), post(3)],
-    "empty-board": [], "quiet-board": [], "wide-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "later-board": [], "task-oracle": [],
+    "empty-board": [], "quiet-board": [], "wide-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "later-board": [], "attempt-board": [post(1, "attempt-board"), post(2, "attempt-board"), post(3, "attempt-board")], "task-oracle": [],
   },
   tasks: {
-    "task-board": BOARD, "quiet-board": [task(1, { title: "A private task" })], "wide-board": MANY, "later-board": LATER,
+    "task-board": BOARD, "quiet-board": [task(1, { title: "A private task" })], "wide-board": MANY, "later-board": LATER, "attempt-board": ATTEMPTS,
     "odd-board": [
       task(1, { x_secret: "SENTINEL-TASK-FIELD", claimed_by: "not a key", done_at: "yesterday", confirmations: { required: 2, given: [OWNER, "not a key"] } }),
     ],
@@ -393,6 +418,80 @@ describe("the Vocabulary page explains the words a changed task brings", () => {
     assert.match(meaning("retired"), /before it was accepted/);
     assert.match(meaning("upkeep task"), /the service(?:'|&#39;)s fixed brief/);
     assert.match(meaning("revision"), /keeps the words before it/);
+  });
+});
+
+describe("several claims and attempts", () => {
+  const board = async () => section((await get("/spaces/attempt-board")).text);
+  const plain = (html: string) => html.replace(/<[^>]*>/g, "");
+
+  test("a task several keys hold names them all and the last claim", async () => {
+    const row = plain(rowOf(await board(), 1));
+    assert.match(row, new RegExp(`Claimed by ${WRITER.slice(0, 8)}\\S*, \\S+ and \\S+, the last claim until 1 Oct 2026, 10:07 UTC\\.`));
+  });
+
+  test("a done task with two attempts lists each with its state", async () => {
+    const row = plain(rowOf(await board(), 2));
+    assert.match(row, /Attempts: 2\./);
+    assert.match(row, /Attempt 1 by \S+: waiting, 1 of 2 confirmations\./);
+    assert.match(row, /Attempt 2 by \S+: rejected by \S+\./);
+    const md = (await get("/spaces/attempt-board.md")).text;
+    assert.match(md, new RegExp(`Attempt 1 by ${WRITER}: waiting, 1 of 2 confirmations\\. Attempt 2 by ${OWNER}: rejected by ${CHECKER}\\.`));
+  });
+
+  test("an accepted task says which attempt passed and which was accepted", async () => {
+    const row = plain(rowOf(await board(), 3));
+    assert.match(row, /Attempt 1 by \S+: not accepted, because another attempt was\. Attempt 2 by \S+: accepted\./);
+  });
+
+  test("a retired task's pending attempts read as not checked", async () => {
+    const row = plain(rowOf(await board(), 7));
+    assert.match(row, /Attempt 1 by \S+: not checked, because the task was retired\. Attempt 2 by \S+: not checked, because the task was retired\./);
+  });
+
+  test("the last claim is the latest by time, not by text", async () => {
+    assert.match(plain(rowOf(await board(), 1)), /the last claim until 1 Oct 2026, 10:07 UTC/);
+  });
+
+  test("the task and attempt entries say what holds where no confirmations are asked", async () => {
+    const doc = JSON.parse((await get("/vocabulary.json")).text) as { words: { word: string; meaning: string }[] };
+    const m = (w: string) => doc.words.find((x) => x.word === w)!.meaning;
+    assert.match(m("task"), /Where none are asked, the first attempt is accepted at once, unless another key holds the task or a rejection came first; then one confirmation decides, which a key that made an attempt may give to another key(?:'|&#39;)s attempt\./);
+    assert.match(m("task"), /Any member who may post marks it done/);
+    assert.match(m("attempt"), /checks none since the task last reopened, except that where none are asked it may confirm another key(?:'|&#39;)s attempt\./);
+    assert.match(m("attempt"), /Where none are asked, an attempt made after a rejection, or while another key held the task, still needs one confirmation\./);
+    assert.ok(!/cycle/.test(m("attempt")), "no cycle on the page");
+  });
+
+  test("a reopened task says what the rejection cleared and links the rejected result", async () => {
+    const text = await board();
+    const four = rowOf(text, 4);
+    assert.match(plain(four), /Reopened after a rejection of attempt 2 by \S+, 1 Oct 2026, 10:05 UTC\. It cleared 2 confirmations\. Reason: Not the page asked for\./);
+    assert.match(four, /Rejected result: <a href="\/spaces\/attempt-board\/2">#2<\/a>\./);
+    const five = rowOf(text, 5);
+    assert.match(plain(five), /Reopened after a rejection by \S+, [^.]*\. It cleared no confirmations\. Reason: Empty\./);
+    assert.match(five, new RegExp(`<a href="/posts/${id(40)}">Rejected result</a>`));
+    const md = (await get("/spaces/attempt-board.md")).text;
+    assert.match(md, /Reopened after a rejection of attempt 2 by [0-9a-f]{64}, 2026-10-01T10:05:00.000Z\. It cleared 2 confirmations\./);
+    assert.match(md, /Rejected result: #2: \/spaces\/attempt-board\/2\.md/);
+  });
+
+  test("with one claimant and one attempt the sentences read as they did", async () => {
+    const six = plain(rowOf(await board(), 6));
+    assert.match(six, /Open\. Reopened after a rejection by \S+, 1 Oct 2026, 10:05 UTC\. Reason: Old\./);
+    assert.doesNotMatch(six, /cleared|attempt/i);
+    const one = readableTasks({ items: [{ number: 1, title: "T", state: "claimed", claimed_by: WRITER, claimed_until: at(5), claimants: [{ by: WRITER, until: at(5) }] }] })!.items[0]!;
+    assert.ok(!("claimants" in one), "one claimant is not a list");
+    const rows = (await get("/spaces/task-board")).text;
+    assert.doesNotMatch(section(rows), /Attempts:|Attempt \d|cleared|Claimed by [^.]* and /);
+  });
+
+  test("the Vocabulary explains a claim beside another and an attempt", async () => {
+    const doc = JSON.parse((await get("/vocabulary.json")).text) as { words: { word: string; meaning: string }[] };
+    const m = (w: string) => doc.words.find((x) => x.word === w)!.meaning;
+    assert.match(m("task"), /no second key/);
+    assert.match(m("task"), /sets one attempt aside/);
+    assert.match(m("attempt"), /first attempt confirmed enough is accepted/);
   });
 });
 

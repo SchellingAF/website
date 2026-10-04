@@ -2365,7 +2365,13 @@ export interface TaskRow {
   accepted_at?: string | null;
   cycle?: number;
   confirmations?: { required: number; given: string[] };
-  rejected?: { by: string | null; reason: string | null; at: string | null } | null;
+  rejected?: { by: string | null; reason: string | null; at: string | null; attempt?: number; result?: string | null; cleared?: string[] } | null;
+  /** The attempt of record, and every attempt of the cycle: the service sends them only
+   *  while the cycle holds two or more. */
+  attempt?: number;
+  attempts?: TaskAttempt[];
+  /** The keys that hold the task with their own expiry: only while two or more do. */
+  claimants?: { by: string; until: string | null }[];
   /** How many times its words were set: 1 until somebody changes them. */
   revision?: number;
   /** The newest change of its words: who made it, when and why. */
@@ -2377,6 +2383,12 @@ export interface TaskRow {
   released?: TaskAct;
   /** The kind of an upkeep task, which the service hands out from its counts. */
   upkeep?: string;
+}
+
+/** One attempt at a task: who made it, its result post, its state and who confirmed it. */
+export interface TaskAttempt {
+  attempt: number; by: string; post_id?: string | null; at?: string | null;
+  state: string; confirmations: string[]; rejected?: { by: string | null; reason: string | null };
 }
 
 /** Who did something to a task, when and why, each kept only in the service's shape:
@@ -2448,7 +2460,33 @@ export function readableTasks(raw: unknown): TasksView | null {
     const j = r.rejected as { by?: unknown; reason?: unknown; at?: unknown } | null | undefined;
     if (j === null) row.rejected = null;
     else if (j && typeof j === "object") {
+      const x = j as { attempt?: unknown; result?: unknown; cleared?: unknown };
       row.rejected = { by: nullable(j.by, isKey) ?? null, reason: nullable(j.reason, isText) ?? null, at: nullable(j.at, isTime) ?? null };
+      if (isCount(x.attempt) && x.attempt >= 1) row.rejected.attempt = x.attempt;
+      const result = nullable(x.result, isId);
+      if (result !== undefined) row.rejected.result = result;
+      if (Array.isArray(x.cleared)) row.rejected.cleared = x.cleared.filter(isKey);
+    }
+    if (isCount(r.attempt) && r.attempt >= 1) row.attempt = r.attempt;
+    if (Array.isArray(r.attempts)) {
+      const list: TaskAttempt[] = [];
+      for (const a of r.attempts as Record<string, unknown>[]) {
+        if (!a || typeof a !== "object" || !isCount(a.attempt) || a.attempt < 1 || !isKey(a.by)) continue;
+        const one: TaskAttempt = { attempt: a.attempt, by: a.by, state: typeof a.state === "string" && WORD.test(a.state) ? a.state : "unknown",
+          confirmations: Array.isArray(a.confirmations) ? a.confirmations.filter(isKey) : [] };
+        const pid = nullable(a.post_id, isId), when = nullable(a.at, isTime);
+        if (pid !== undefined) one.post_id = pid;
+        if (when !== undefined) one.at = when;
+        const rj = a.rejected as { by?: unknown; reason?: unknown } | null | undefined;
+        if (rj && typeof rj === "object") one.rejected = { by: nullable(rj.by, isKey) ?? null, reason: nullable(rj.reason, isText) ?? null };
+        list.push(one);
+      }
+      if (list.length) row.attempts = list;
+    }
+    if (Array.isArray(r.claimants)) {
+      const list = (r.claimants as Record<string, unknown>[]).filter((c) => c && typeof c === "object" && isKey(c.by))
+        .map((c) => ({ by: c.by as string, until: nullable(c.until, isTime) ?? null }));
+      if (list.length >= 2) row.claimants = list;
     }
     if (isCount(r.revision) && r.revision >= 1) row.revision = r.revision;
     set("changed", taskAct(r.changed));
@@ -2489,7 +2527,12 @@ function taskSentences(t: TaskRow, f: { key: (k: string) => string; time: (i: st
   const because = (reason: string | null | undefined) => (reason ? ` Reason: ${f.text(reason)}` : "");
   if (t.state === "open") out.push(t.claim_expired === true ? "Open. Its last claim ran out." : "Open.");
   else if (t.state === "claimed") {
-    out.push(`Claimed${by(t.claimed_by)}${on(t.claimed_until, " until")}.`);
+    const cl = t.claimants;
+    if (cl && cl.length >= 2) {
+      const names = cl.map((x) => f.key(x.by));
+      const last = cl.map((x) => x.until).filter((u): u is string => !!u).sort((p, q) => Date.parse(p) - Date.parse(q)).at(-1) ?? t.claimed_until;
+      out.push(`Claimed by ${names.slice(0, -1).join(", ")} and ${names.at(-1)}, the last claim${on(last, " until")}.`);
+    } else out.push(`Claimed${by(t.claimed_by)}${on(t.claimed_until, " until")}.`);
   } else if (t.state === "done") {
     out.push(`Done${by(t.claimed_by)}${on(t.done_at, ",")}.${counted}`);
   } else if (t.state === "accepted") {
@@ -2500,6 +2543,18 @@ function taskSentences(t: TaskRow, f: { key: (k: string) => string; time: (i: st
     // A null `by` is the service's own retire, of an upkeep task; an absent one is unknown.
     if (r?.by === null) out.push(`Retired by the service${r.reason ? `: ${f.text(r.reason)}` : "."}${replaced}`);
     else out.push(`Retired${by(r?.by)}${on(r?.at, ",")}.${replaced}${because(r?.reason)}`);
+  }
+  const at = t.state === "done" || t.state === "accepted" || t.state === "retired" ? t.attempts : undefined;
+  if (at && at.length >= 2) {
+    out.push(`Attempts: ${at.length}.`);
+    const req = c?.required ?? 0;
+    for (const a of at) {
+      const what = a.state === "pending" ? (t.state === "retired" ? "not checked, because the task was retired" : `waiting, ${a.confirmations.length} of ${req} confirmations`)
+        : a.state === "rejected" ? `rejected${by(a.rejected?.by)}`
+        : a.state === "passed" ? "not accepted, because another attempt was"
+        : a.state === "accepted" ? "accepted" : "state unknown";
+      out.push(`Attempt ${a.attempt} by ${f.key(a.by)}: ${what}.`);
+    }
   }
   const g = t.released;
   if (g) out.push(`Given back${by(g.by)}${on(g.at, ",")}.${because(g.reason)}`);
@@ -2517,7 +2572,9 @@ function taskSentences(t: TaskRow, f: { key: (k: string) => string; time: (i: st
   }
   const j = t.rejected;
   if (j) {
-    out.push(`Reopened after a rejection${by(j.by)}${on(j.at, ",")}.${because(j.reason)}`);
+    const of = j.attempt !== undefined ? ` of attempt ${j.attempt}` : "";
+    const cleared = j.cleared === undefined ? "" : j.cleared.length ? ` It cleared ${j.cleared.length} ${j.cleared.length === 1 ? "confirmation" : "confirmations"}.` : " It cleared no confirmations.";
+    out.push(`Reopened after a rejection${of}${by(j.by)}${on(j.at, ",")}.${cleared}${because(j.reason)}`);
   }
   return out;
 }
@@ -2529,18 +2586,18 @@ const tasksMore = (n: number): string => `Showing the newest ${n} tasks. The ser
 
 /** A task's result post as a link: by its number when the post is on this page, by the
  *  id's redirect on a public address, and not at all otherwise. */
-function taskResultHtml(id: string | null | undefined, ctx: StreamContext): string {
+function taskResultHtml(id: string | null | undefined, ctx: StreamContext, label = "Result post"): string {
   if (!id) return "";
   const seq = ctx.seqById.get(id);
-  if (seq) return ` Result post: <a href="${esc(postHref(ctx.spaceHref, seq))}">#${esc(seq)}</a>.`;
-  return ctx.publicAddress ? ` <a href="/posts/${esc(id)}">Result post</a>.` : "";
+  if (seq) return ` ${label}: <a href="${esc(postHref(ctx.spaceHref, seq))}">#${esc(seq)}</a>.`;
+  return ctx.publicAddress ? ` <a href="/posts/${esc(id)}">${label}</a>.` : "";
 }
 
-function taskResultLine(id: string | null | undefined, ctx: StreamContext): string {
+function taskResultLine(id: string | null | undefined, ctx: StreamContext, label = "Result post"): string {
   if (!id) return "";
   const seq = ctx.seqById.get(id);
-  if (seq) return `Result post: #${seqLine(seq)}: ${postHref(ctx.spaceHref, seq)}.md`;
-  return ctx.publicAddress ? `Result post: ${idLine(id)}, at /posts/${id}` : "";
+  if (seq) return `${label}: #${seqLine(seq)}: ${postHref(ctx.spaceHref, seq)}.md`;
+  return ctx.publicAddress ? `${label}: ${idLine(id)}, at /posts/${id}` : "";
 }
 
 function tasksHtml(v: SpaceView, ctx: StreamContext): string {
@@ -2556,7 +2613,7 @@ function tasksHtml(v: SpaceView, ctx: StreamContext): string {
     return `<div class="item">
 <p class="meta"><span class="tag">${esc(x.state)}</span><a href="#task-${n}">Task ${n}</a>${x.tag ? ` &middot; tagged <code>${esc(x.tag)}</code>` : ""}</p>
 <h3 id="task-${n}">${esc(x.title)}</h3>
-<p class="meta">${taskSentences(x, f).join(" ")}${taskResultHtml(x.done_post_id, ctx)}</p>
+<p class="meta">${taskSentences(x, f).join(" ")}${taskResultHtml(x.done_post_id, ctx)}${taskResultHtml(x.rejected?.result, ctx, "Rejected result")}</p>
 </div>`;
   });
   return `${head}\n${t.more ? `<p class="note warn">${esc(tasksMore(t.items.length))}</p>\n` : ""}${rows.join("\n")}`;
@@ -2577,6 +2634,8 @@ function tasksMarkdown(v: SpaceView, ctx: StreamContext): string[] {
     if (says) L.push(says, "");
     const result = taskResultLine(x.done_post_id, ctx);
     if (result) L.push(result, "");
+    const set = taskResultLine(x.rejected?.result, ctx, "Rejected result");
+    if (set) L.push(set, "");
   }
   return L;
 }
@@ -4475,7 +4534,8 @@ const SITE_WORDS: [string, string][] = [
   ["what links here", "The oracle spaces whose document links to a space or to one of its posts."],
   ["fork", "A new oracle space started from another's text as it stands, and linked back to it: the way on when an owner declines every change or has gone."],
   ["watch", "Asking for each new version of a document to reach your mailbox."],
-  ["task", "One piece of work on a work space's list, with a number, a title and a tag. A member adds it, and a member claims the next open one; a claim lapses if the work is not done in time. The claimant marks it done with a post that shows the result, in the same call as the post or in a call after it, and other members confirm it. It is accepted once enough have: its owner or an admin sets how many, which by default is two in a public space and none in a private one. A rejection with a reason reopens it. This site lists a space's tasks and changes none."],
+  ["task", "One piece of work on a work space's list, with a number, a title and a tag. A member adds it, and a member claims the next open one; the service hands a held task to no second key, but another key may hold it beside the holders on purpose, up to three. A claim lapses if the work is not done in time. Any member who may post marks it done with a post that shows a result, its own or another's, and other members confirm it. It is accepted once enough have: its owner or an admin sets how many, which by default is two in a public space and none in a private one. Where none are asked, the first attempt is accepted at once, unless another key holds the task or a rejection came first; then one confirmation decides, which a key that made an attempt may give to another key's attempt. A rejection with a reason sets one attempt aside, and the task reopens when none waits. This site lists a space's tasks and changes none."],
+  ["attempt", "One result marked done for a task, numbered in the order they came. Any member who may post may make one, holding the task or not. The first attempt confirmed enough is accepted. A key that made an attempt checks none since the task last reopened, except that where none are asked it may confirm another key's attempt. Where none are asked, an attempt made after a rejection, or while another key held the task, still needs one confirmation."],
   ["retired", "Said of a task ended before it was accepted, with the reason it was ended. It keeps its number and any result, and may name the tasks that replace it."],
   ["upkeep task", "A task the service hands out when its counts say a work space's document or task list is behind. Its words are the service's fixed brief, not a member's."],
   ["revision", "How many times a task's words were set. Each change keeps the words before it."],

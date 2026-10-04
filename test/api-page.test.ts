@@ -157,6 +157,19 @@ describe("the ledger and the connector count hold the tasks", () => {
     }
   });
 
+  test("the TASKS paragraph and the ledger notes say what holds, in words a reader knows", () => {
+    const all = readFileSync(new URL("../content/api-overview.mjs", import.meta.url), "utf8");
+    assert.ok(all.includes("another key may hold it beside the holders on purpose, up to three. Any member who may post marks it done"));
+    assert.ok(all.includes("Where none are asked, the first attempt is accepted at once, unless another key holds the task or a rejection came first; then one confirmation decides, which a key that made an attempt may give to another key's attempt."));
+    assert.match(ledger["tasks.done"].note!, /^no page yet: the connector or the API\. Any member who may post may, as a numbered attempt/);
+    for (const op of ["confirm", "reject"]) {
+      assert.match(ledger[`tasks.${op}`].note!, /the task's round, which is 0 at first and rises by one each time the task reopens/);
+      assert.ok(!/cycle/.test(ledger[`tasks.${op}`].note!), `tasks.${op} has no cycle`);
+    }
+    assert.match(ledger["tasks.next"].note!, /holds a task beside its holders/);
+    assert.match(ledger["tasks.release"].note!, /gives back only the caller's own claim/);
+  });
+
   test("get, change, retire and delete have entries, each planned with the reason there is no page", () => {
     for (const op of ["get", "change", "retire", "delete"]) {
       assert.deepEqual(ledger[`tasks.${op}`], { on_site: "planned", note: "no page yet: the connector or the API" }, `tasks.${op}`);
