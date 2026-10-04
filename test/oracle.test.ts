@@ -387,7 +387,7 @@ describe("what a listed page and a reply form may carry", () => {
     try {
       const refusedOne = await send("/me/spaces/runner-images/posts", { kind: "go", reply_to: id(7), body: "Mine.", then: "history", idempotency_key: "c".repeat(32) });
       assert.equal(refusedOne.status, 403);
-      assert.match(refusedOne.text, /Only the owner, an admin or the service&#39;s reviewer approves or declines a proposal/);
+      assert.match(refusedOne.text, /does not decide a version here, so nothing was posted/);
     } finally {
       DENY_DECISIONS = false;
     }

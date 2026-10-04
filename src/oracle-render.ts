@@ -77,6 +77,11 @@ export interface Version {
   snippet: string | null;
   snippetCut: boolean;
   decision: Decision | null;
+  /** While it waits in a work space that counts confirmations: the writers whose go still
+   *  counts and how many the space needs, as the service says them. Null otherwise. */
+  confirmations: { given: string[]; required: number } | null;
+  /** While it waits: the roles whose go or veto decides it, as the service says them; empty when it names none. */
+  decidedBy: string[];
 }
 
 /** The go or veto that decided a version. */
@@ -89,6 +94,10 @@ export interface Decision {
   /** What whoever decided wrote: agent text, the reviewer's too. */
   reason: string | null;
   at: string | null;
+  /** True only when writers' confirmations accepted the version, not one decider's go;
+   *  then `confirmedBy` holds the keys that counted. */
+  byConfirmations: boolean;
+  confirmedBy: string[];
 }
 
 /** An oracle space that links to a space or a post. */
@@ -113,7 +122,27 @@ function readableDecision(raw: unknown): Decision | null {
     author: textOrNull(d.author) ?? "",
     reason: textOrNull(d.reason),
     at: textOrNull(d.at),
+    byConfirmations: d.by === "confirmations",
+    confirmedBy: d.by === "confirmations" ? hexIds(d.confirmed_by) : [],
   };
+}
+
+const HEX_ID = /^[0-9a-f]{64}$/;
+
+/** The key ids in a list the service sent: only those in a key's shape, at most ten. */
+const hexIds = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && HEX_ID.test(x)).slice(0, 10) : [];
+
+/** The roles the service names as deciding a version: only the four it has. */
+const deciderRoles = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && ["owner", "admin", "coordinator", "reviewer"].includes(x)).slice(0, 4) : [];
+
+/** What a waiting version has so far, or null when the service names no count or it is out of range. */
+function readableConfirmations(raw: unknown): { given: string[]; required: number } | null {
+  const c = record(record(raw).confirmations);
+  const required = c.required;
+  if (!Number.isSafeInteger(required) || (required as number) < 1 || (required as number) > 5) return null;
+  return { given: hexIds(c.given), required: required as number };
 }
 
 /**
@@ -147,6 +176,8 @@ export function readableVersion(raw: unknown): Version | null {
     snippet: unavailable ? null : textOrNull(v.snippet),
     snippetCut: !unavailable && v.snippet_truncated === true,
     decision: readableDecision(v.decision ?? v.decided_by),
+    confirmations: v.state === "pending" ? readableConfirmations(v.waits_for) : null,
+    decidedBy: v.state === "pending" ? deciderRoles(record(v.waits_for).decision) : [],
   };
 }
 
@@ -294,20 +325,47 @@ export interface DocumentView extends CurrentDocument {
   /** The document of a work space rather than an oracle space's: no service reviewer decides
    *  and none can be forked, and a section the service marks is marked here. */
   work?: boolean;
+  /** A work space's: how many writers' confirmations accept a version, when its profile says one. */
+  confirmations?: number;
 }
 
 /** Who decides here, in a sentence. */
-function whoDecides(v: { reviewer: { on: boolean }; work?: boolean }): string {
-  if (v.work) return "Its owner, its admins and its coordinators approve or decline each proposal. Its versions are in the history, not among the posts below.";
+function whoDecides(v: { reviewer: { on: boolean }; work?: boolean; confirmations?: number }): string {
+  if (v.work) {
+    const n = v.confirmations;
+    return `Its owner, its admins and its coordinators approve or decline each proposal.${
+      n && n > 0 ? ` A version is also accepted when ${n} ${n === 1 ? "writer confirms" : "writers confirm"} it.` : ""
+    } Its versions are in the history, not among the posts below.`;
+  }
   return v.reviewer.on
     ? "Its owner, its admins and the service's reviewer approve or decline each proposal."
     : "Its owner and its admins approve or decline each proposal. Its owner has switched the service's reviewer off here.";
 }
 
+const count = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** A version writers' confirmations accepted, which is never worded as one key's approval:
+ *  how many counted, and the number of the last, which decided it. */
+const acceptedBy = (d: Decision): string => (d.confirmedBy.length ? `Accepted by ${count(d.confirmedBy.length, "confirmation")}` : "Accepted by confirmations");
+
+/** The same, for a line of HTML. */
+const acceptedHtml = (d: Decision, spaceHref: string): string =>
+  `${acceptedBy(d)}, the last in ${versionLink(spaceHref, d.seq)}${d.confirmedBy.length ? `: ${d.confirmedBy.map(keyLink).join(", ")}` : ""}`;
+
+/** The same, for markdown. */
+const acceptedLine = (d: Decision): string =>
+  `${acceptedBy(d)}, the last in #${seqLine(d.seq)}${d.confirmedBy.length ? `: ${d.confirmedBy.map(keyLine).join(", ")}` : ""}`;
+
+/** What a waiting version has so far, in words, or null when it counts no confirmations. */
+const confirmationsWords = (v: Version): string | null =>
+  v.confirmations ? `${v.confirmations.given.length} of ${v.confirmations.required} confirmations by writers` : null;
+
 /** How the current version became the document, in a sentence of HTML. */
 function howItCame(v: Version, spaceHref: string): string {
   const d = v.decision;
-  return d
+  return d?.byConfirmations
+    ? `${acceptedHtml(d, spaceHref)}.`
+    : d
     ? `Approved in ${versionLink(spaceHref, d.seq)} by ${keyLink(d.author)}.`
     : "It went in directly, because its author may approve their own.";
 }
@@ -386,7 +444,9 @@ ${body}
     if (ver.summary) L.push(`- what changed: ${codeSpan(ver.summary)}`);
     if (ver.sourceWithdrawn) L.push(`- ${SOURCE_WITHDRAWN}`);
     for (const id of marked()) L.push(`- section ${codeSpan(id)}: ${SOURCE_WITHDRAWN}`);
-    L.push(ver.decision
+    L.push(ver.decision?.byConfirmations
+      ? `- approved: ${acceptedLine(ver.decision)}`
+      : ver.decision
       ? `- approved in: #${seqLine(ver.decision.seq)} by ${keyLine(ver.decision.author)}`
       : "- approved: directly, by its author, who may approve their own");
     if (ver.edits) L.push(`- what it changed: ${compareHref(v.spaceHref, ver.edits, ver.seq)}`);
@@ -449,8 +509,12 @@ function versionJson(v: Version, spaceHref: string) {
           post_id: v.decision.post_id, seq: v.decision.seq, kind: v.decision.kind, author: v.decision.author,
           ...(v.decision.reason !== null ? { reason: v.decision.reason } : {}),
           ...(v.decision.at !== null ? { at: v.decision.at } : {}),
+          ...(v.decision.byConfirmations ? { by: "confirmations", confirmed_by: v.decision.confirmedBy } : {}),
         }
       : null,
+    ...(v.decidedBy.length || v.confirmations
+      ? { waits_for: { ...(v.decidedBy.length ? { decision: v.decidedBy } : {}), ...(v.confirmations ? { confirmations: v.confirmations } : {}) } }
+      : {}),
   };
 }
 
@@ -489,13 +553,18 @@ export function versionNote(v: Version, spaceHref: string, work = false): Drawn 
   const known = ownWord(work ? WORK_STATE_SENTENCE : STATE_SENTENCE, v.state);
   const kind = work ? "work space" : "oracle space";
   const d = v.decision;
-  const by = d ? ` It was ${decided(d.kind)} in ${versionLink(spaceHref, d.seq)} by ${keyLink(d.author)}.` : "";
+  const waiting = confirmationsWords(v);
+  const by = d?.byConfirmations
+    ? ` It was ${acceptedHtml(d, spaceHref).replace(/^Accepted/, "accepted")}.`
+    : d ? ` It was ${decided(d.kind)} in ${versionLink(spaceHref, d.seq)} by ${keyLink(d.author)}.` : "";
+  const count_ = waiting ? ` It has ${waiting}.` : "";
   const compare = v.edits ? ` &middot; <a href="${esc(compareHref(spaceHref, v.edits, v.seq))}">what it changes</a>` : "";
   const warn = wasTheDocument(v.state) ? "" : " warn";
-  const html = `<p class="note${warn}">A version of this ${kind}'s document. ${esc(known ?? `The service says its state is ${v.state}.`)}${by} <a href="${esc(`${spaceHref}/history`)}">Its history</a>${compare}</p>`;
+  const html = `<p class="note${warn}">A version of this ${kind}'s document. ${esc(known ?? `The service says its state is ${v.state}.`)}${by}${esc(count_)} <a href="${esc(`${spaceHref}/history`)}">Its history</a>${compare}</p>`;
   const md = [
     `A version of this ${kind}'s document. ${known ?? `The service says its state is ${codeSpan(v.state)}.`}${
-      d ? ` It was ${decided(d.kind)} in #${seqLine(d.seq)} by key ${keyLine(d.author)}.` : ""}`,
+      d?.byConfirmations ? ` It was ${acceptedLine(d).replace(/^Accepted/, "accepted")}.`
+      : d ? ` It was ${decided(d.kind)} in #${seqLine(d.seq)} by key ${keyLine(d.author)}.` : ""}${count_}`,
     "",
     `- state: ${wordLine(v.state)}`,
     ...(v.edits ? [`- edits: #${seqLine(v.edits)}, ${compareHref(spaceHref, v.edits, v.seq)}`] : []),
@@ -562,9 +631,12 @@ function rowHtml(r: Version, v: HistoryView): string {
     : " &middot; a first version";
   const undo = r.sameTextAs ? ` &middot; the same text as ${versionLink(v.spaceHref, r.sameTextAs)}` : "";
   const d = r.decision;
-  const decision = d
+  const waiting = confirmationsWords(r);
+  const decision = d?.byConfirmations
+    ? `<p class="meta">${acceptedHtml(d, v.spaceHref)}${d.at ? `, ${esc(when(d.at))}` : ""}${d.reason ? ":" : "."}</p>${d.reason ? `<pre>${esc(d.reason)}</pre>` : ""}`
+    : d
     ? `<p class="meta">${esc(Decided(d.kind))} in ${versionLink(v.spaceHref, d.seq)} by ${keyLink(d.author)}${d.at ? `, ${esc(when(d.at))}` : ""}${d.reason ? ":" : "."}</p>${d.reason ? `<pre>${esc(d.reason)}</pre>` : ""}`
-    : "";
+    : waiting ? `<p class="meta">${esc(`Waiting: ${waiting}.`)}</p>` : "";
   const text = r.unavailable
     ? `<p class="note warn">${esc(`This version is ${goneWords(r.unavailable)}. Its place is kept; its text is not shown.`)}</p>`
     : r.snippet ? `<pre>${esc(r.snippet)}${r.snippetCut ? "…" : ""}</pre>` : "";
@@ -616,9 +688,13 @@ export function historyMarkdown(v: HistoryView): string {
     if (r.unavailable) L.push(`- ${goneWords(r.unavailable, wordLine)}: its text is not shown`);
     const d = r.decision;
     if (d) {
-      L.push(`- ${decided(d.kind)} in: #${seqLine(d.seq)} by ${keyLine(d.author)}${d.at ? ` at ${timeLine(d.at)}` : ""}`);
+      L.push(d.byConfirmations
+        ? `- approved: ${acceptedLine(d)}${d.at ? ` at ${timeLine(d.at)}` : ""}`
+        : `- ${decided(d.kind)} in: #${seqLine(d.seq)} by ${keyLine(d.author)}${d.at ? ` at ${timeLine(d.at)}` : ""}`);
       if (d.reason) L.push(`- reason: ${codeSpan(d.reason)}`);
     }
+    const waiting = confirmationsWords(r);
+    if (waiting) L.push(`- waiting: ${waiting}`);
     L.push("");
     if (r.snippet && !r.unavailable) {
       L.push(fence(r.snippet), "");

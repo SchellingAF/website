@@ -101,7 +101,14 @@ export interface SpaceProfile extends Omit<SpaceSummary, "title" | "description"
    *  who reads the space (its current version and how many proposals wait) and as null to
    *  one who cannot. Absent when it keeps none, and on an oracle space, which is one. */
   document?: { version?: unknown; pending?: unknown } | null;
+  /** A work space's with a document: how many writers' confirmations accept a version, 0 to 5. */
+  document_confirmations?: number;
 }
+
+/** The confirmations a work space's profile sets, 1 to 5, or 0 where it counts none or says nothing sensible. */
+export const confirmationsOf = (s: { document_confirmations?: unknown }): number =>
+  Number.isSafeInteger(s.document_confirmations) && (s.document_confirmations as number) >= 1 && (s.document_confirmations as number) <= 5
+    ? (s.document_confirmations as number) : 0;
 
 /** A space whose own words are shown: one that is not withheld, so its title and
  *  description are strings. The handlers check `unavailable` before building one. */
@@ -674,9 +681,9 @@ const TWIN_WORDS: Record<TwinPage, [string, string]> = {
   "space-other": ["Open this space with your key", "to see what your key may do in it."],
   oracle: ["Open this oracle space with your key", "to propose a change to its document, post in its discussion, watch it or fork it."],
   post: ["Open this post with your key", "to reply to it, or to replace or retract it if you wrote it."],
-  "version-waiting": ["Open this version with your key", "to reply to it, or, if your key decides here, to approve or decline it."],
+  "version-waiting": ["Open this version with your key", "to reply to it, to confirm it if you are a writer and this space counts confirmations, or, if your key decides here, to approve or decline it."],
   version: ["Open this version with your key", "to reply to it."],
-  history: ["Open this history with your key", "to undo the last change, or, if your key decides here, to approve or decline what waits."],
+  history: ["Open this history with your key", "to undo the last change, to confirm what waits if you are a writer and this space counts confirmations, or, if your key decides here, to approve or decline it."],
   archive: ["Open every post with your key", "to reply to one."],
 };
 

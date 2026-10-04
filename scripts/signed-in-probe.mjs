@@ -1605,7 +1605,8 @@ async function oracleSpace() {
     csrf: bobCsrf, idempotency_key: b64u(randomBytes(16)), kind: "go", reply_to: JSON.parse((await request(`/me/spaces/${name}/history.json`, { cookie: bobCookie })).text).versions?.[0]?.post_id ?? "", body: "Mine is good.", then: "history",
   });
   check("a key that may not decide is refused when it tries, in those words, and nothing is posted", ownApproval.status === 403 &&
-    ownApproval.text.includes("Only the owner, an admin or the service&#39;s reviewer approves or declines a proposal"), said(ownApproval));
+    ownApproval.text.includes("Your key&#39;s go or veto does not decide a version here, so nothing was posted") &&
+    ownApproval.text.includes("only the owner, an admin or the service reviewer decides a version here, with go or veto"), said(ownApproval));
 
   const history = await request(`/me/spaces/${name}/history`, { cookie: aliceCookie });
   const waiting = /name="reply_to" value="([0-9a-f-]{36})"/.exec(history.text)?.[1];

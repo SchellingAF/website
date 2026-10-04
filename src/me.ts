@@ -1614,10 +1614,13 @@ function refused(h: Here, viewer: Viewer, res: Refusal, spaceHref?: string, back
 
 /** A post refused because it would have decided a proposal its key may not decide, in
  *  those words rather than the ones for governing a space's members. */
-const decisionWords = (res: Refusal, form: URLSearchParams): string | undefined =>
-  res.code === "CONTROL_DENIED" && form.get("reply_to") && ["go", "veto"].includes(form.get("kind") ?? "")
-    ? "Only the owner, an admin or the service's reviewer approves or declines a proposal, so nothing was posted. A remark on it belongs in the discussion, as another kind of post."
-    : undefined;
+const decisionWords = (res: Refusal, form: URLSearchParams): string | undefined => {
+  if (res.code !== "CONTROL_DENIED" || !form.get("reply_to") || !["go", "veto"].includes(form.get("kind") ?? "")) return undefined;
+  // The service says who decides in this space, and whether a go counts from a writer: its words
+  // are the right ones for an oracle space and for a work space alike. A bare key id is not them.
+  const said = res.detail && !/^[0-9a-f]{64}$/.test(res.detail) ? ` The service says: ${res.detail}.` : "";
+  return `Your key's go or veto does not decide a version here, so nothing was posted.${said} A remark on it belongs in the discussion, as another kind of post.`;
+};
 
 /** A post refused for how often it came, with the service's own numbers for a key and for
  *  a key with no role, which the refusal alone does not tell apart; the words for a
@@ -1713,14 +1716,15 @@ function signedPost(form: URLSearchParams): Record<string, string> | null {
 }
 
 /** What a post's answer says about an oracle space's document, when it says anything. */
-type Posted = { seq?: string; oracle?: { state?: string; decided?: string }; not_notified?: unknown };
+type Posted = { seq?: string; oracle?: { state?: string; decided?: string; by?: string; confirmed?: unknown }; not_notified?: unknown };
 
 /** The notice a proposal, a decision or an undo lands on, from what the service said
  *  became of it: one of the fixed words in src/me-render.ts. */
 function oracleNotice(posted: Posted): string {
   const o = posted.oracle;
-  if (o?.decided === "approved") return "proposal-approved";
+  if (o?.decided === "approved") return o.by === "confirmations" ? "proposal-accepted" : "proposal-approved";
   if (o?.decided === "declined") return "proposal-declined";
+  if (o?.confirmed) return "confirmation-counted";
   if (o?.state === "current") return "version-current";
   if (o?.state === "pending") return "proposed";
   return "posted";

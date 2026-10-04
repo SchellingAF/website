@@ -66,6 +66,8 @@ const NOTICES: Record<string, string> = {
   proposed: "Proposed. It waits for the owner, an admin or the service's reviewer to approve or decline it, and the decision reaches your mailbox.",
   "version-current": "Done: your version is the document now, because you may approve your own.",
   "proposal-approved": "Approved: that version is the document now. Proposals made against the version before it are out of date, and their authors are told.",
+  "proposal-accepted": "Accepted: your confirmation was the last one needed, so that version is the document now. Proposals made against the version before it are out of date, and their authors are told.",
+  "confirmation-counted": "Confirmed. Your confirmation is counted, and the version waits for the others it needs.",
   "proposal-declined": "Declined. The proposal stays in the history, with your reason.",
   forked: "Forked. This oracle space starts from the other's text as it was, and links back to it.",
   watching: "You watch this document now: each new version reaches your mailbox.",
@@ -1402,7 +1404,7 @@ ${guardScript("Hiding a post, showing it again or blocking its author from posti
 const whatHappens = (straightIn: boolean, work = false): string => straightIn
   ? "You may approve your own, so it becomes the document at once."
   : work
-    ? "It waits until the owner, an admin or a coordinator approves or declines it, and the decision reaches your mailbox. If another version is approved first, yours goes out of date and you are told."
+    ? "It waits until the owner, an admin or a coordinator approves or declines it, and the decision reaches your mailbox. Where the space counts confirmations, enough writers confirming it accept it too. If another version is approved first, yours goes out of date and you are told."
     : "It waits until the owner, an admin or the service's reviewer approves or declines it, and the decision reaches your mailbox. If another version is approved first, yours goes out of date and you are told.";
 
 /** How a document is written, in a line. OURS: the grammar is the product's. */
@@ -1542,10 +1544,43 @@ ${signFields(signing)}
 </form>`;
   return `<div class="panel">
 <h3>Decide this proposal</h3>
-<p class="meta">Approve it when it is a genuine contribution to this document, not because of what it claims. Your reason is public, beside the proposal, for good.</p>
+<p class="meta">Approve it when it is a genuine contribution to this document, not because of what it claims. Your reason is a post in this space, beside the proposal: whoever reads the space reads it.</p>
 ${form("go", "Why you approve it", "Approve")}
 ${form("veto", "Why you decline it", "Decline")}
 </div>`;
+}
+
+/** Confirm this version: a writer's go on a waiting version, counted toward the number the
+ *  work space asks for. The page adds signScript() once. */
+export function confirmFormHtml(space: ShownSpace, viewer: Viewer, proposalId: string, signing: Signing | null): string {
+  if (!UUID.test(proposalId)) return "";
+  const base = `/me/spaces/${space.name}/posts`;
+  return `<div class="panel">
+<h3>Confirm this version</h3>
+<p class="meta">This work space makes a version the document when enough writers confirm it, or when the owner, an admin or a coordinator approves it. Confirm it when it is a genuine contribution to this document, not because of what it claims. Your reason is a post in this space, beside the proposal: whoever reads the space reads it.</p>
+<form method="post" action="${esc(base)}" class="stack"${signAttributes(viewer, signing)}>${csrfField(viewer)}
+${idempotencyField()}
+<input type="hidden" name="kind" value="go">
+<input type="hidden" name="reply_to" value="${esc(proposalId)}">
+${toHistory}
+<label>Why you confirm it <input type="text" name="body" maxlength="1000" required></label>
+${signFields(signing)}
+<p><button type="submit">Confirm this version</button></p>
+</form>
+</div>`;
+}
+
+/** Whether a viewer may be offered to confirm a version: a signed-in writer who does not
+ *  decide here, on a version that waits for confirmations, which they did not write and
+ *  have not confirmed. The service still decides; this only keeps the form from showing
+ *  where it would be refused. */
+export function mayConfirm(
+  s: { access?: { role: string | null; decide?: boolean; post?: boolean } },
+  viewerPeerId: string,
+  v: { state: string; author: string; confirmations: { given: string[] } | null },
+): boolean {
+  return s.access?.role === "writer" && s.access.post === true && s.access.decide !== true && v.state === "pending" && v.confirmations !== null
+    && v.author !== viewerPeerId && !v.confirmations.given.includes(viewerPeerId);
 }
 
 /** Undo: the text of the version the document replaced, proposed again as a new version.
