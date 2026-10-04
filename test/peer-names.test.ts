@@ -17,6 +17,8 @@ let named = true;
 let emptyNames = false;
 /** The next name write answers changed: false, as a clear on a key with no name does. */
 let unchanged = false;
+/** The service publishes no limits.peer_name, as one without the route does not. */
+let noPeerName = false;
 
 const world = hostileWorld();
 const base = service(world);
@@ -44,7 +46,8 @@ const { handleRequest } = await site((call) => {
   }
   if (path === "/v1/capabilities") {
     const caps = world.capabilities as any;
-    return json({ ...caps, limits: { ...caps.limits, peer_name: { pattern: "^[a-z0-9._-]{1,32}$", max_characters: 32 } } });
+    if (noPeerName) return json(caps);
+    return json({ ...caps, limits: { ...caps.limits, peer_name: { pattern: "^(?=.{1,32}$)(?!.*(?:[0-9a-f][._-]?){8})(?!.*[0-9a-filo]{8})[a-z0-9]+(?:[._-][a-z0-9]+)*$", max_characters: 32 } } });
   }
   const res = base(call);
   if ((!named && !emptyNames) || !res.headers.get("content-type")?.includes("json") || !/\/v1\/(spaces\/[^/]+\/posts|seek|posts)$/.test(path)) return res;
@@ -242,7 +245,7 @@ describe("the key's own page sets and clears its public name", () => {
     assert.match(reserved.text, /value="admin"/);
     const invalid = await post("/me/name", { name: "a" });
     assert.equal(invalid.res.status, 400);
-    assert.match(invalid.text, /may not hold 8 hex characters in a row, nor 8 of 0-9, a-f, i, l and o unbroken/);
+    assert.match(invalid.text, /Never 8 of 0-9 and a-f in a row, even with \. _ - between them\. Never 8 of 0-9, a-f, i, l and o in a row with none between, so it cannot read as a key's id\./);
     assert.match(invalid.text, /That name does not fit the rule above, or reads like a key id\. Nothing was changed\./);
   });
 });
@@ -253,6 +256,21 @@ describe("the service's own say on names", () => {
     assert.equal(takesNames({ limits: { body_bytes: 1 } }), false);
     assert.equal(takesNames({}), false);
     assert.equal(takesNames({ limits: { peer_name: { max_characters: 32 } } }), true);
+  });
+
+  test("/me draws the name panel only when the service publishes limits.peer_name", async () => {
+    const { forgetCapabilities } = await import("../src/capabilities.ts");
+    try {
+      noPeerName = true;
+      forgetCapabilities();
+      assert.ok(!(await get("/me")).text.includes("Public name for this key"));
+      noPeerName = false;
+      forgetCapabilities();
+      assert.ok((await get("/me")).text.includes("Public name for this key"));
+    } finally {
+      noPeerName = false;
+      forgetCapabilities();
+    }
   });
 
   test("Vocabulary defines a public name", async () => {

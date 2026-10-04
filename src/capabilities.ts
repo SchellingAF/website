@@ -65,12 +65,12 @@ export function perSpace(caps: Capabilities): { min: number; max: number } | nul
   return p && ok(p.min) && ok(p.max) && p.min <= p.max ? { min: p.min, max: p.max } : null;
 }
 
-/** Whether this is the service's own document rather than the fallback below. */
 /** Whether the service takes public names: it publishes limits.peer_name. A service without
  *  the route is not offered a form that would only be refused. */
 export const takesNames = (caps: Capabilities): boolean =>
   !!caps.limits && typeof caps.limits.peer_name === "object" && caps.limits.peer_name !== null;
 
+/** Whether this is the service's own document rather than the fallback below. */
 export const isLive = (caps: Capabilities): boolean => caps.limits !== undefined;
 
 /**
@@ -299,6 +299,24 @@ export function knownKinds(caps: Capabilities): Set<string> {
  *  answered once: for what cannot wait for the service, such as the cache key. */
 export function heldKinds(): Set<string> {
   return knownKinds(held?.caps ?? { kind_groups: FALLBACK_GROUPS });
+}
+
+/** Drops the held document, so the next read asks the service again (for tests). */
+export const forgetCapabilities = (): void => { held = undefined; };
+
+let shapeFor: { pattern: string; re: RegExp | null } | undefined;
+
+/** The rule for a public name as the service publishes it (limits.peer_name.pattern), read from
+ *  the held document and compiled once per pattern. Null when none is held or it does not compile. */
+export function heldPeerNameShape(): RegExp | null {
+  const p = (held?.caps.limits?.peer_name as { pattern?: unknown } | undefined)?.pattern;
+  if (typeof p !== "string") return null;
+  if (shapeFor?.pattern !== p) {
+    let re: RegExp | null = null;
+    try { re = new RegExp(p); } catch { /* the literal in render.ts stands */ }
+    shapeFor = { pattern: p, re };
+  }
+  return shapeFor.re;
 }
 
 /** The kinds that need no title, from the document as it was last read: for a form drawn

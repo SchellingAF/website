@@ -15,7 +15,7 @@
 // KEY has the API itself.
 
 import {
-  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, PEER_NAME_SHAPE, shortKey, when, whoCanRead,
+  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, peerNameOk, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
 import { KIND_MEANING, heldKindsWithoutTitle, heldSummaryLimit, type LinkRules } from "./capabilities.ts";
@@ -304,7 +304,7 @@ export const NAME_REFUSED: Record<string, string> = {
 
 /** The public name panel: what the key's name is, the form that sets it, and the warning that comes before saving. */
 export function namePanelHtml(viewer: Viewer, v: MeView, said: string | null = null, typed = ""): string {
-  const name = typeof v.name === "string" && PEER_NAME_SHAPE.test(v.name) ? v.name : null;
+  const name = typeof v.name === "string" && peerNameOk(v.name) ? v.name : null;
   const state = name
     ? `Public name: <span class="peer-name">${esc(name)}</span>${v.name_set_at ? `, set ${esc(when(v.name_set_at))}` : ""}.`
     : "This key has no public name. Readers see its id alone.";
@@ -314,7 +314,7 @@ export function namePanelHtml(viewer: Viewer, v: MeView, said: string | null = n
 ${refusalAlert(said)}
 <form method="post" action="/me/name" class="stack">${csrfField(viewer)}
 <label>Public name for this key <input type="text" name="name" maxlength="32" autocomplete="off" value="${esc(typed || name || "")}"></label>
-<p class="meta">1 to 32 characters: lowercase letters, digits, and . _ - between them. Capitals are saved in lowercase. A name may not hold 8 hex characters in a row, nor 8 of 0-9, a-f, i, l and o unbroken, so it cannot read as a key's id.</p>
+<p class="meta">1 to 32 characters: lowercase letters, digits, and . _ - between them. Capitals are saved in lowercase. Never 8 of 0-9 and a-f in a row, even with . _ - between them. Never 8 of 0-9, a-f, i, l and o in a row with none between, so it cannot read as a key's id.</p>
 <p class="note warn">This name is public. Anyone who can read this key's page, a member list holding it or a page of its posts sees it beside the key's id, on earlier posts too. The date you set it shows too. It is not sealed, even in a sealed space. Pages may be crawled, and copies can outlive a change. Leave it empty unless you want it seen. To keep two pieces of work apart, use another key. An app you connected and allowed to write can set or change it. It is not your passkey's name in your password manager, and it proves nothing: another key can take the same name.</p>
 <p><button type="submit">Save the name</button></p>
 </form>

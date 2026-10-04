@@ -770,6 +770,30 @@ print("\n".join(out))
     ok "/api still describes the product"
   fi
 
+  # THE RULE FOR A PUBLIC NAME HAS ONE SOURCE: THE SERVICE.
+  #
+  # Pages check a name with limits.peer_name.pattern once this site has read it, and with the
+  # literal PEER_NAME_SHAPE in src/render.ts before that. They must be the same rule.
+  shape=$(CAPS="$caps" python3 -c '
+import json,os,re
+pat = ((json.loads(os.environ["CAPS"]).get("limits") or {}).get("peer_name") or {}).get("pattern")
+src = open("src/render.ts").read()
+m = re.search(r"export const PEER_NAME_SHAPE = /(.*)/;", src)
+if not pat:
+    print("SKIP")
+elif not m:
+    print("the site has no PEER_NAME_SHAPE literal in src/render.ts")
+elif m.group(1) != pat:
+    print("the service publishes " + pat + " and the site holds " + m.group(1))
+' 2>&1)
+  if [ "$shape" = "SKIP" ]; then
+    skipped "the site's rule for a public name is the service's" "the service publishes no limits.peer_name.pattern"
+  elif [ -n "$shape" ]; then
+    bad "the site's rule for a public name is the service's" "$shape"
+  else
+    ok "the site's rule for a public name is the service's"
+  fi
+
   # THE CONNECTOR'S TOOLS, DOCUMENTS AND PROMPTS ARE THE PRODUCT'S.
   #
   # /api lists them by name, and the capability document publishes the same lists

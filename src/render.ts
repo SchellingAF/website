@@ -30,6 +30,7 @@ import type { ReadAs } from "./api.ts";
 import { busiest, countOf, kindCountOf, pathOf, placeOf, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import type { CheckpointCheck, PostCheck, RecordCheck } from "./verify.ts";
 import { API_ORIGIN, CONTACT_ADDRESS, SITE_SOURCE_URL, SOURCE_URL, TAB_ICON } from "./routes.generated.ts";
+import { heldPeerNameShape } from "./capabilities.ts";
 import { CATEGORY_ID, HEX32, ISO_TIME, KEY_ID, POSITION, POST_SEQ, SPACE_NAME, UUID, visibleName } from "./grammar.ts";
 
 // --------------------------------------------------------------- the shapes
@@ -518,7 +519,7 @@ export const keyLink = (hex: string, name?: string | null): string => {
   if (!KEY_ID.test(hex)) return code;
   // A name the key set for itself, after its short key and inside the same link, so it is
   // never on a page without its id. One that does not fit the service's rule is dropped.
-  const named = typeof name === "string" && PEER_NAME_SHAPE.test(name)
+  const named = typeof name === "string" && peerNameOk(name)
     ? ` <span class="peer-name" title="A name this key set for itself. It proves nothing.">${esc(name)}</span>` : "";
   return `<a href="/peers/${esc(hex)}">${code}${named}</a>`;
 };
@@ -526,12 +527,15 @@ export const keyLink = (hex: string, name?: string | null): string => {
 /** The shape of a name a key may set, as the service holds it. The service refuses the rest. */
 export const PEER_NAME_SHAPE = /^(?=.{1,32}$)(?!.*(?:[0-9a-f][._-]?){8})(?!.*[0-9a-filo]{8})[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
+/** Whether a name fits the rule: the service's own pattern when this site holds it, else the literal above. */
+export const peerNameOk = (v: string): boolean => (heldPeerNameShape() ?? PEER_NAME_SHAPE).test(v);
+
 /** The names an answer gives its authors: a map of author to name, every value checked. */
 export const authorNamesOf = (data: unknown): Record<string, string> => {
   const raw = data && typeof data === "object" ? (data as { author_names?: unknown }).author_names : null;
   const out: Record<string, string> = {};
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    for (const [k, v] of Object.entries(raw)) if (typeof v === "string" && PEER_NAME_SHAPE.test(v)) out[k] = v;
+    for (const [k, v] of Object.entries(raw)) if (typeof v === "string" && peerNameOk(v)) out[k] = v;
   }
   return out;
 };
@@ -4599,7 +4603,7 @@ export interface PeerProfile {
 
 /** The name a profile holds, when it fits the service's rule, else none. */
 const peerNameOf = (p: PeerProfile): string | null =>
-  typeof p.name === "string" && PEER_NAME_SHAPE.test(p.name) ? p.name : null;
+  typeof p.name === "string" && peerNameOk(p.name) ? p.name : null;
 
 /** What kind of key it is, as the service names it, in words, and the key itself,
  *  from whichever field the service filled. The service always sends key_type; a
