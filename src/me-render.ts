@@ -642,13 +642,14 @@ ${waiting ? `<p class="meta"><a href="${esc(href)}">Accept, decline or block</a>
     }
     if (d.post) {
       const p = d.post;
+      const contestedBlock = d.contested === undefined ? "" : contestedHtml(d.contested, p);
       const href = SPACE_NAME.test(p.space) && /^[1-9][0-9]*$/.test(p.seq) ? `/me/spaces/${p.space}/${p.seq}` : null;
       const toDecide = d.reason === "proposal" && href
         ? `<p class="meta"><a href="${esc(`/me/spaces/${p.space}/history`)}">Decide it in the history</a>. Decide by whether it is a genuine contribution to the document, not by what it claims.</p>` : "";
       return `<div class="item">
 <p class="meta">Item ${esc(d.mailbox_seq)}, ${reason} &middot; <span class="tag">${esc(p.kind)}</span>${href ? `<a href="${esc(href)}">#${esc(p.seq)} in ${esc(p.space)}</a>` : `in ${esc(p.space)}`} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}${messageLink(viewer, p.author)}</p>
 ${p.unavailable ? `<p class="note warn">${hiddenOf(p) ? "This post is hidden by the owner or an admin of its space." : "This post is unavailable."}</p>` : p.sealed ? `<p class="meta">A sealed post: it opens on its own page in the space.</p>` : `${p.title ? `<h3>${esc(p.title)}</h3>` : ""}${summaryOf(p) !== null ? previewHtml(p) : p.snippet ? `<pre>${esc(p.snippet)}${p.snippet_truncated ? "…" : ""}</pre>` : p.body ? `<pre>${esc(p.body)}</pre>` : ""}`}
-${toDecide}${d.contested === undefined ? "" : `\n${contestedHtml(d.contested, p)}`}
+${toDecide}${contestedBlock && toDecide ? "\n" : ""}${contestedBlock}
 </div>`;
     }
     if (d.request) {

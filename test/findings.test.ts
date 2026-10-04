@@ -61,7 +61,8 @@ const CONTESTED: Json[] = [
     { cause: "fail", on: "4", by: CHECKER, post: "14" }] }),
   finding(4, { claim: "Causes in no shape", seq: "34", contested: [
     { cause: "judged", on: "30", by: CHECKER }, { cause: "rejected", on: "30", task: 0, by: CHECKER }, { cause: "warn", on: "x", by: CHECKER },
-    { cause: "fail", on: "5", by: "not a key" }, { cause: "warn", on: "5", by: CHECKER, post: "<b>" }, "text", null] }),
+    { cause: "fail", on: "5", by: "not a key" }, { cause: "warn", on: "5", by: CHECKER, post: "<b>" }, "text", null,
+    { title: "<b>kept</b>", post: "14", by: CHECKER, on: "34", cause: "fail" }] }),
   finding(5, { claim: "Unmarked beside them", seq: "35" }),
 ];
 
@@ -122,6 +123,8 @@ const { fake, handleRequest } = await site(async (call) => {
   if (call.url.pathname === "/v1/spaces/finding-oracle/document") return json({ space: "finding-oracle", title: "A document", version: null, text: null, sections: [], references: [], pending: 0 });
   return base(call);
 });
+// After site(): the module reads the service's address as it loads.
+const { causeSentence, htmlFormat, readableCauses } = await import("../src/render.ts");
 
 async function get(path: string, headers: Record<string, string> = {}) {
   const res = await handleRequest(new Request(`${SITE}${path}`, { headers }), { ...env, SITE_TOKEN: "site-token-for-tests" });
@@ -342,10 +345,14 @@ describe("a finding the service marked contested says what contests it", () => {
     assert.ok(!tags(page).some((t) => t.name === "script"), "the title became a script");
   });
 
-  test("a cause in no shape is dropped, and a finding with none left reads as it did", async () => {
+  test("a cause in no shape is dropped beside the one in shape, and a finding with none left reads as it did", async () => {
     const text = section((await get("/spaces/contested-board")).text);
-    assert.doesNotMatch(rowOf(text, 4), /A check|A member|rests on it|<pre>/);
-    assert.match(rowOf(text, 4), /<p class="meta">Cited by 0 posts\. Cites no sources\.<\/p>\n<\/div>/);
+    const four = rowOf(text, 4);
+    assert.equal(four.match(/A check|A member/g)?.length, 1, "exactly one sentence");
+    assert.ok(four.includes(`A member&#39;s fail, post <a href="/spaces/contested-board/14">14</a>, cites this finding.`) ||
+      four.includes(`A member's fail, post <a href="/spaces/contested-board/14">14</a>, cites this finding.`), four);
+    assert.ok(four.includes("<pre>&lt;b&gt;kept&lt;/b&gt;</pre>"));
+    assert.doesNotMatch(four, /rests on it|judged|<b>/);
     assert.doesNotMatch(rowOf(text, 5), /A check|A member|rests on it/);
   });
 
@@ -364,8 +371,20 @@ describe("a finding the service marked contested says what contests it", () => {
     const row = (n: number) => doc.findings.items.find((r: Json) => r.number === n);
     assert.deepEqual(row(1).contested, CONTESTED[0]!.contested);
     assert.deepEqual(row(3).contested, CONTESTED[2]!.contested);
-    assert.ok(!("contested" in row(4)), "a list with nothing left is left out");
+    assert.equal(JSON.stringify(row(4).contested), JSON.stringify([{ cause: "fail", on: "34", by: CHECKER, post: "14", title: "<b>kept</b>" }]),
+      "a cause is written in the service's order of keys");
+    assert.equal(JSON.stringify(readableCauses([{ by: CHECKER, post: "36", task: 7, on: "30", cause: "rejected" }])),
+      JSON.stringify([{ cause: "rejected", on: "30", task: 7, by: CHECKER, post: "36" }]));
     assert.ok(!("contested" in row(5)));
+  });
+});
+
+describe("a cause read with the finding's own post unknown", () => {
+  test("is not said to be what the finding rests on", () => {
+    const f = htmlFormat(null, undefined);
+    assert.equal(causeSentence({ cause: "warn", on: "5", by: CHECKER, post: "9" }, f), "A member's warn, post 9, cites post 5.");
+    assert.equal(causeSentence({ cause: "rejected", on: "5", task: 2, by: CHECKER }, f).includes("rests on it"), false);
+    assert.ok(causeSentence({ cause: "warn", on: "5", by: CHECKER }, htmlFormat(null, "6")).endsWith("This finding rests on it."));
   });
 });
 

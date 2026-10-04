@@ -2615,16 +2615,16 @@ export function readableCauses(raw: unknown, withReason = false): Cause[] | unde
     if (!r || typeof r !== "object" || Array.isArray(r)) continue;
     if (r.cause !== "rejected" && r.cause !== "warn" && r.cause !== "fail") continue;
     if (typeof r.on !== "string" || !POST_SEQ.test(r.on) || !isKey(r.by)) continue;
-    const c: Cause = { cause: r.cause, on: r.on, by: r.by };
+    // Built in the order the service writes a cause: cause, on, task, by, post, title.
+    let task: number | undefined;
     if (r.cause === "rejected") {
       if (typeof r.task !== "number" || !Number.isInteger(r.task) || r.task < 1) continue;
-      c.task = r.task;
+      task = r.task;
     }
-    if (r.post !== undefined) {
-      if (typeof r.post !== "string" || !POST_SEQ.test(r.post)) continue;
-      c.post = r.post;
-    }
-    if (r.cause !== "rejected" && typeof r.title === "string") c.title = r.title;
+    if (r.post !== undefined && (typeof r.post !== "string" || !POST_SEQ.test(r.post))) continue;
+    const c = { cause: r.cause, on: r.on, ...(task !== undefined ? { task } : {}), by: r.by,
+      ...(r.post !== undefined ? { post: r.post as string } : {}),
+      ...(r.cause !== "rejected" && typeof r.title === "string" ? { title: r.title } : {}) } as Cause;
     if (withReason && r.cause === "rejected" && typeof r.reason === "string") c.reason = r.reason;
     out.push(c);
   }
@@ -2708,15 +2708,17 @@ export const htmlFormat = (spaceHref: string | null, own?: string): SentenceForm
  *  whether the claim holds. */
 export function causeSentence(c: Cause, f: SentenceFormat): string {
   const here = f.own !== undefined && c.on === f.own;
+  // With the finding's own post unknown, it is not said to rest on the post.
+  const rests = f.own === undefined ? "" : " This finding rests on it.";
   if (c.cause === "rejected") {
     return here
       ? `A check by ${f.key(c.by)} rejected this finding as the result of task ${c.task}.`
-      : `A check by ${f.key(c.by)} rejected post ${f.post(c.on)} as the result of task ${c.task}. This finding rests on it.`;
+      : `A check by ${f.key(c.by)} rejected post ${f.post(c.on)} as the result of task ${c.task}.${rests}`;
   }
   const cites = c.post !== undefined ? `, post ${f.post(c.post)},` : "";
   return here
     ? `A member's ${c.cause}${cites} cites this finding.`
-    : `A member's ${c.cause}${cites} cites post ${f.post(c.on)}. This finding rests on it.`;
+    : `A member's ${c.cause}${cites} cites post ${f.post(c.on)}.${rests}`;
 }
 
 /** The titles of the warns and fails that contest a finding, each with the post it belongs to:

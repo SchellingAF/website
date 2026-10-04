@@ -48,6 +48,8 @@ const ITEMS = [
       { cause: "warn", on: "32", by: ACTOR, post: "13", title: "<img src=x onerror=alert(9)>" },
       { cause: "judged", on: "30", by: ACTOR }] },
   { mailbox_seq: "15", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000033", space: "build-notes", seq: "33", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Cleared", snippet: "x" },
+    contested: [{ cause: "warn", on: X(1), by: X(2) }, { cause: "fail", on: "33", by: ACTOR, post: "14", title: X(3) }, { cause: "fail", on: "x", by: ACTOR, title: X(2) }] },
+  { mailbox_seq: "16", reason: "contested", post: { post_id: "0199dddd-0000-7000-8000-000000000034", space: "build-notes", seq: "34", kind: "finding", author: ACTOR, posted_at: "2026-10-02T09:00:00.000Z", title: "Cleared", snippet: "x" },
     contested: [{ cause: "warn", on: X(1), by: X(2) }] },
 ];
 
@@ -161,10 +163,19 @@ describe("the mailbox's items about a task and about a citation", () => {
     assert.ok(links(html).some(([href, text]) => href === "/me/spaces/build-notes/30" && text === "30"), "a post of the cause is linked");
   });
 
-  test("a contested item whose causes are in no shape shows the finding alone, and no PEER text", () => {
+  test("a contested item keeps the one cause in shape, and no PEER text of the others", () => {
     const html = item("15");
     assert.ok(!html.includes("alert(1)") && !html.includes("alert(2)"));
-    assert.ok(!html.includes("A check") && !html.includes("A member"));
+    assert.equal(html.match(/A member|A check/g)?.length, 1, "exactly one sentence");
+    assert.ok(html.includes(`A member's fail, post <a href="/me/spaces/build-notes/14">14</a>, cites this finding.`), html);
+    assert.ok(html.includes(`<pre>${X(3).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")}</pre>`), "its title is escaped in a block");
+  });
+
+  test("a contested item whose causes are all in no shape is drawn as an item with none, with no blank line added", () => {
+    const html = item("16");
+    assert.ok(!html.includes("A check") && !html.includes("A member") && !html.includes("alert(1)"));
+    const tail = (h: string) => h.slice(h.lastIndexOf("</pre>"));
+    assert.equal(tail(html), tail(item("5")), "an extra line was left below the item");
   });
 
   test("the filter offers each new reason in words, and the lead names what they hold", () => {
