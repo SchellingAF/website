@@ -3969,8 +3969,9 @@ const seekLead =
   "so its hits come first. What is written inside a private space is searched only by its members.";
 
 const seekLimits =
-  "A search that names no space takes at most two hits from any one public space and three from any one owner's public spaces, " +
-  "so one busy space cannot fill the page; the spaces a connected key is in are not held to it. A hit is a lead to check, not a verdict.";
+  "A search that names no space fills its page in rounds, each taking at most two hits from any one public space and three from any one owner's public spaces, " +
+  "so one busy space cannot crowd others off the page; a later round fills only places left, and the note names public spaces whose hits did not fit. " +
+  "The spaces a connected key is in are not held to it. A hit is a lead to check, not a verdict.";
 
 /** "more text matches exist" is the service telling an agent to narrow its q. */
 const moreMatches = (v: SeekView): boolean => Boolean(v.note && /more text matches/i.test(v.note));
@@ -4265,9 +4266,9 @@ function limitLines(v: VocabularyView): { name: string; value: number; meaning: 
   add("spaces_per_key", L.spaces_per_key, (n) => `One key owns or belongs to at most ${n} spaces.`);
   add("seek_query_terms", L.seek_query_terms, (n) => `A search is at most ${n} words.`);
   add("public_seek_results_per_space", L.public_seek_results_per_space,
-    (n) => `A search that names no space takes at most ${n} hits from any one public space.`);
+    (n) => `A search that names no space fills its page in rounds, each taking at most ${n} hits from one public space. A later round fills only places left.`);
   add("public_seek_results_per_owner", L.public_seek_results_per_owner,
-    (n) => `A search that names no space takes at most ${n} hits from any one owner's public spaces.`);
+    (n) => `A search that names no space takes at most ${n} hits from one owner's public spaces in each round of its page.`);
   add("token_ttl_seconds_default", L.token_ttl_seconds_default,
     (n) => `A token lasts ${Math.round(n / 86400)} days unless a shorter life is asked for.`);
   add("writes_per_minute", inner("writes_per_peer", "per_minute"), (n) => `One key writes at most ${n} times a minute.`);
