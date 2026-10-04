@@ -50,6 +50,21 @@ const BOARD: Json[] = [
   finding(6, { claim: "Nothing cited for this one", sources: [] }),
 ];
 
+const CHECKER = "e5f6".repeat(16);
+const XSS = "<script>alert(7)</script>";
+/** Findings the service marked contested, each cause as its spec writes it, and one with causes in no shape. */
+const CONTESTED: Json[] = [
+  finding(1, { claim: "Rests on a rejected result", seq: "31", sources: [id(1)], contested: [{ cause: "rejected", on: "30", task: 7, by: CHECKER, post: "36" }] }),
+  finding(2, { claim: "Is itself the rejected result", seq: "32", contested: [{ cause: "rejected", on: "32", task: 4, by: CHECKER }] }),
+  finding(3, { claim: "Cited by a warn", seq: "33", contested: [
+    { cause: "warn", on: "33", by: CHECKER, post: "13", title: `Sum is wrong ${XSS}` },
+    { cause: "fail", on: "4", by: CHECKER, post: "14" }] }),
+  finding(4, { claim: "Causes in no shape", seq: "34", contested: [
+    { cause: "judged", on: "30", by: CHECKER }, { cause: "rejected", on: "30", task: 0, by: CHECKER }, { cause: "warn", on: "x", by: CHECKER },
+    { cause: "fail", on: "5", by: "not a key" }, { cause: "warn", on: "5", by: CHECKER, post: "<b>" }, "text", null] }),
+  finding(5, { claim: "Unmarked beside them", seq: "35" }),
+];
+
 const MANY: Json[] = Array.from({ length: 60 }, (_, i) => finding(i + 1, { claim: `Page ${i + 1}` }));
 
 const world: World = {
@@ -61,6 +76,7 @@ const world: World = {
     space("quiet-board", { visibility: "private" }),
     space("wide-board"),
     space("busy-board"),
+    space("contested-board"),
     space("refused-board"),
     space("broken-board"),
     space("shaped-board"),
@@ -69,11 +85,11 @@ const world: World = {
   ],
   posts: {
     "findings-board": [post(1), post(2), post(3)],
-    "empty-board": [], "quiet-board": [], "wide-board": [], "busy-board": [], "refused-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "finding-oracle": [],
+    "empty-board": [], "quiet-board": [], "wide-board": [], "busy-board": [], "contested-board": [], "refused-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "finding-oracle": [],
   },
   findings: {
     "findings-board": BOARD, "quiet-board": [finding(1, { claim: "A private claim" })], "wide-board": MANY,
-    "busy-board": [finding(1, { claim: "Busy claim" })],
+    "busy-board": [finding(1, { claim: "Busy claim" })], "contested-board": CONTESTED,
     "odd-board": [
       finding(1, {
         x_secret: "SENTINEL-FINDING-FIELD", author: "not a key", posted_at: "yesterday", sources: [id(1), "not an id"],
@@ -304,6 +320,52 @@ describe("the JSON twin carries the service's fields unchanged", () => {
     assert.equal(row.confidence, "unknown");
     assert.deepEqual(row.sources, [id(1)]);
     assert.doesNotMatch(JSON.stringify(doc), /SENTINEL-FINDING-FIELD/);
+  });
+});
+
+describe("a finding the service marked contested says what contests it", () => {
+  const KEY = `<a href="/peers/${CHECKER}"><code title="${CHECKER}">e5f6e5f6…e5f6</code></a>`;
+
+  test("each cause is one sentence in the row, the posts and the key linked", async () => {
+    const text = section((await get("/spaces/contested-board")).text);
+    assert.ok(rowOf(text, 1).includes(`A check by ${KEY} rejected post <a href="/spaces/contested-board/30">30</a> as the result of task 7. This finding rests on it.`));
+    assert.ok(rowOf(text, 2).includes(`A check by ${KEY} rejected this finding as the result of task 4.`));
+    assert.ok(rowOf(text, 3).includes(`A member&#39;s warn, post <a href="/spaces/contested-board/13">13</a>, cites this finding.`) ||
+      rowOf(text, 3).includes(`A member's warn, post <a href="/spaces/contested-board/13">13</a>, cites this finding.`), rowOf(text, 3));
+    assert.ok(/A member.s fail, post <a href="\/spaces\/contested-board\/14">14<\/a>, cites post <a href="\/spaces\/contested-board\/4">4<\/a>\. This finding rests on it\./.test(rowOf(text, 3)));
+  });
+
+  test("a warn's title is text in a block of its own, never markup", async () => {
+    const page = (await get("/spaces/contested-board")).text;
+    assert.deepEqual(htmlProblems(page), []);
+    assert.ok(rowOf(section(page), 3).includes("<pre>Sum is wrong &lt;script&gt;alert(7)&lt;/script&gt;</pre>"));
+    assert.ok(!tags(page).some((t) => t.name === "script"), "the title became a script");
+  });
+
+  test("a cause in no shape is dropped, and a finding with none left reads as it did", async () => {
+    const text = section((await get("/spaces/contested-board")).text);
+    assert.doesNotMatch(rowOf(text, 4), /A check|A member|rests on it|<pre>/);
+    assert.match(rowOf(text, 4), /<p class="meta">Cited by 0 posts\. Cites no sources\.<\/p>\n<\/div>/);
+    assert.doesNotMatch(rowOf(text, 5), /A check|A member|rests on it/);
+  });
+
+  test("the markdown says the same, the title fenced", async () => {
+    const md = (await get("/spaces/contested-board.md")).text;
+    assert.deepEqual(markdownProblems(md), []);
+    assert.ok(md.includes(`A check by ${CHECKER} rejected post 30 as the result of task 7. This finding rests on it.`));
+    assert.ok(md.includes(`A check by ${CHECKER} rejected this finding as the result of task 4.`));
+    assert.ok(md.includes(`A member's warn, post 13, cites this finding. A member's fail, post 14, cites post 4. This finding rests on it.`));
+    assert.ok(md.includes("```\nSum is wrong <script>alert(7)</script>\n```"), "the title is not in a fence");
+    assert.doesNotMatch(md, /judged/);
+  });
+
+  test("the JSON keeps each cause as the service wrote it, those in no shape dropped", async () => {
+    const doc = JSON.parse((await get("/spaces/contested-board.json")).text) as Json;
+    const row = (n: number) => doc.findings.items.find((r: Json) => r.number === n);
+    assert.deepEqual(row(1).contested, CONTESTED[0]!.contested);
+    assert.deepEqual(row(3).contested, CONTESTED[2]!.contested);
+    assert.ok(!("contested" in row(4)), "a list with nothing left is left out");
+    assert.ok(!("contested" in row(5)));
   });
 });
 
