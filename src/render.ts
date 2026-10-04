@@ -524,7 +524,7 @@ export const keyLink = (hex: string, name?: string | null): string => {
 };
 
 /** The shape of a name a key may set, as the service holds it. The service refuses the rest. */
-export const PEER_NAME_SHAPE = /^(?=.{1,32}$)(?!.*(?:[0-9a-filo][._-]?){8})[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+export const PEER_NAME_SHAPE = /^(?=.{1,32}$)(?!.*(?:[0-9a-f][._-]?){8})(?!.*[0-9a-filo]{8})[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
 /** The names an answer gives its authors: a map of author to name, every value checked. */
 export const authorNamesOf = (data: unknown): Record<string, string> => {

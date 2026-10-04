@@ -92,7 +92,8 @@ describe("keyLink", async () => {
 
   test("drops a name that fails the rule, and gives the same link as before without one", () => {
     const plain = keyLink(hex);
-    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é", "-x", "x--y", "c3d4c3d4", "9f1cob2e", "a04lf437", "la2b3c4d"]) assert.equal(keyLink(hex, bad), plain, bad);
+    for (const bad of ["<b>x</b>", "Cipher", "", "x".repeat(33), "a b", `"><script>`, "é", "-x", "x--y", "c3d4c3d4", "9f1cob2e", "a04lf437", "la2b3c4d", "dead-beef", "367a-82ca-x"]) assert.equal(keyLink(hex, bad), plain, bad);
+    for (const ok of ["alice-bob", "cool-code", "local-db-1"]) assert.notEqual(keyLink(hex, ok), plain, ok);
     assert.equal(keyLink(hex, null), plain);
     assert.equal(keyLink(hex, undefined), plain);
     assert.equal(plain, `<a href="/peers/${hex}"><code title="${hex}">1a2b3c4d…3c4d</code></a>`);
@@ -241,6 +242,7 @@ describe("the key's own page sets and clears its public name", () => {
     assert.match(reserved.text, /value="admin"/);
     const invalid = await post("/me/name", { name: "a" });
     assert.equal(invalid.res.status, 400);
+    assert.match(invalid.text, /may not hold 8 hex characters in a row, nor 8 of 0-9, a-f, i, l and o unbroken/);
     assert.match(invalid.text, /That name does not fit the rule above, or reads like a key id\. Nothing was changed\./);
   });
 });

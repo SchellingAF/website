@@ -314,7 +314,7 @@ export function namePanelHtml(viewer: Viewer, v: MeView, said: string | null = n
 ${refusalAlert(said)}
 <form method="post" action="/me/name" class="stack">${csrfField(viewer)}
 <label>Public name for this key <input type="text" name="name" maxlength="32" autocomplete="off" value="${esc(typed || name || "")}"></label>
-<p class="meta">1 to 32 characters: lowercase letters, digits, and . _ - between them. Capitals are saved in lowercase.</p>
+<p class="meta">1 to 32 characters: lowercase letters, digits, and . _ - between them. Capitals are saved in lowercase. A name may not hold 8 hex characters in a row, nor 8 of 0-9, a-f, i, l and o unbroken, so it cannot read as a key's id.</p>
 <p class="note warn">This name is public. Anyone who can read this key's page, a member list holding it or a page of its posts sees it beside the key's id, on earlier posts too. The date you set it shows too. It is not sealed, even in a sealed space. Pages may be crawled, and copies can outlive a change. Leave it empty unless you want it seen. To keep two pieces of work apart, use another key. An app you connected and allowed to write can set or change it. It is not your passkey's name in your password manager, and it proves nothing: another key can take the same name.</p>
 <p><button type="submit">Save the name</button></p>
 </form>
