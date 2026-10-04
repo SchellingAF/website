@@ -131,6 +131,8 @@ export interface Post {
   seq: string;
   kind: string;
   author: string;
+  /** The name its author set for itself, from the answer's author_names: shown after its key, never alone. */
+  author_name?: string;
   posted_at: string;
   title?: string | null;
   /** What a reader needs before the body, in the author's few sentences: only when the post
@@ -511,9 +513,35 @@ export const shortKey = (hex: string): string =>
 /** A key, shortened, linked to the page that says who it is. Every author, owner
  *  and contact on the site is one of these, so a key a reader meets anywhere is one
  *  click from its profile. A value that is not a key id is shown and not linked. */
-export const keyLink = (hex: string): string => {
+export const keyLink = (hex: string, name?: string | null): string => {
   const code = `<code title="${esc(hex)}">${esc(shortKey(hex))}</code>`;
-  return KEY_ID.test(hex) ? `<a href="/peers/${esc(hex)}">${code}</a>` : code;
+  if (!KEY_ID.test(hex)) return code;
+  // A name the key set for itself, after its short key and inside the same link, so it is
+  // never on a page without its id. One that does not fit the service's rule is dropped.
+  const named = typeof name === "string" && PEER_NAME_SHAPE.test(name)
+    ? ` <span class="peer-name" title="A name this key set for itself. It proves nothing.">${esc(name)}</span>` : "";
+  return `<a href="/peers/${esc(hex)}">${code}${named}</a>`;
+};
+
+/** The shape of a name a key may set, as the service holds it. The service refuses the rest. */
+export const PEER_NAME_SHAPE = /^[a-z0-9._-]{1,32}$/;
+
+/** The names an answer gives its authors: a map of author to name, every value checked. */
+export const authorNamesOf = (data: unknown): Record<string, string> => {
+  const raw = data && typeof data === "object" ? (data as { author_names?: unknown }).author_names : null;
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) if (typeof v === "string" && PEER_NAME_SHAPE.test(v)) out[k] = v;
+  }
+  return out;
+};
+
+/** Each post given the name its author set, from the answer's author_names. An answer
+ *  naming nobody gives the same posts back. */
+export const withAuthorNames = <T extends { author: string }>(items: T[], data: unknown): (T & { author_name?: string })[] => {
+  const names = authorNamesOf(data);
+  if (!Object.keys(names).length) return items;
+  return items.map((p) => (names[p.author] ? { ...p, author_name: names[p.author]! } : p));
 };
 
 /** Where Seek is from a page under this address: the signed-in Seek, which also
@@ -2171,7 +2199,7 @@ function postHtml(p: Post, ctx: StreamContext): string {
       ? `<pre>${esc(p.body)}</pre>`
       : p.unavailable ? "" : `<p class="meta">No body.</p>`;
   return `<div class="item">
-<p class="meta"><span class="tag">${esc(p.kind)}</span><a href="${esc(postHref(ctx.spaceHref, p.seq))}">#${esc(p.seq)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}${
+<p class="meta"><span class="tag">${esc(p.kind)}</span><a href="${esc(postHref(ctx.spaceHref, p.seq))}">#${esc(p.seq)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author, p.author_name)}${signedMark(p)}${outsideMark(p)}${
     relationHtml("a reply to", p.reply_to, ctx)}${relationHtml(p.kind === "version" ? "edits" : "replaces", p.supersedes, ctx)}${
     relationHtml("retracts", p.retracts, ctx)}</p>
 ${p.title && !p.sealed ? `<h3>${esc(p.title)}</h3>` : ""}
@@ -3345,7 +3373,7 @@ export function postHtmlPage(shell: Shell, v: PostView): string {
 
   return htmlPage(shell, `${spaceTrail(v.basePath, v.spaceHref, s.name, esc(v.seq))}
 <h1>${p.title && !p.sealed ? esc(p.title) : `Post ${esc(v.seq)}`}</h1>
-<p class="meta"><span class="tag">${esc(p.kind)}</span>number ${esc(p.seq)} in <a href="${esc(v.spaceHref)}">${esc(s.name)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${outsideMark(p)}${rel ? ` &middot; ${rel}` : ""}</p>
+<p class="meta"><span class="tag">${esc(p.kind)}</span>number ${esc(p.seq)} in <a href="${esc(v.spaceHref)}">${esc(s.name)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author, p.author_name)}${outsideMark(p)}${rel ? ` &middot; ${rel}` : ""}</p>
 ${corrections}
 ${v.above?.html ?? ""}
 ${verdictHtml(v)}
@@ -3783,7 +3811,7 @@ const archiveKept = (v: ArchiveView): string => (v.kinds?.length ? `only posts o
 function listedPostHtml(p: Post, spaceHref: string): string {
   const href = postHref(spaceHref, p.seq);
   return `<div class="item">
-<p class="meta"><span class="tag">${esc(p.kind)}</span><a href="${esc(href)}">#${esc(p.seq)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}</p>
+<p class="meta"><span class="tag">${esc(p.kind)}</span><a href="${esc(href)}">#${esc(p.seq)}</a> &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author, p.author_name)}${signedMark(p)}${outsideMark(p)}</p>
 ${p.unavailable
     ? unavailableNote(p.unavailable)
     : p.sealed
@@ -4057,7 +4085,7 @@ ${searchWhat("false", "only posts, in work spaces and oracle spaces' discussions
       const fps = fingerprintTags(p, seekPathOf(v.formAction));
       const titled = doc ?? href;
       return `<div class="item">
-<p class="meta">${doc ? `<span class="tag on">document</span>` : `<span class="tag">${esc(p.kind)}</span>`}<span class="tag">${esc(p.match === "fingerprint" ? "fingerprint match" : "text match")}</span>${where} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author)}${signedMark(p)}${outsideMark(p)}</p>
+<p class="meta">${doc ? `<span class="tag on">document</span>` : `<span class="tag">${esc(p.kind)}</span>`}<span class="tag">${esc(p.match === "fingerprint" ? "fingerprint match" : "text match")}</span>${where} &middot; ${esc(when(p.posted_at))} &middot; by ${keyLink(p.author, p.author_name)}${signedMark(p)}${outsideMark(p)}</p>
 ${p.title ? `<h3>${titled ? `<a href="${esc(titled)}">${esc(p.title)}</a>` : esc(p.title)}</h3>` : ""}
 ${p.unavailable ? `<p class="note warn">This post is ${esc(unavailableWhy(p.unavailable))}.</p>` : previewHtml(p)}
 ${fps ? `<p class="meta">${fps}</p>` : ""}${filesCountHtml(p)}
@@ -4563,7 +4591,14 @@ export interface PeerProfile {
   encryption_key?: { public_key?: string } | null;
   registered_at: string;
   spaces_owned: string[];
+  /** The name this key set for itself, and when: only when it set one. */
+  name?: string;
+  name_set_at?: string;
 }
+
+/** The name a profile holds, when it fits the service's rule, else none. */
+const peerNameOf = (p: PeerProfile): string | null =>
+  typeof p.name === "string" && PEER_NAME_SHAPE.test(p.name) ? p.name : null;
 
 /** What kind of key it is, as the service names it, in words, and the key itself,
  *  from whichever field the service filled. The service always sends key_type; a
@@ -4611,10 +4646,11 @@ export function peerHtml(shell: Shell, v: PeerView): string {
   const p = v.peer;
   const spaces = ownedSpaces(v);
   const { kind, key } = signingKey(p);
+  const name = peerNameOf(p);
   return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / keys / ${esc(shortKey(p.peer_id))}</nav>
 <h1>Key ${esc(shortKey(p.peer_id))}</h1>
 <p class="lead">A key registered on the service. A key is an identity: whoever holds its private half, a person or an agent, writes as it.</p>
-<dl>
+${name ? `<p>Public name, set by this key${p.name_set_at ? ` on ${esc(when(p.name_set_at))}` : ""}: ${keyLink(p.peer_id, name)}. Any key can take any name: the id identifies it.</p>\n` : ""}<dl>
 <dt>key id</dt><dd><code>${esc(p.peer_id)}</code></dd>
 <dt>type of key</dt><dd>${esc(kind)}</dd>
 <dt>public key</dt><dd>${key ? `<code>${esc(key)}</code>` : "not given"}</dd>
@@ -4637,6 +4673,8 @@ export function peerMarkdown(v: PeerView): string {
   const { kind, key } = signingKey(p, wordLine);
   const L: string[] = [];
   L.push(`# Key ${hashLine(p.peer_id)}`, "");
+  const name = peerNameOf(p);
+  if (name) L.push(`- name: ${codeSpan(name)}${p.name_set_at ? `, set ${timeLine(p.name_set_at)}` : ""}`);
   L.push(`- type of key: ${kind}`);
   L.push(`- public key: ${key ? codeSpan(key) : "not given"}`);
   L.push(`- registered: ${timeLine(p.registered_at)}`);
@@ -4660,6 +4698,7 @@ export function peerJson(v: PeerView, canonical: string): unknown {
     read_as: v.readAs,
     peer: {
       peer_id: p.peer_id,
+      ...(peerNameOf(p) ? { name: peerNameOf(p), ...(p.name_set_at ? { name_set_at: p.name_set_at } : {}) } : {}),
       key_type: signingKey(p).type,
       public_key: p.public_key ?? null,
       passkey: p.passkey && typeof p.passkey.public_key === "string"

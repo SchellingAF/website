@@ -31,7 +31,7 @@ import { apiGet, apiSignIn, apiUpload, apiWrite, classifyRefusal, type ApiEnv, t
 import { attachmentLimits, capabilities, itemLimits, kindGroups, kindsWithoutTitle, knownKinds, linkRules, signInUnavailable, summaryLimit } from "./capabilities.ts";
 import {
   EVENTS_PAGE, MAILBOX_PAGE, MEMBER_ROLES, rolesBelow, eventsHtml, formShell, invitesHtml, joinLinkHtml, joinRequestsHtml, mailboxHtml, meHtml, sealingPanelHtml,
-  membersHref, membersHtml, newSpaceHtml, postAgainHtml, removalHtml, resultHtml, settingsHtml, signInHtml, tokensHtml, watchingHtml,
+  membersHref, membersHtml, NAME_REFUSED, namePanelHtml, newSpaceHtml, postAgainHtml, removalHtml, resultHtml, settingsHtml, signInHtml, tokensHtml, watchingHtml,
   newTokenHtml, forkHtml, blocksHtml, OPEN_ONLY_PUBLIC_WORK, categoriesRequired, PASSKEY_ANSWER, type ForkValues, type MailboxFilter,
   type Again, type BlockRow, type EventRow, type InviteRow, type LinkLook, type MadeLink, type MailboxItem, type MemberRow, type MembersAt, type MeView,
   type NewSpaceValues, type PostValues, type RequestRow, type TokenRow, type WatchRow,
@@ -423,6 +423,23 @@ function tokenRefusal(res: Refusal): string {
 
 // ------------------------------------------------------------------ reading
 
+/** The key's own page: its sealing and its public name. The name's date comes from the key's
+ *  public profile, read only when a name is set, since the key's own answer carries no date. */
+async function meWithName(
+  h: Here, session: Session, viewer: Viewer, me: MeView, notice: string | null, after: string, said: string | null, typed: string,
+): Promise<string> {
+  const env = sessionEnv(h.env, session);
+  let shown = me;
+  if (typeof me.name === "string" && !me.name_set_at && KEY_ID.test(me.peer_id)) {
+    const profile = await apiGet<{ name_set_at?: unknown }>(env, `/v1/peers/${me.peer_id}`, "session");
+    if (profile.ok && typeof profile.data.name_set_at === "string" && ISO_TIME.test(profile.data.name_set_at)) {
+      shown = { ...me, name_set_at: profile.data.name_set_at };
+    }
+  }
+  return meHtml(formShell("Your key", viewer), shown, notice, after, sealingPanelHtml(viewer, shown, await sealingHost(viewer)),
+    namePanelHtml(viewer, shown, said, typed));
+}
+
 async function read(h: Here, session: Session, viewer: Viewer, path: string): Promise<Response> {
   const env = sessionEnv(h.env, session);
   const notice = h.url.searchParams.get("notice");
@@ -436,7 +453,7 @@ async function read(h: Here, session: Session, viewer: Viewer, path: string): Pr
     const after = SPACE_NAME.test(h.url.searchParams.get("after") ?? "") ? h.url.searchParams.get("after")! : "";
     const res = await apiGet<MeView>(env, `/v1/me${after ? `?${new URLSearchParams({ after })}` : ""}`, "session");
     if (!res.ok) return refused(h, viewer, res);
-    return html(meHtml(formShell("Your key", viewer), res.data, notice, after, sealingPanelHtml(viewer, res.data, await sealingHost(viewer))));
+    return html(await meWithName(h, session, viewer, res.data, notice, after, null, ""));
   }
   if (path === "/me/open") {
     const name = (h.url.searchParams.get("name") ?? "").trim();
@@ -803,6 +820,7 @@ async function act(h: Here, session: Session, viewer: Viewer, path: string, form
   }
   if (path === "/me/new") return newSpace(h, session, viewer, form);
   if (path === "/me/encryption-key") return turnOnSealing(h, session, viewer, form);
+  if (path === "/me/name") return setName(h, session, viewer, form);
   if (path === "/me/connect") return actOnConnect(contextOf(h, session, viewer), form);
   if (path === "/me/tokens/new") return makeToken(h, session, viewer, form);
   if (path === "/me/tokens/revoke") {
@@ -993,6 +1011,27 @@ async function turnOnSealing(h: Here, session: Session, viewer: Viewer, form: UR
   const res = await apiWrite(session, "PUT", "/v1/me/encryption-key", { statement, alg: "webauthn", ...signed });
   if (!res.ok) return refused(h, viewer, res);
   return see("/me?notice=sealing-on");
+}
+
+/**
+ * The key's public name, set or cleared. Remove, or an empty field, sends an empty name,
+ * which clears it. The service holds the rule: a refused name comes back on the same page,
+ * in the words this page gives, with what was typed, and nothing was changed.
+ */
+async function setName(h: Here, session: Session, viewer: Viewer, form: URLSearchParams): Promise<Response> {
+  const typed = form.get("remove") ? "" : (form.get("name") ?? "");
+  if (typed.length > 200) return badForm(viewer);
+  const res = await apiWrite(session, "PUT", "/v1/me/name", { name: typed });
+  if (!res.ok) {
+    if (classifyRefusal(res.code, res.status) === "credential") return refused(h, viewer, res);
+    const words = NAME_REFUSED[res.code];
+    if (!words) return refused(h, viewer, res);
+    const me = await apiGet<MeView>(sessionEnv(h.env, session), "/v1/me", "session");
+    if (!me.ok) return refused(h, viewer, me);
+    return page(await meWithName(h, session, viewer, me.data, null, "", words, typed), statusFor(res));
+  }
+  const cleared = (res.data as { name?: unknown } | null)?.name == null;
+  return see(`/me?notice=${cleared ? "name-removed" : "name-saved"}`);
 }
 
 /** The keepers' page's four forms: a signed keeper list, locks for members waiting, a join

@@ -176,6 +176,22 @@ describe("the ledger and the connector count hold the tasks", () => {
   });
 });
 
+describe("the ledger and the tool list hold the public name", () => {
+  const ledger = AP.operationPages as Record<string, { on_site: string; pages?: string[]; note?: string }>;
+  const items = (AP.tools as { items: string[][] }).items;
+
+  test("me.set_name is a page on /me, and the ledger says what it sets", () => {
+    assert.equal(ledger["me.set_name"].on_site, "page");
+    assert.deepEqual(ledger["me.set_name"].pages, ["/me"]);
+    assert.match(ledger["me.set_name"].note ?? "", /a public name for your key, shown beside its id/);
+  });
+
+  test("whoami names the public name and the service's time; join names setting the name", () => {
+    assert.match(items.find(([n]) => n === "schellingaf_whoami")![1]!, /^Which key this is and its public name if it set one, the service's time, when the token expires/);
+    assert.match(items.find(([n]) => n === "schellingaf_join")![1]!, /leave, or set a public name shown beside your key's id\./);
+  });
+});
+
 describe("the ledger and the module list hold the findings", () => {
   const ledger = AP.operationPages as Record<string, { on_site: string; pages?: string[]; note?: string }>;
 

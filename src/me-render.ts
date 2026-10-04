@@ -15,7 +15,7 @@
 // KEY has the API itself.
 
 import {
-  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, shortKey, when, whoCanRead,
+  csrfField, esc, filedIds, hiddenOf, outsideMark, ownWord, previewHtml, signedMark, summaryOf, foldedJson, htmlPage, keyLink, noticeHtml, PEER_NAME_SHAPE, shortKey, when, whoCanRead,
   type Post, type Shell, type ShownSpace, type Viewer,
 } from "./render.ts";
 import { KIND_MEANING, heldKindsWithoutTitle, heldSummaryLimit, type LinkRules } from "./capabilities.ts";
@@ -52,6 +52,8 @@ const NOTICES: Record<string, string> = {
   declined: "The join request is declined.",
   revoked: "The link is revoked. Whoever holds it and has not used it is refused from now on.",
   "signed-in": "You are connected.",
+  "name-saved": "Public name saved. It shows beside this key's id.",
+  "name-removed": "Public name removed. Copies taken while it showed may remain.",
   "sealing-on": "Sealing is on. Your key's encryption key is published, for life, and sealed conversations and spaces can lock their keys to it.",
   "message-sent": "Sent.",
   "request-accepted": "Accepted. Its messages reach you now, and its sender can write again.",
@@ -289,6 +291,35 @@ export interface MeView {
   messages?: { unread_conversations: number; requests_waiting: number; retention_days: number };
   /** The key's encryption key, once published: what sealed conversations and spaces seal to it. */
   encryption_key?: { public_key: string; fingerprint: string } | null;
+  /** The name this key set for itself, when it set one, and when, from its profile. */
+  name?: string;
+  name_set_at?: string;
+}
+
+/** A refused name, in the words the page gives: by the code the service sent. */
+export const NAME_REFUSED: Record<string, string> = {
+  PEER_NAME_INVALID: "That name does not fit the rule above, or reads like a key id. Nothing was changed.",
+  PEER_NAME_RESERVED: "That name reads as a word kept for roles, statuses and the service, such as admin, owner, operator or verified, even spelled with digits or at the start or end of a longer word. Choose another. Nothing was changed.",
+};
+
+/** The public name panel: what the key's name is, the form that sets it, and the warning that comes before saving. */
+export function namePanelHtml(viewer: Viewer, v: MeView, said: string | null = null, typed = ""): string {
+  const name = typeof v.name === "string" && PEER_NAME_SHAPE.test(v.name) ? v.name : null;
+  const state = name
+    ? `Public name: <span class="peer-name">${esc(name)}</span>${v.name_set_at ? `, set ${esc(when(v.name_set_at))}` : ""}.`
+    : "This key has no public name. Readers see its id alone.";
+  return `<h2 id="name-heading">Public name</h2>
+<div class="panel" id="name-panel">
+<p>${state}</p>
+${refusalAlert(said)}
+<form method="post" action="/me/name" class="stack">${csrfField(viewer)}
+<label>Public name for this key <input type="text" name="name" maxlength="32" autocomplete="off" value="${esc(typed || name || "")}"></label>
+<p class="meta">1 to 32 characters: lowercase letters, digits, and . _ - between them. Capitals are saved in lowercase.</p>
+<p class="note warn">This name is public. Anyone who can read this key's page, a member list holding it or a page of its posts sees it beside the key's id, on earlier posts too. The date you set it shows too. It is not sealed, even in a sealed space. Pages may be crawled, and copies can outlive a change. Leave it empty unless you want it seen. To keep two pieces of work apart, use another key. An app you connected and allowed to write can set or change it. It is not your passkey's name in your password manager, and it proves nothing: another key can take the same name.</p>
+<p><button type="submit">Save the name</button></p>
+</form>
+${name ? buttonForm(viewer, "/me/name", "Remove the name", { remove: "1" }, false) : ""}
+</div>`;
 }
 
 /**
@@ -319,7 +350,7 @@ ${host}`;
 
 /** The key's own page. `after` is the space its list of memberships continues after,
  *  held to a name's shape, or "" from the start. */
-export function meHtml(shell: Shell, v: MeView, notice: string | null, after = "", sealing = ""): string {
+export function meHtml(shell: Shell, v: MeView, notice: string | null, after = "", sealing = "", namePanel = ""): string {
   const owned = v.spaces_owned.length
     ? `<ul>${v.spaces_owned.map((n) => `<li>${spaceLink(n)}</li>`).join("")}</ul>`
     : "<p>None yet.</p>";
@@ -343,6 +374,7 @@ ${next ? `<p><a href="${esc(`/me?after=${next}`)}">More spaces you are in</a></p
 ${v.messages ? `<dt>messages</dt><dd><a href="/me/messages">${esc(String(v.messages.unread_conversations))} ${v.messages.unread_conversations === 1 ? "conversation" : "conversations"} with something unread</a>, <a href="/me/messages/requests">${esc(String(v.messages.requests_waiting))} message ${v.messages.requests_waiting === 1 ? "request" : "requests"}</a>; kept ${esc(String(v.messages.retention_days))} days (<a href="/me/messages/settings">settings</a>)</dd>` : ""}
 </dl>
 ${sealing}
+${namePanel}
 <h2>Spaces you own</h2>
 ${owned}
 <p><a href="/me/new">Create a space</a></p>
@@ -1681,6 +1713,8 @@ export interface MemberRow {
   peer_id: string; role: string; tags: string[]; via: string; granted_by: string; granted_at: string;
   /** Who decided this membership last: a coordinator changes only the keys it manages. */
   managed_by?: string;
+  /** The name this key set for itself, when it set one: shown after its key, never alone. */
+  name?: string;
   /** The link this membership rests on, while it rests on one. */
   invite_id?: string | null;
 }
@@ -1733,7 +1767,7 @@ export function membersHtml(
   const base = `/me/spaces/${space.name}`;
   // Set and Remove come back to the page they were pressed on, not to the first.
   const where = membersAtFields(at);
-  const rows = items.map((m) => `<tr><td>${keyLink(m.peer_id)}${m.peer_id === viewer.peerId ? ' <span class="tag on">you</span>' : messageLink(viewer, m.peer_id)}</td>
+  const rows = items.map((m) => `<tr><td>${keyLink(m.peer_id, m.name)}${m.peer_id === viewer.peerId ? ' <span class="tag on">you</span>' : messageLink(viewer, m.peer_id)}</td>
 <td>${esc(m.role)}</td><td>${m.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</td><td>${esc(ownWord(JOINED_BY, m.via) ?? m.via)}${
     m.invite_id ? ' <span class="tag">came in by a link</span>' : ""}</td>
 <td>${keyLink(m.granted_by)} ${esc(when(m.granted_at))}</td>

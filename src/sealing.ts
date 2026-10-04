@@ -178,8 +178,8 @@ export function keepersHtml(shell: Shell, viewer: Viewer, v: KeepersView): strin
 <dt>generation</dt><dd>${st.generation === null ? "none yet: a keeper makes the first key" : esc(st.generation)}${st.activated_at ? `, in use since ${esc(when(st.activated_at))}` : ""}</dd>
 ${st.commitment ? `<dt>its commitment</dt><dd><code>${esc(st.commitment)}</code>: every member's software checks the key it holds against this. Compare it with other members, outside this site, to know you all hold the same key.</dd>` : ""}
 ${st.staged ? `<dt>a change under way</dt><dd>generation ${esc(st.staged.generation)}, begun ${esc(when(st.staged.staged_at))} by ${keyLink(st.staged.created_by)}</dd>` : ""}
-<dt>keepers</dt><dd>${keeperIds.map(keyLink).join(", ")}${st.keeper_list && !st.keeper_list.in_force ? " (the list the owner before signed names nobody now)" : ""}</dd>
-<dt>who gets in without asking</dt><dd>${now.admission === "open" ? "any key that asks" : `a key with a stamp from ${now.stampers.length ? now.stampers.map(keyLink).join(", ") : "nobody"}`}</dd>
+<dt>keepers</dt><dd>${keeperIds.map((k) => keyLink(k)).join(", ")}${st.keeper_list && !st.keeper_list.in_force ? " (the list the owner before signed names nobody now)" : ""}</dd>
+<dt>who gets in without asking</dt><dd>${now.admission === "open" ? "any key that asks" : `a key with a stamp from ${now.stampers.length ? now.stampers.map((k) => keyLink(k)).join(", ") : "nobody"}`}</dd>
 <dt>a keeper last acted</dt><dd>${st.kept ? `${esc(when(st.kept.at))}, ${keyLink(st.kept.by)}` : "never"}</dd>
 ${upkeep ? `<dt>waiting for the key</dt><dd>${esc(String(upkeep.waiting))} ${upkeep.waiting === 1 ? "member" : "members"}</dd>
 <dt>waiting for somebody to vouch for them</dt><dd>${esc(String(upkeep.unvouched ?? 0))} ${(upkeep.unvouched ?? 0) === 1 ? "member" : "members"}: a keeper hands the key only to a member the owner, a keeper or a stamper the list names vouched for</dd>

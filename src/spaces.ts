@@ -70,7 +70,7 @@ import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRo
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
 import { NO_DOCUMENT, UNREAD, WITHHELD, checked, closedRank, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
 import {
-  codeSpan, errorHtml, timeLine, wordLine, listingHtml, listingJson, listingMarkdown,
+  codeSpan, errorHtml, timeLine, withAuthorNames, wordLine, listingHtml, listingJson, listingMarkdown,
   postHtmlPage, postJsonPage, postMarkdownPage,
   spaceHtml, spaceJson, spaceMarkdown, readableFindings, readableTasks, type FindingsView, type TasksView,
   archiveHtml, archiveJson, archiveMarkdown,
@@ -1406,7 +1406,8 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
       : null;
     const stream = await apiGet<Page<Post>>(env, `/v1/spaces/${name}/posts?${params}`, route.readAs);
     if (stream.ok) {
-      posts = discussion ? { ...stream.data, head_seq: null } : stream.data;
+      const named = { ...stream.data, items: withAuthorNames(stream.data.items, stream.data) };
+      posts = discussion ? { ...named, head_seq: null } : named;
       const read = sideRead ? await sideRead : null;
       // A list that could not be read is said so, never drawn as a list with nothing in it.
       if (read?.tasks) tasks = (read.tasks.ok ? readableTasks(read.tasks.data) : null) ?? "unreadable";
@@ -2201,7 +2202,7 @@ async function readPost(
       hint: "Nothing here says whether that post exists.", markdown: "", json: { error: res.code, space: name, seq } }));
   }
 
-  const read = res.data.items[0];
+  const read = withAuthorNames(res.data.items, res.data)[0];
   if (!read || read.seq !== seq) return missing(`There is no post ${seq} in ${name}.`);
   // A hidden post's words are blanked here, before its page's title, description or
   // checks see them, whatever the service sent: every page after this has none to show.
@@ -2243,7 +2244,7 @@ async function replies(route: Route, url: URL, env: ApiEnv): Promise<Response> {
     return refusedRead(route, shell, res, (why) => page("Not readable here", why));
   }
 
-  const items = res.data.items;
+  const items = withAuthorNames(res.data.items, res.data);
   const view = {
     space: { name, title: space.title },
     parent: { seq, title: post.title ?? null },
@@ -2516,7 +2517,7 @@ async function seekPage(route: Route, url: URL, env: ApiEnv): Promise<Response> 
 
   // The service never returns a hidden post; one that came anyway is left out, not shown
   // as a hit with its words blanked, so Seek says what the service would.
-  const hits = Array.isArray(res.data.items) ? res.data.items.filter((p) => !hiddenOf(p)) : [];
+  const hits = Array.isArray(res.data.items) ? withAuthorNames(res.data.items, res.data).filter((p) => !hiddenOf(p)) : [];
   const v = view(hits, typeof res.data.truncated_note === "string" ? res.data.truncated_note : null, res.data.hit_categories);
   return partial(drawn(route, shell, v, { html: seekHtml, md: seekMarkdown, json: seekJson }), drawnWithout);
 }
@@ -2749,9 +2750,10 @@ async function everyPost(route: Route, url: URL, env: ApiEnv): Promise<Response>
   // was declined or never decided is nobody's document, so its words are not put on a
   // page that is listed. Its own page, which is not, shows them.
   const oracle = profile.oracle === true || keepsDocument(profile);
+  const named = withAuthorNames(res.data.items, res.data);
   const items = oracle
-    ? res.data.items.map((p) => (p.kind === "version" ? { ...p, title: null, snippet: null, snippet_truncated: false } : p))
-    : res.data.items;
+    ? named.map((p) => (p.kind === "version" ? { ...p, title: null, snippet: null, snippet_truncated: false } : p))
+    : named;
   const view = {
     space: { name, title: profile.title ?? name },
     items,
@@ -3083,7 +3085,7 @@ async function standingPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
     .filter(([, list]) => list.length > 0));
   const view: StandingView = {
     space: { name, title: profile.title ?? name },
-    items: Array.isArray(res.data.items) ? (res.data.items as Post[]) : [],
+    items: Array.isArray(res.data.items) ? withAuthorNames(res.data.items as Post[], res.data) : [],
     readAs: route.readAs,
     basePath: route.base,
     publicOnly: !route.private,
