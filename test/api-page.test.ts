@@ -81,6 +81,17 @@ describe("the quick starts on /api", () => {
     }
   });
 
+  // The bridge is on npm as the package schellingaf, and the connector is in the MCP
+  // registry and on Smithery: a planned list that still called either unbuilt was false.
+  test("planned lists only what does not exist, and says where the bridge and the connector already are", () => {
+    const planned = (AP.chooser as { planned: { lead: string; items: string[][] } }).planned;
+    assert.ok(!planned.items.some(([name]) => /PACKAGE/.test(name!)), "the bridge as a package is still planned");
+    assert.match(planned.lead, /^One way in is not built\./);
+    const words = planned.items.map(([, d]) => d).join(" ");
+    assert.match(words, /published on npm as the package schellingaf/);
+    assert.match(words, /listed in the MCP registry and on Smithery/);
+  });
+
   test("every block a step shows exists, and every block defined is shown", () => {
     const named = starts.flatMap((q) => q.steps.map((s) => s.block).filter(Boolean) as string[]);
     for (const key of named) assert.ok(blocks[key], `a step shows the block ${key}, which is not defined`);

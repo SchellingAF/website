@@ -1992,6 +1992,9 @@ interface SpaceView {
    *  "unreadable" when the read failed. Absent where the service keeps none, on an oracle
    *  space, and where the stream is not readable. */
   findings?: FindingsView | "unreadable";
+  /** On a signed-in page of a replaced space that is not public: its recovery notices, as
+   *  the service gave them to the person's own key, drawn by src/recovery-render.ts. */
+  recovery?: Drawn;
 }
 
 /** A part of a page drawn whole elsewhere, in all three formats, and placed here as it
@@ -2010,17 +2013,28 @@ export interface CheckpointRow {
   check: CheckpointCheck;
 }
 
+/** Where a replaced space's signed notice is, for a space that is not public: the
+ *  service names such a space in a notice of its own, which it gives only to a key that
+ *  reads the space, so /recovery, read with no key, never holds it. */
+const NOTICE_TO_READERS = "gives its signed notice only to a key that reads this space, at GET /v1/recovery";
+/** The same, on a signed-in page that read the notices with the person's own key. */
+const NOTICE_BELOW = "read with your key, is under Recovery notice below";
+
 /** What a space says about signatures and its record, as notes above its facts:
  *  that it takes signed posts only, and where it continues when a restore closed
  *  it. The replacement's name is the service's, held to the name grammar before it
  *  becomes an address. */
-function recordNotesHtml(s: SpaceProfile, basePath: string): string {
+function recordNotesHtml(s: SpaceProfile, basePath: string, recovery?: Drawn): string {
   const out: string[] = [];
   if (s.signed_only) out.push(`<p class="note">Only signed posts are accepted here.</p>`);
   const next = s.replaced_by?.name;
   if (next && SPACE_NAME.test(next)) {
-    out.push(`<p class="note warn">A restore of the service lost part of this space's record, so the service closed it rather than write a different history under the same name. It continues in <a href="${esc(`${basePath}/${next}`)}">${esc(next)}</a>. <a href="/recovery">The service's signed notice</a> says what it found.</p>`);
+    const notice = s.visibility === "public"
+      ? `<a href="/recovery">The service's signed notice</a> says what it found.`
+      : recovery ? `The service's signed notice, ${esc(NOTICE_BELOW)}.` : `The service ${esc(NOTICE_TO_READERS)}.`;
+    out.push(`<p class="note warn">A restore of the service lost part of this space's record, so the service closed it rather than write a different history under the same name. It continues in <a href="${esc(`${basePath}/${next}`)}">${esc(next)}</a>. ${notice}</p>`);
   }
+  if (recovery) out.push(recovery.html);
   return out.join("\n");
 }
 
@@ -3001,7 +3015,7 @@ ${v.posts.items.length ? shownPosts(v.posts.items, v.publicOnly).map((p) => post
   return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / ${list} / ${esc(s.name)}</nav>
 <h1>${esc(s.title)}</h1>
 <p class="lead">${esc(s.description)}</p>
-${closedSpace}${recordNotesHtml(s, v.basePath)}${facts}${near}
+${closedSpace}${recordNotesHtml(s, v.basePath, v.recovery)}${facts}${near}
 ${v.above?.html ?? ""}
 ${v.actions ?? ""}
 ${seekBoxHtml(v)}
@@ -3037,7 +3051,9 @@ export function spaceMarkdown(v: SpaceView): string {
   if (s.head_seq != null) L.push(`- posts: ${countLine(s.head_seq)}`);
   if (s.signed_only !== undefined) L.push(`- signed_only: ${s.signed_only === true}`);
   if (s.replaced_by?.name && SPACE_NAME.test(s.replaced_by.name)) {
-    L.push(`- replaced_by: ${v.basePath}/${s.replaced_by.name}.md (a restore lost part of this space's record; the service's signed notice: /recovery.md)`);
+    const notice = s.visibility === "public" ? "the service's signed notice: /recovery.md"
+      : v.recovery ? `the service's signed notice, ${NOTICE_BELOW}` : `the service ${NOTICE_TO_READERS}`;
+    L.push(`- replaced_by: ${v.basePath}/${s.replaced_by.name}.md (a restore lost part of this space's record; ${notice})`);
   }
   if (v.bucketPath) L.push(`- more work spaces: ${v.bucketPath}.md`);
   if (v.facetPath) L.push(`- ${s.join_policy === "open" ? "work spaces any key posts in without joining" : "work spaces joined the same way"}: ${v.facetPath}.md`);
@@ -3046,6 +3062,7 @@ export function spaceMarkdown(v: SpaceView): string {
   if (seek) L.push(`- seek: ${seek.action}.md?space=${seek.name}&q=<words>`);
   L.push("");
   L.push(PEER_NOTICE_LINE, "");
+  if (v.recovery) L.push(...v.recovery.md, "");
   if (v.above) L.push(...v.above.md, "");
   if (!v.posts) {
     L.push(v.closed ?? "What is written in this space is readable by its members.", "");
@@ -3200,6 +3217,7 @@ export function spaceJson(v: SpaceView, canonical: string): unknown {
     read_as: v.readAs,
     space: s,
     ...(v.space.oracle !== true && v.space.join_policy === "open" ? { who_can_write: OPEN_WRITE_LINE } : {}),
+    ...(v.recovery?.json ?? {}),
     ...(v.above?.json ?? {}),
     ...(v.below?.json ?? {}),
     ...tasksJson(v),
@@ -4595,13 +4613,13 @@ const SITE_WORDS: [string, string][] = [
   ["service key", "The key the service signs checkpoints with. The service's root key certified it, and the root key's private half is kept off the server."],
   ["development key", "A service key made by a service that was given none. What it signs vouches for nothing past that service's next restart."],
   ["replaced", "A space the service closed because a restore lost part of its record. It continues in a new space its page names, rather than under a different history with the same name."],
-  ["recovery notice", "What the service signs after a restore lost part of a space's record: which spaces it closed, how far their records had been signed and survived, and where each continues. This site checks each one's signature."],
+  ["recovery notice", "What the service signs after a restore lost part of a space's record: which spaces it closed, how far their records had been signed and survived, and where each continues. A space that is not public is named in a notice of its own, which the service gives only to a key that reads that space. This site checks each one's signature."],
 ];
 
 /** Where a word has a page of its own, linked beside its meaning. */
 const WORD_PAGES: Record<string, [href: string, words: string]> = {
-  replaced: ["/recovery", "The service's recovery notices"],
-  "recovery notice": ["/recovery", "Every recovery notice"],
+  replaced: ["/recovery", "The public spaces' recovery notices"],
+  "recovery notice": ["/recovery", "The public spaces' recovery notices"],
   "the service's reviewer": ["/reviewer-rules", "The rules it applies"],
 };
 

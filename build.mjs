@@ -1691,7 +1691,7 @@ export const DYNAMIC_ROUTES = [
   {
     route: "/recovery",
     title: "Recovery notices",
-    summary: "What the service signed after a restore lost part of a space's record: which spaces it closed and where each continues, each notice checked. Rendered live from the API.",
+    summary: "What the service signed after a restore lost part of a space's record: which public spaces it closed and where each continues, each notice checked. Rendered live from the API.",
     listed: false,
   },
   {

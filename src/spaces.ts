@@ -66,7 +66,7 @@ import { apiFindings, apiGet, apiPostFinding, apiTasks, classifyRefusal, haveTok
 import { GROUP_MEANING, KIND_MEANING, attachmentLimits, capabilities, checkpointDue, heldKinds, isLive, itemLimits, keepsFindings, kindGroups, knownKinds, linkRules, passkeySite, perSpace, reviewerRules, serviceReviewer, type Capabilities } from "./capabilities.ts";
 import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, register, resolveCategory, unknownId, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
-import { noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, type NoticeRow } from "./recovery-render.ts";
+import { namesSpace, noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, spaceNoticesDrawn, type NoticeRow, type SpaceNotices } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
 import { NO_DOCUMENT, UNREAD, WITHHELD, checked, closedRank, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
 import {
@@ -1476,6 +1476,14 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
     }
   }
 
+  // A REPLACED SPACE THAT IS NOT PUBLIC, SIGNED IN: its recovery notice. The service names
+  // such a space only in a notice of its own, which it gives only to a key that reads the
+  // space, so /recovery, read with no key, never holds it. Read with the person's own key,
+  // never the site's, and only on a signed-in page, which no cache keeps.
+  const recovery = signedIn && SPACE_NAME.test(s.replaced_by?.name ?? "") && s.visibility !== "public" && typeof s.space_id === "string" && UUID.test(s.space_id)
+    ? spaceNoticesDrawn(await spaceNotices(env, s.space_id), env.SERVICE_ROOT_KEY != null)
+    : undefined;
+
   const above = current ? documentSection({
     ...current, spaceHref, spacePath,
     links: documentLinks(route.base, signedIn ? "/me/seek" : "/seek"),
@@ -1523,6 +1531,7 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
     register: reg,
     above,
     below,
+    ...(recovery ? { recovery } : {}),
     ...(document ? { document } : {}),
     ...(oracle ? { streamHeading: "Discussion" } : {}),
     ...(tasks ? { tasks } : {}),
@@ -2802,6 +2811,20 @@ async function reviewerRulesPage(route: Route, url: URL): Promise<Response> {
  * checkpoint. A page holds a hundred, and older ones follow by the service's cursor; a page with none says so and is
  * not offered to search engines.
  */
+/** The recovery notices naming one space, read with the signed-in person's own key and
+ *  checked as /recovery checks them; null when the read failed. One page, the newest. */
+async function spaceNotices(env: ApiEnv, spaceId: string): Promise<SpaceNotices | null> {
+  const res = await apiGet<{ items?: unknown; has_more?: unknown }>(env, "/v1/recovery", "session");
+  if (!res.ok || !Array.isArray(res.data.items)) return null;
+  const root = env.SERVICE_ROOT_KEY ?? null;
+  const rows: NoticeRow[] = [];
+  for (const raw of res.data.items.slice(0, 100)) {
+    const row = { id: noticeIdOf(raw), check: await checkRecoveryNotice(raw, root) };
+    if (namesSpace(row, spaceId)) rows.push(row);
+  }
+  return { rows, more: res.data.has_more === true };
+}
+
 async function recoveryPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
   const shell = shellFor(route, url, `Recovery notices — ${SITE_NAME}`,
     `What ${SITE_NAME} signed after a restore lost part of a space's record, each notice checked by this site.`);

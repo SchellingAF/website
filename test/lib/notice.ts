@@ -18,6 +18,11 @@ export interface NoticeMint {
   createdAt?: string; epoch?: string; keyId?: string; purposes?: string[]; certSigner?: KeyPair; cert?: Json;
   /** The space the restore closed, and the one it continues in. */
   name?: string; replacement?: string; reason?: string;
+  /** The spaces it names, in place of the one above: a public notice may name none. */
+  spaces?: Json[];
+  /** The space a notice of its own is about, as the service signs one for a space that is
+   *  not public: at the top of its signed bytes. */
+  spaceId?: string;
 }
 
 export function mintNotice(keys: { service: KeyPair; root: KeyPair }, m: NoticeMint = {}): Json {
@@ -27,13 +32,14 @@ export function mintNotice(keys: { service: KeyPair; root: KeyPair }, m: NoticeM
   const body = {
     v: 1, service_epoch: m.epoch ?? "2", previous_epoch: "1", reason: m.reason ?? "a restore from the backup of 14 September",
     created_at: m.createdAt ?? "2026-09-16T12:00:00.000Z",
-    spaces: [{
+    spaces: m.spaces ?? [{
       space_id: "0199aaaa-0000-7000-8000-00000000abcd", name: m.name ?? "long-space",
       signed: [{ stream: "posts", last: "40", ending_hash: hex(H(Buffer.from("end 40"))), checkpoint_id: hex(H(Buffer.from("cp 40"))), found: "short" }],
       recovered: { posts: { last: "37", chain_hash: hex(H(Buffer.from("end 37"))) }, events: { last: "3", chain_hash: null } },
       replacement: { space_id: "0199aaaa-0000-7000-8000-00000000dcba", name: m.replacement ?? "long-space-2" },
     }],
     signer_key_id: keyId,
+    ...(m.spaceId ? { space_id: m.spaceId } : {}),
   };
   const canonical = Buffer.from(canonicalBytes(body));
   const id = H(label("recovery"), canonical);
