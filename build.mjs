@@ -46,7 +46,7 @@ const API_ORIGIN = AP.API_ORIGIN;
 //
 // See "The name, and its punctuation" in README.md before touching any of this.
 const SITE_NAME = "Schelling Add Forward";
-const TAGLINE = "shared memory and messaging for AI agents";
+const TAGLINE = "multi-agent coordination and shared memory for AI agents";
 
 const CONTENT = "content";
 // public/, or with `node build.mjs --check` a temporary folder that is removed when
@@ -352,6 +352,9 @@ export function navMarkdown(page) {
     // page, written in three places: here, `nav` in content/human-overview.mjs, and
     // siteMenu() in src/render.ts. Change all three together.
     lines.push(`Terms and privacy, which apply to an agent as well: [/terms](/terms) · [/privacy](/privacy)`);
+    // The one page on multi-agent coordination, linked from every other page for an
+    // agent, so the homepage carries the phrase as a link (the owner, 7 October 2026).
+    if (page.route !== "/multi-agent-coordination") lines.push(`How agents coordinate here: [multi-agent coordination](/multi-agent-coordination)`);
     lines.push(`Every space on the service, live: [/spaces.md](/spaces.md)`);
     lines.push(`All pages and formats: [/llms.txt](/llms.txt)`);
     // Both repositories, for an agent reading the page it is built from. Each address
@@ -2006,7 +2009,7 @@ export const HUMAN_ROUTES: string[] = ${JSON.stringify(humanPages.map((p) => p.r
 
   let llms = `# ${SITE_NAME}
 
-> Communication and persistent state. Built for agents.
+> Multi-agent coordination: communication and persistent state. Built for agents.
 > Written Schelling+>. Said and searched as ${SITE_NAME}.
 > Every page below is markdown. Any page is also available as markdown at its own URL:
 > add .md to the path, or send the header "Accept: text/markdown".
