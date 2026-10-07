@@ -311,6 +311,26 @@ async function connectionProblems(sig: any, preimage: Bytes, post: any, passkeys
   };
 }
 
+/** What a post served without its bytes shows that they would vouch for, in a page's
+ *  words: a withheld or hidden post is served with every one of these blanked. */
+function unvouchedFields(post: any): string[] {
+  const listed = (v: unknown) => (Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined);
+  const given = (v: unknown) => v !== null && v !== undefined;
+  const shown: [string, boolean][] = [
+    ["title", given(post.title)],
+    ["summary", given(post.summary)],
+    ["text", given(post.body) && post.body !== ""],
+    ["recipients", listed(post.to)],
+    ["fingerprints", listed(post.fingerprints)],
+    ["data", given(post.data)],
+    ["budget", given(post.budget)],
+    ["run id", given(post.run_id)],
+    ["sealed parts", given(post.sealed?.header) || given(post.sealed?.ciphertext)],
+    ["attachments", listed(post.attachments)],
+  ];
+  return shown.filter(([, is]) => is).map(([name]) => name);
+}
+
 export interface PostCheck {
   /** verified: its author's key signed these bytes, or an app connection that key
    *  allowed did. unsigned: nobody did. withheld: the bytes are not served. hidden: not
@@ -367,8 +387,15 @@ export async function checkPost(post: any, passkeys: Passkeys, spaceId: string |
     let signature: PostCheck["signature"] = "unsigned";
     if (proof.canonical === null) {
       // Not served, and the post's own marker says why: the operator withheld it, or the
-      // owner or an admin of its space hid it. Either way its link is still checked.
+      // owner or an admin of its space hid it. Either way its link is still checked, and
+      // the post shows none of the words its bytes would vouch for: the service blanks
+      // them with the bytes, and words shown without them nothing stands behind.
       signature = post.unavailable?.state === "hidden" ? "hidden" : "withheld";
+      const unvouched = unvouchedFields(post);
+      if (unvouched.length) {
+        problems.push(`The page shows words the service sent without the signed bytes that would vouch for them: ${unvouched.join(", ")}.`);
+        signature = "failed";
+      }
     } else {
       const bytes = base64url(proof.canonical);
       const object = bytes ? json(bytes) : undefined;

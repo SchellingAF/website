@@ -112,6 +112,18 @@ function build(i: PostInputs, replace: { objectId?: Buffer; previous?: Buffer; a
   };
 }
 
+/** A withheld post as the service serves one: its bytes, its signature and every word
+ *  they would vouch for blanked, and its link kept. */
+function withheldAsServed(): Json {
+  const post = build(inputs());
+  post.proof.canonical = null;
+  post.proof.signature = null;
+  delete post.proof.private;
+  Object.assign(post, { title: null, body: null, to: null, fingerprints: [], budget: null, run_id: null, unavailable: { state: "withheld", since: "2026-10-07T00:00:00Z" } });
+  delete post.data;
+  return post;
+}
+
 /** Holds, and says so in every field. */
 async function holds(post: Json, passkeys: typeof PASSKEYS | null = PASSKEYS, space: string | null = SPACE) {
   const r = await checkPost(post, passkeys, space);
@@ -179,9 +191,39 @@ describe("a post signed with an Ed25519 key", () => {
     const unsigned = build(inputs());
     unsigned.proof.signature = null;
     await holds(unsigned);
-    const withheld = build(inputs());
-    withheld.proof.canonical = null;
-    await holds(withheld);
+    await holds(withheldAsServed());
+  });
+
+  test("withheld or hidden, it holds only while it shows none of the words its bytes would vouch for", async () => {
+    const shown: [string, (p: Json) => void][] = [
+      ["title", (p) => { p.title = "Build passes"; }],
+      ["summary", (p) => { p.summary = "Twice."; }],
+      ["text", (p) => { p.body = "Reproduced on linux, twice."; }],
+      ["recipients", (p) => { p.to = [hex(H(Buffer.from("a recipient")))]; }],
+      ["fingerprints", (p) => { p.fingerprints = [{ scheme: "git.commit", value: "b75e527ac4f1" }]; }],
+      ["data", (p) => { p.data = DATA; }],
+      ["budget", (p) => { p.budget = { observed_at: "2026-10-07T00:00:00Z" }; }],
+      ["run id", (p) => { p.run_id = "0199aaaa-0000-7000-8000-000000000001"; }],
+      ["sealed parts", (p) => { p.sealed = { generation: 1, header: b64u("header"), ciphertext: b64u("cipher") }; }],
+      ["attachments", (p) => { p.attachments = [{ sha256: "ab".repeat(32), name: "a.txt", media_type: "text/plain" }]; }],
+    ];
+    for (const hidden of [false, true]) {
+      const plain = withheldAsServed();
+      if (hidden) plain.unavailable = { state: "hidden", since: "2026-10-07T00:00:00Z" };
+      const r = await checkPost(plain, PASSKEYS, SPACE);
+      assert.deepEqual(r.problems, []);
+      assert.equal(r.signature, hidden ? "hidden" : "withheld");
+      // A sealed post's generation and size are not its words.
+      await holds({ ...withheldAsServed(), sealed: { generation: 1, bytes: 1200 } });
+      for (const [name, put] of shown) {
+        const post = withheldAsServed();
+        if (hidden) post.unavailable = { state: "hidden", since: "2026-10-07T00:00:00Z" };
+        put(post);
+        const words = await refused(post, [`The page shows words the service sent without the signed bytes that would vouch for them: ${name}.`]);
+        assert.equal(words.signature, "failed");
+        assert.equal(words.chain, "holds", "the link is still checked");
+      }
+    }
   });
 
   test("the proof names a post this site can read", async () => {
