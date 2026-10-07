@@ -6,3 +6,8 @@ public
 src/routes.generated.ts
 .dev.vars
 scripts/.*-key.pem
+.env
+.env.*
+**/*.pem
+.stack
+.claude

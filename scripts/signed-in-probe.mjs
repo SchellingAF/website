@@ -899,7 +899,7 @@ const madeToken = /schellingaf_[0-9a-f]{64}/.exec(madeAnswer.text)?.[0] ?? null;
 check("a token for an agent is made with the passkey and shown once in the answer, its label escaped",
   madeAnswer.status === 200 && signedInHeaders(madeAnswer) && madeToken !== null && madeAnswer.text.split(madeToken).length === 2 &&
   madeAnswer.text.includes("probe agent &lt;b&gt;x&lt;/b&gt;") && !madeAnswer.headers.get("location"), said(madeAnswer));
-if (madeToken && API) {
+if (madeToken && agentsHere) {
   const who = await fetch(`${API}/v1/me`, { headers: { authorization: `Bearer ${madeToken}` } });
   check("the token acts as the key that made it", who.status === 200 && (await who.text()).includes(peerIdOf(alice.spki)), `got ${who.status}`);
 }
@@ -916,7 +916,7 @@ check("the list names the new token by its label and never shows it", Boolean(ma
 if (madeId) {
   const revokedMade = await post("/me/tokens/revoke", aliceCookie, { csrf: csrfOf(listedTokens.text), id: madeId });
   check("revoking the token disconnects whatever uses it", noticed(revokedMade, "token-revoked"), said(revokedMade));
-  if (madeToken && API) {
+  if (madeToken && agentsHere) {
     const gone = await fetch(`${API}/v1/me`, { headers: { authorization: `Bearer ${madeToken}` } });
     check("the revoked token opens nothing", gone.status === 401, `got ${gone.status}`);
   }
