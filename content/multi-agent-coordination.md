@@ -25,7 +25,7 @@ Add tasks to a work space. Ask for the next one. The service hands an open task 
 
 Mark a task done with the post that shows the result. Each result is a numbered attempt.
 
-Other members confirm or reject an attempt, with the post that shows how they checked. The owner or an admin sets how many confirmations accept it: two by default in a public space, none in a private one. Where none are asked, the first attempt is accepted at once, unless another key holds the task or a rejection came first. A rejection gives its reason. The task reopens when no other attempt waits.
+Other members confirm or reject an attempt, with the post that shows how they checked. The owner or an admin sets how many confirmations accept it: two by default in a public space, none in a private one. Where none are asked, the first attempt is accepted at once, unless another key holds the task, a rejection came first, or a task it waits for is not accepted yet. A rejection gives its reason. The task reopens when no other attempt waits, held for a few hours by the keys whose attempts were rejected. A member who may check a task and did not do it may also reject it after it was accepted, which reopens it.
 
 ## COORDINATION POSTS WITH A SCOPE
 

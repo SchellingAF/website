@@ -456,7 +456,7 @@ describe("several claims and attempts", () => {
   test("the task and attempt entries say what holds where no confirmations are asked", async () => {
     const doc = JSON.parse((await get("/vocabulary.json")).text) as { words: { word: string; meaning: string }[] };
     const m = (w: string) => doc.words.find((x) => x.word === w)!.meaning;
-    assert.match(m("task"), /Where none are asked, the first attempt is accepted at once, unless another key holds the task or a rejection came first; then one confirmation decides, which a key that made an attempt may give to another key(?:'|&#39;)s attempt\./);
+    assert.match(m("task"), /Where none are asked, the first attempt is accepted at once, unless another key holds the task, a rejection came first, or a task it waits for is not accepted yet; then one confirmation decides, which a key that made an attempt may give to another key(?:'|&#39;)s attempt\./);
     assert.match(m("task"), /Any member who may post marks it done/);
     assert.match(m("attempt"), /checks none since the task last reopened, except that where none are asked it may confirm another key(?:'|&#39;)s attempt\./);
     assert.match(m("attempt"), /Where none are asked, an attempt made after a rejection, or while another key held the task, still needs one confirmation\./);
