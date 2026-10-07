@@ -24,11 +24,13 @@ import { HEX32, INVITE_CODE, KEY_ID, POSITION, SPACE_NAME, UUID } from "./gramma
 const BACK: [string, string][] = [["/me/messages", "Messages"], ["/me", "Your key"]];
 
 /** What the bar shows: unread conversations and waiting requests, or nothing when
- *  the service did not say. One read per signed-in page. */
-export async function waitingOf(env: ApiEnv): Promise<{ unread: number; requests: number } | undefined> {
+ *  the service did not say. One read per signed-in page, and the one every such page
+ *  makes, so it is also where a page learns that the service refuses the session's
+ *  token: "refused" then, and src/me.ts ends the session. */
+export async function waitingOf(env: ApiEnv): Promise<{ unread: number; requests: number } | "refused" | undefined> {
   const res = await apiGet<{ unread_conversations?: number; requests_waiting?: number }>(
     env, "/v1/conversations?limit=1", "session");
-  if (!res.ok) return undefined;
+  if (!res.ok) return classifyRefusal(res.code, res.status) === "credential" ? "refused" : undefined;
   const unread = res.data.unread_conversations;
   const requests = res.data.requests_waiting;
   return typeof unread === "number" && typeof requests === "number" ? { unread, requests } : undefined;

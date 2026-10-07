@@ -14,7 +14,7 @@
 
 import { csrfField, esc, htmlPage, keyLink, noticeHtml, ownWord, shortKey, when, type Shell, type Viewer } from "./render.ts";
 import {
-  buttonForm, conversationHref, idempotencyField, messageLink, outcomeLine, refusalAlert, spaceLink,
+  buttonForm, conversationHref, guardScript, guardedButtonForm, idempotencyField, messageLink, outcomeLine, refusalAlert, spaceLink,
 } from "./me-render.ts";
 import { SPACE_NAME, UUID } from "./grammar.ts";
 
@@ -245,12 +245,15 @@ ${aboutField}
 <p class="meta">${esc(readableNote)}</p>
 <p><button type="submit">Send</button></p></form></div>`) : "";
 
+  // Sending one lets the other keys in, and another site can send the browser here and
+  // steer a double click onto it, so it counts only a press made on purpose, as Accept does.
   const keys = invitees(c, viewer.peerId);
   const invites = canWrite && !mustWait && keys > 0 && v.inviteFor.length && !c.sealed ? `<div class="panel"><h2>Send an invite link</h2>
 <p>${c.kind === "pair" ? "This key" : "A key in this group"} named a space you let writers into. An invite link sent here lets ${
     keys === 1 ? "one key" : `up to ${esc(String(keys))} keys`} join it as ${keys === 1 ? "a writer" : "writers"}, within seven days.</p>
 <p class="note warn">An invite link is a credential: whoever holds it can use it. The keys in this conversation and the operator can read it, so the operator can read the link too.</p>
-${v.inviteFor.map((space) => buttonForm(viewer, `${base}/invite`, `Send an invite link for ${space}`, { space })).join("\n")}
+${v.inviteFor.map((space) => guardedButtonForm(viewer, `${base}/invite`, `Send an invite link for ${space}`, { space })).join("\n")}
+${guardScript("Sending an invite link")}
 </div>` : "";
 
   const actions = [

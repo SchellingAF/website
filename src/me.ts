@@ -130,8 +130,7 @@ export async function handleSignedIn(
     // page is where connecting goes anyway, so /me goes to plain /sign-in. A form
     // posted from a page whose session has ended goes to the sign-in page too, rather
     // than to a refusal that reads like an attack, and is not sent again.
-    const next = method === "GET" && path !== "/me" ? safeNext(path + url.search) : null;
-    return see(next ? `/sign-in?next=${encodeURIComponent(next)}` : "/sign-in");
+    return see(connectAgain(here));
   }
   const viewer = viewerOf(session);
 
@@ -147,8 +146,11 @@ export async function handleSignedIn(
   }
   if (method !== "GET") return notAllowed("GET, HEAD, POST");
   // What waits in this key's messages, for the bar every signed-in page carries. A
-  // download carries no bar, so it asks nothing.
+  // download carries no bar, so it asks nothing. A token the service refuses here, revoked
+  // or blocked anywhere, ends the session now, before a page that reads nothing else hands
+  // the browser what the session holds for it.
   const waiting = EXPORT_FILE.test(path) ? null : await waitingOf(sessionEnv(env, session));
+  if (waiting === "refused") return endSession(here);
   return read(here, session, waiting ? { ...viewer, waiting } : viewer, path);
 }
 
@@ -539,9 +541,7 @@ async function read(h: Here, session: Session, viewer: Viewer, path: string): Pr
   if (route) {
     let keyRefused = false;
     const answer = await handle(route, h.url, { ...env, onSessionRefused: () => { keyRefused = true; } });
-    if (!keyRefused) return answer;
-    void destroySession(h.request, h.secure);
-    return sessionEnded(h, "/sign-in");
+    return keyRefused ? endSession(h) : answer;
   }
 
   return nothingHere(viewer, "page");
@@ -958,8 +958,12 @@ async function newSpace(h: Here, session: Session, viewer: Viewer, form: URLSear
     oracle: form.get("oracle") === "1",
   };
   const [reg, host, caps] = await Promise.all([register(), sealingHost(viewer), capabilities()]);
-  const again = (why: string, status: number) =>
+  const drawAgain = (why: string, status: number) =>
     page(newSpaceHtml(formShell("Create a space", viewer), viewer, values, why, reg, host, takesOpen(caps)), status);
+  // Refused here, before anything is sent: the form is drawn again with the session's
+  // secret for the browser's sealing, so only for a session whose token the service takes.
+  const again = async (why: string, status: number): Promise<Response> =>
+    (await waitingOf(sessionEnv(h.env, session))) === "refused" ? endSession(h) : drawAgain(why, status);
   // Taking posts from any key is for a public work space alone, as the service holds it:
   // chosen with anything else, the form comes back as it was typed, before the oracle
   // choice makes the space public or a sealed one is made to take join requests, either
@@ -995,7 +999,7 @@ async function newSpace(h: Here, session: Session, viewer: Viewer, form: URLSear
   });
   if (!res.ok) {
     if (classifyRefusal(res.code, res.status) === "credential") return refused(h, viewer, res);
-    return again(refusalText(res), statusFor(res));
+    return drawAgain(refusalText(res), statusFor(res));
   }
   return see(`/me/spaces/${values.name}?notice=created`);
 }
@@ -1705,6 +1709,22 @@ function nothingHere(viewer: Viewer, what: "page" | "action"): Response {
   return page(resultHtml(formShell("Not found", viewer), "Nothing is here",
     what === "page" ? "There is no signed-in page at this address." : "There is no action at this address.",
     [["/me", "Your key"]]), 404);
+}
+
+/** The session ended because the service refuses its token, and the person sent to
+ *  connect again, coming back to the page they opened as a visitor with no session does. */
+async function endSession(h: Here): Promise<Response> {
+  await destroySession(h.request, h.secure);
+  return sessionEnded(h, connectAgain(h));
+}
+
+/** Where a person with no working session connects: back to the page asked for after it,
+ *  an app waiting at /me/connect or an invite link above all; a form, which is not sent
+ *  again, and the key's own page, where connecting goes anyway, to plain /sign-in. */
+function connectAgain(h: Here): string {
+  const opened = h.request.method === "GET" || h.request.method === "HEAD";
+  const next = opened && h.url.pathname !== "/me" ? safeNext(h.url.pathname + h.url.search) : null;
+  return next ? `/sign-in?next=${encodeURIComponent(next)}` : "/sign-in";
 }
 
 /** On to the next page with the cookie cleared, once the session behind it has ended. */

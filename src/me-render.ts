@@ -152,8 +152,10 @@ export function buttonForm(viewer: Viewer, action: string, button: string, hidde
  * A form that is one button counted only when it was pressed on purpose: sent switched
  * off, switched on by src/allow.js, which refuses a press that arrived with the page or
  * straight after another click, and says so in the note beside it. For a button another
- * site could make a signed-in browser press with a steered click: Allow, Join, Take over
- * and Accept. The page adds guardScript() once, and runs under a policy that admits it.
+ * site could make a signed-in browser press with a steered click: Allow, Join, Take over,
+ * Accept, and the two that let another key in, a join request's Approve and a
+ * conversation's Send an invite link. The page adds guardScript() once, and runs under a
+ * policy that admits it.
  */
 export function guardedButtonForm(viewer: Viewer, action: string, button: string, hidden: Record<string, string> = {}, inline = true): string {
   const fields = hiddenFields(hidden);
@@ -1882,11 +1884,14 @@ export function joinRequestsHtml(
   const base = `/me/spaces/${space.name}`;
   const tabs = ["pending", "approved", "declined", "withdrawn"].map((s) =>
     s === state ? `<span class="tag on">${esc(s)}</span>` : `<a class="tag" href="${esc(base)}/requests?state=${esc(s)}">${esc(s)}</a>`).join("");
+  // Approve lets the key that asked in, and another site can send the browser here and steer
+  // a double click onto it, so it counts only a press made on purpose, as Accept does.
+  const decidable = (r: RequestRow) => r.state === "pending" && UUID.test(r.request_id);
   const rows = items.map((r) => `<div class="item">
 <p class="meta">${keyLink(r.requester)}${messageLink(viewer, r.requester, space.name)} asked ${esc(when(r.created_at))} &middot; ${esc(r.state)}${r.decided_at ? ` ${esc(when(r.decided_at))}${r.decided_by ? ` by ${keyLink(r.decided_by)}` : ""}${r.decided_role ? ` as ${esc(r.decided_role)}` : ""}` : ` &middot; expires ${esc(when(r.expires_at))}`}</p>
 <pre>${esc(r.message)}</pre>
-${r.state === "pending" && UUID.test(r.request_id) ? `<form method="post" action="/me/requests/${esc(r.request_id)}/approve" class="inline">${csrfField(viewer)}<input type="hidden" name="space" value="${esc(space.name)}">
-<select name="role" aria-label="Role">${roleOptions(assignable, "writer")}</select> <input type="text" name="tags" maxlength="400" placeholder="tags, if any" aria-label="Tags, separated by spaces" autocomplete="off"> <button type="submit">Approve</button></form>
+${decidable(r) ? `<form method="post" action="/me/requests/${esc(r.request_id)}/approve" class="inline">${csrfField(viewer)}<input type="hidden" name="space" value="${esc(space.name)}">
+<select name="role" aria-label="Role">${roleOptions(assignable, "writer")}</select> <input type="text" name="tags" maxlength="400" placeholder="tags, if any" aria-label="Tags, separated by spaces" autocomplete="off"> <button type="submit" data-guard disabled>Approve</button> <span class="meta" data-guard-note role="status" aria-live="polite"></span></form>
 ${buttonForm(viewer, `/me/requests/${r.request_id}/decline`, "Decline", { space: space.name })}` : ""}
 </div>`).join("\n");
   return htmlPage(shell, `${spaceNav(space.name, "join requests")}
@@ -1898,7 +1903,8 @@ ${pending === null ? "" : `<p class="meta">${esc(pending === 1 ? "1 join request
 <p class="tags">${tabs}</p>
 ${after ? `<p class="meta"><a href="${esc(base)}/requests?state=${esc(state)}">From the first</a></p>` : ""}
 ${items.length ? noticeHtml() + rows : `<p>No ${esc(state)} join requests${after ? " past this point" : ""}.</p>`}
-${nextAfter ? `<p><a href="${esc(`${base}/requests?${new URLSearchParams({ state, after: nextAfter })}`)}">More requests</a></p>` : ""}`);
+${nextAfter ? `<p><a href="${esc(`${base}/requests?${new URLSearchParams({ state, after: nextAfter })}`)}">More requests</a></p>` : ""}
+${items.some(decidable) ? guardScript("Approve", "Decline needs no script.") : ""}`);
 }
 
 /** Why a link no longer works, in words. */
