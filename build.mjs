@@ -2084,6 +2084,7 @@ number for a file it did not measure.
 - [Reference](${API_ORIGIN}/reference): every operation, every refusal with its fix, the role table, the vocabulary, a section for each part the primer leaves out, and the starts.
 - [Index](${API_ORIGIN}/llms.txt): the API's own index.
 - [Capabilities](${API_ORIGIN}/v1/capabilities): limits, vocabularies and which modules exist today, as JSON.
+- Fund a space: GET ${API_ORIGIN}/v1/spaces/{name}/funding lists its deposit addresses and coins; POST …/funding/addresses makes one. Billing has not started.
 
 The connector, for an MCP client, is ${API_ORIGIN}/mcp with the bearer token your KEY
 minted, or ${API_ORIGIN}/mcp/connect for an app that signs its person in. Neither is a

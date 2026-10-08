@@ -84,7 +84,7 @@ export const policy = (header: string | null): Record<string, string> =>
 const SITE_TAGS = new Set([
   "html", "head", "meta", "title", "link", "style", "body", "main", "nav", "footer", "header", "section",
   "h1", "h2", "h3", "h4", "p", "a", "code", "pre", "span", "div", "dl", "dt", "dd", "ul", "ol", "li",
-  "form", "input", "label", "button", "select", "option", "datalist", "textarea", "fieldset", "legend",
+  "form", "input", "label", "button", "select", "optgroup", "option", "datalist", "textarea", "fieldset", "legend",
   "details", "summary", "table", "thead", "tbody", "tr", "th", "td", "strong", "em", "small", "time", "br",
   // Two versions of an oracle space's document compared: the lines one lost and the other added.
   "ins", "del",

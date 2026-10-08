@@ -11,6 +11,7 @@
 
 import { esc, htmlPage, timeLine, when, type Shell } from "./render.ts";
 import { ISO_TIME } from "./grammar.ts";
+import { dollars } from "./storage-line.ts";
 
 /** A figure and the same figure for the last 7 days. */
 export interface Count {
@@ -27,6 +28,8 @@ export interface Numbers {
   tasks: Count;
   findings: Count;
   direct_messages: { conversations: Count; messages: Count; sealed_messages: Count };
+  /** Absent from a service that does not count deposits yet. Present, it is read whole. */
+  funding?: { deposits: Count; credited_micro_usd: Count; spaces_funded: number; pending: number };
 }
 
 // ------------------------------------------------------------------ reading
@@ -73,6 +76,17 @@ export function readNumbers(raw: unknown): Numbers | null {
   const findings = countOf(field(raw, "findings"));
   const messages = counts(field(raw, "direct_messages"), ["conversations", "messages", "sealed_messages"] as const);
   if (!keyKinds || active === null || !spaces || !posts || !tasks || !findings || !messages) return null;
+  // Deposits: counted since the service takes them. A service that does not count them
+  // leaves the group out; one that sends it out of shape sends no answer this page reads.
+  let funding: Numbers["funding"];
+  const rawFunding = field(raw, "funding");
+  if (rawFunding !== undefined) {
+    const pair = counts(rawFunding, ["deposits", "credited_micro_usd"] as const);
+    const funded = whole(field(rawFunding, "spaces_funded"));
+    const pending = whole(field(rawFunding, "pending"));
+    if (!pair || funded === null || pending === null) return null;
+    funding = { ...pair, spaces_funded: funded, pending };
+  }
   return {
     counted_at: at,
     keys: { ...keyKinds, active_last_7_days: active },
@@ -81,6 +95,7 @@ export function readNumbers(raw: unknown): Numbers | null {
     tasks,
     findings,
     direct_messages: messages,
+    ...(funding ? { funding } : {}),
   };
 }
 
@@ -114,7 +129,16 @@ interface Section {
   id: string;
   heading: string;
   rows: [label: string, count: Count][];
+  /** How a figure of this group is written, when not as a count. */
+  format?: (n: number) => string;
 }
+
+/** The deposits group: what has been credited and what waits, in whole figures. Money is
+ *  in US dollars, from millionths. */
+const fundingSectionOf = (f: NonNullable<Numbers["funding"]>): Section => ({
+  id: "funding", heading: "Funding",
+  rows: [["Deposits confirmed", f.deposits], ["US dollars credited", f.credited_micro_usd]],
+});
 
 const sections = (n: Numbers): Section[] => [
   { id: "keys", heading: "Keys", rows: [["All keys", n.keys.all], ["Ed25519 keys", n.keys.ed25519], ["Passkeys", n.keys.passkey]] },
@@ -135,7 +159,16 @@ const sections = (n: Numbers): Section[] => [
       ["Conversations", n.direct_messages.conversations], ["Messages", n.direct_messages.messages], ["Sealed messages", n.direct_messages.sealed_messages],
     ],
   },
+  ...(n.funding ? [fundingSectionOf(n.funding)] : []),
 ];
+
+const FUNDING_NOTE = "Deposits are credit sent to a space's deposit addresses and confirmed. Billing has not started. Totals only: no space, key or address is named.";
+const fundingWords = (f: NonNullable<Numbers["funding"]>): string =>
+  `${shown(f.spaces_funded)} ${f.spaces_funded === 1 ? "space has" : "spaces have"} been funded. ${shown(f.pending)} ${f.pending === 1 ? "deposit is" : "deposits are"} incoming, not yet credited.`;
+
+/** A figure of a section: dollars for the money row, a count otherwise. */
+const figure = (s: Section, label: string, n: number, plain = false): string =>
+  s.id === "funding" && label === "US dollars credited" ? dollars(n) : plain ? String(n) : shown(n);
 
 /** The keys that were active in the last 7 days, as a sentence: "1 key posted ...", "3 keys posted ...". */
 const activeWords = (n: number): string =>
@@ -147,7 +180,7 @@ const shown = (n: number): string => n.toLocaleString("en-US");
 
 const tableHtml = (s: Section): string => `<div class="wide"><table>
 <tr><th scope="col"></th><th scope="col">Total</th><th scope="col">Last 7 days</th></tr>
-${s.rows.map(([label, c]) => `<tr><th scope="row">${esc(label)}</th><td>${esc(shown(c.total))}</td><td>${esc(shown(c.last_7_days))}</td></tr>`).join("\n")}
+${s.rows.map(([label, c]) => `<tr><th scope="row">${esc(label)}</th><td>${esc(figure(s, label, c.total))}</td><td>${esc(figure(s, label, c.last_7_days))}</td></tr>`).join("\n")}
 </table></div>`;
 
 export function numbersHtml(shell: Shell, n: Numbers): string {
@@ -168,7 +201,11 @@ ${tableHtml(spaces)}
 <h2 id="${posts.id}">${esc(posts.heading)}</h2>
 ${tableHtml(posts)}
 <h2 id="${messages.id}">${esc(messages.heading)}</h2>
-${tableHtml(messages)}`);
+${tableHtml(messages)}${n.funding ? `
+<h2 id="funding">Funding</h2>
+<p>${esc(FUNDING_NOTE)}</p>
+${tableHtml(fundingSectionOf(n.funding))}
+<p>${esc(fundingWords(n.funding))}</p>` : ""}`);
 }
 
 export function numbersMarkdown(n: Numbers): string {
@@ -176,7 +213,9 @@ export function numbersMarkdown(n: Numbers): string {
   for (const s of sections(n)) {
     L.push(`## ${s.heading}`, "");
     if (s.id === "keys") L.push(KEYS_NOTE, "");
-    for (const [label, c] of s.rows) L.push(`- ${label}: ${c.total} in total, ${c.last_7_days} in the last 7 days`);
+    if (s.id === "funding") L.push(FUNDING_NOTE, "");
+    for (const [label, c] of s.rows) L.push(`- ${label}: ${figure(s, label, c.total, true)} in total, ${figure(s, label, c.last_7_days, true)} in the last 7 days`);
+    if (s.id === "funding" && n.funding) L.push(`- ${fundingWords(n.funding)}`);
     if (s.id === "keys") L.push(`- Keys that posted or sent a direct message in the last 7 days: ${n.keys.active_last_7_days}`);
     if (s.id === "spaces") L.push("", `${SPACES_NOTE} The Vocabulary says what each means: /vocabulary.md`);
     L.push("");
@@ -199,5 +238,14 @@ export function numbersJson(n: Numbers, canonical: string): unknown {
     tasks: n.tasks,
     findings: n.findings,
     direct_messages: n.direct_messages,
+    ...(n.funding ? {
+      funding: {
+        deposits: n.funding.deposits,
+        credited_micro_usd: n.funding.credited_micro_usd,
+        credited_usd: { total: dollars(n.funding.credited_micro_usd.total), last_7_days: dollars(n.funding.credited_micro_usd.last_7_days) },
+        spaces_funded: n.funding.spaces_funded,
+        pending: n.funding.pending,
+      },
+    } : {}),
   };
 }

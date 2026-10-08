@@ -15,7 +15,20 @@ import { operationPages } from "../content/api-overview.mjs";
 
 process.env.API_ORIGIN = API;
 const SITE = "https://schellingaf.com";
-const fake = stubFetch(service(hostileWorld()));
+// One space answers a funding section, so the page it leads to has a link to be reached by.
+const hostile = hostileWorld();
+const fake = stubFetch(service({
+  ...hostile,
+  funding: {
+    "hostile-public": {
+      space: "hostile-public", visibility: "public", billing: "not_started", deposits_open: true, minimums_as_of: "2026-10-08",
+      addresses: [], coins: [], make_address: "POST /v1/spaces/{name}/funding/addresses",
+      bytes: { posts: 1, files: 0, total: 1 }, allowance_bytes: 25000000, over_bytes: 0,
+      balance_micro_usd: 0, days_left: null,
+      deposits: { pending: [], held: [], rejected: [], pending_count: 0, held_count: 0, rejected_count: 0, credited_count: 0 },
+    },
+  },
+}));
 const stubbed = globalThis.fetch;
 const { handleRequest } = await import("../src/index.ts");
 const env = {

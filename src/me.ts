@@ -73,7 +73,7 @@ const GOVERNING_PAGES: Record<string, string> = {
 
 /** A space's governing pages, and the actions a form under a space posts to. */
 const GOVERNING = new RegExp(`^/me/spaces/(${NAME})/(${Object.keys(GOVERNING_PAGES).join("|")})$`);
-const ACTING = new RegExp(`^/me/spaces/(${NAME})/(posts|join|stamp|leave|settings|members|members/remove|invites|hand-over|fork|watch|keepers|locks|admit|vouch|change|finish|abandon|hide|unhide|block|unblock)$`);
+const ACTING = new RegExp(`^/me/spaces/(${NAME})/(posts|join|stamp|leave|settings|members|members/remove|invites|hand-over|fork|watch|funding|keepers|locks|admit|vouch|change|finish|abandon|hide|unhide|block|unblock)$`);
 
 /** Where an invite link brings a person: /me/join/<space>/<code>, the signed-in twin of
  *  /join/<space>/<code>, and like it an address carrying a credential by the one
@@ -1592,6 +1592,15 @@ async function spaceAction(
       // A block changes no public page, so nothing held is forgotten.
       return see(`${back}?notice=${block ? "posting-blocked" : "posting-unblocked"}`);
     }
+    case "funding": {
+      // A deposit address for this space, in the coin the person chose: the product makes
+      // it on the first request and answers the same after. The page shows it first.
+      const coin = (form.get("coin") ?? "").trim();
+      if (!/^[a-z0-9][a-z0-9./_-]{0,63}$/.test(coin)) return badForm(viewer, "Choose a coin from the list. Nothing was made.");
+      const res = await apiWrite(session, "POST", `/v1/spaces/${name}/funding/addresses`, { coin });
+      if (!res.ok) return refused(h, viewer, res, name, [[`${spaceHref}/funding`, "Back to the funding page"], [spaceHref, "Back to the space"]], fundingRefusalWords(res));
+      return see(`${spaceHref}/funding?${new URLSearchParams({ coin })}`);
+    }
     case "watch": {
       const on = form.get("on") === "1";
       const res = await apiWrite(session, on ? "PUT" : "DELETE", `/v1/spaces/${name}/watch`, undefined);
@@ -1659,6 +1668,21 @@ function refused(h: Here, viewer: Viewer, res: Refusal, spaceHref?: string, back
   }
   const links: [string, string][] = back ?? (spaceHref ? [[`/me/spaces/${spaceHref}`, "Back to the space"], ["/me", "Your key"]] : [["/me", "Your key"]]);
   return page(resultHtml(formShell("Not done", viewer), "Not done", words ?? refusalText(res), links, true), statusFor(res));
+}
+
+/** A deposit address refused, in the form's own words; anything else in refusalText's. */
+function fundingRefusalWords(res: Refusal): string | undefined {
+  switch (res.code) {
+    case "COIN_NOT_OFFERED":
+      return "That coin is not one this space takes on this server. Choose one from the list on the funding page. Nothing was made.";
+    case "FUNDING_UNAVAILABLE":
+      return "Deposit addresses cannot be made just now: deposits are not open on this server, or the provider did not answer. Nothing was made. Try again later.";
+    case "RATE_LIMITED":
+      return res.retryAfter
+        ? `Too many deposit addresses made in a short time. Wait ${res.retryAfter} ${res.retryAfter === 1 ? "second" : "seconds"} and try again. Nothing was made.`
+        : "Too many deposit addresses made in a short time. Wait a minute and try again. Nothing was made.";
+    default: return undefined;
+  }
 }
 
 /** A post refused because it would have decided a proposal its key may not decide, in

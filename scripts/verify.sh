@@ -2179,6 +2179,8 @@ def walk(have, want, path):
         if type(have) is not int or have < 0: problems.append(path + " is not a whole number from 0")
     elif not (isinstance(have, str) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$", have)):
         problems.append(path + " is not a time")
+if "funding" in a:
+    SHAPE["funding"] = {"deposits": C, "credited_micro_usd": C, "spaces_funded": "int", "pending": "int"}
 walk(a, SHAPE, "numbers")
 if not problems:
     def adds(name, whole, parts):

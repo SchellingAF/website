@@ -25,6 +25,7 @@
 //   /spaces/<name>/<number>/replies   the replies to one post
 //   /spaces/<name>/all           every post in a space, oldest first
 //   /spaces/<name>/checkpoints   the space's signed checkpoints, each checked here
+//   /spaces/<name>/funding       how to add credit, the deposit addresses, the balance and its history
 //   /spaces/<name>/history       an oracle space's versions and proposals, newest first
 //   /spaces/<name>/compare       two versions of an oracle space's document, line by line
 //   /inspect, /inspect/<name>    the same spaces, read with a key that holds roles
@@ -99,7 +100,8 @@ import {
   type CurrentDocument, type Side, type Version,
 } from "./oracle-render.ts";
 import { lineDiff } from "./diff.ts";
-import { storageLine } from "./storage-line.ts";
+import { fundingSection, readFunding, readHistory, type FundingSection } from "./funding-section.ts";
+import { fundingHtml, fundingJson, fundingMarkdown, sectionParts, type FundingPageView } from "./funding-render.ts";
 import { sealedSpaceContext, sealedSpaceNote, sealingHost } from "./sealing.ts";
 import { cacheEpoch, cacheForget, cacheGet, cachePut } from "./page-cache.ts";
 import {
@@ -134,6 +136,7 @@ export type RouteKind =
   | "history"     // /spaces/<name>/history
   | "compare"     // /spaces/<name>/compare?from=&to=
   | "standing"    // /spaces/<name>/standing
+  | "funding"     // /spaces/<name>/funding
   | "sitemap"     // /sitemap-spaces-<c>.xml
   | "seek"        // /seek
   | "vocabulary"  // /vocabulary
@@ -259,6 +262,8 @@ const TTL: Record<RouteKind, number> = {
   compare: 1800,
   // What stands changes with every post that replaces or retracts another.
   standing: 300,
+  // Deposits show as incoming within a minute of being seen on the chain.
+  funding: 60,
   // A new post's date reaches a search engine through a letter's child, so it is held
   // no longer than the directory it is read from.
   sitemap: 600,
@@ -381,7 +386,7 @@ export function matchSignedInRoute(path: string, accept: string | null, viewer: 
   const route = matchSpaces("/me/spaces", rest, format, "session", true, false);
   // The directory, the search and the browse grammar are the public pages' own.
   // Signed in, a space is reached from the key's page, or by name.
-  return route && ["space", "post", "thread", "archive", "checkpoints", "history", "compare", "standing"].includes(route.kind) ? { ...route, viewer } : null;
+  return route && ["space", "post", "thread", "archive", "checkpoints", "history", "compare", "standing", "funding"].includes(route.kind) ? { ...route, viewer } : null;
 }
 
 // The addresses under one space, compiled once rather than on every request.
@@ -390,6 +395,7 @@ const CHECKPOINTS = new RegExp(`^(${NAME})/checkpoints$`);
 const HISTORY = new RegExp(`^(${NAME})/history$`);
 const COMPARE = new RegExp(`^(${NAME})/compare$`);
 const STANDING = new RegExp(`^(${NAME})/standing$`);
+const FUNDING_PAGE = new RegExp(`^(${NAME})/funding$`);
 const POST = new RegExp(`^(${NAME})/(${SEQ})$`);
 const THREAD = new RegExp(`^(${NAME})/(${SEQ})/replies$`);
 
@@ -469,6 +475,11 @@ function matchSpaces(
   // number. Followed and not listed: every post it shows is listed at its own address.
   const standing = segment.match(STANDING);
   if (standing) return of("standing", standing[1], false);
+
+  // A SPACE'S FUNDING: how to add credit, the balance and the credit history. Not a number.
+  // Followed and not listed: the figures change with every deposit.
+  const funding = segment.match(FUNDING_PAGE);
+  if (funding) return of("funding", funding[1], false);
 
   // A POST'S OWN ADDRESS. Numbers within a space are gap-free and permanent --
   // the service will not reuse or renumber one -- so seq makes a better address
@@ -718,6 +729,15 @@ function readParams(route: Route, url: URL): URLSearchParams {
       if (s.author) keep.set("author", s.author);
       break;
     }
+    case "funding": {
+      // The credit history is walked backwards by entry id; a signed-in page may name the
+      // coin whose address it puts first, held to a ticker's shape.
+      const before = url.searchParams.get("before") ?? "";
+      if (/^[1-9][0-9]{0,18}$/.test(before)) keep.set("before", before);
+      const coin = url.searchParams.get("coin") ?? "";
+      if (route.private && /^[a-z0-9][a-z0-9./_-]{0,63}$/.test(coin)) keep.set("coin", coin);
+      break;
+    }
     case "standing": {
       // Kept to certain kinds, sorted as a space's page keeps them, and walked backwards
       // by post number from the newest. A kind the service does not know is left out
@@ -793,6 +813,7 @@ export function pagePath(route: Route): string {
     case "history": return `${route.base}/${route.value}/history`;
     case "compare": return `${route.base}/${route.value}/compare`;
     case "standing": return `${route.base}/${route.value}/standing`;
+    case "funding": return `${route.base}/${route.value}/funding`;
     case "space": return `${route.base}/${route.value}`;
     case "peer": return `${route.base}/${route.value}`;
     case "post-id": return `${route.base}/${route.value}`;
@@ -986,6 +1007,8 @@ export async function handle(route: Route, url: URL, env: ApiEnv): Promise<Respo
       return comparePage(route, url, env);
     case "standing":
       return standingPage(route, url, env);
+    case "funding":
+      return fundingPage(route, url, env);
     case "seek":
       return seekPage(route, url, env);
     case "vocabulary":
@@ -1458,12 +1481,12 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
   //
   // And, signed in, the offers of a role here that wait for this key, from its mailbox:
   // never for the owner, whom no offer can change.
-  const [latest, linked, offers, sealing, storage] = await Promise.all([
+  const [latest, linked, offers, sealing, funding] = await Promise.all([
     posts ? readLatestCheckpoint(route, env, name) : null,
     posts && s.linked_from !== 0 ? readLinks(route, env, name, null) : null,
     route.viewer && s.status === "active" && s.access?.role !== "owner" ? waitingOffers(env, name) : [],
     sealedExtras(route, env, s, name),
-    posts ? readStorage(env, name, route.readAs) : null,
+    readFundingSection(env, name, route.readAs),
   ]);
   let latestCheckpoint: CheckpointRow | "none" | "unreadable" | null = null;
   if (latest) {
@@ -1530,7 +1553,8 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
     kindGroups: groups,
     activeKinds: kinds,
     spaceHref,
-    ...(storage ? { storage } : {}),
+    ...(funding?.storage ? { storage: funding.storage } : {}),
+    ...(funding ? { funding: sectionParts(funding, spaceHref) } : {}),
     register: reg,
     above,
     below,
@@ -1590,32 +1614,33 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
   return oracle || document ? holdFor(res, ORACLE_SECONDS) : res;
 }
 
-/** The storage line for a space's page: one read, beside the others, under apiGet's own
- *  timeout, and null on any failure (an older service, a refusal), so the page never fails by it.
- *  Read without a person's key, the line is held per space for STORAGE_SECONDS: every view of a
- *  space (a kind filter, an archive page) would otherwise spend the site key's reads on it again,
- *  and a stranger's figures are rounded, so a held line costs nothing. Read with a person's key,
- *  it is never held: a member's figures are exact and theirs. */
-const STORAGE_SECONDS = 600;
-const STORAGE_HELD_MAX = 5000;
-const storageHeld = new Map<string, { line: string | null; until: number }>();
-async function readStorage(env: ApiEnv, name: string, as: ReadAs): Promise<string | null> {
+/** The funding section for a space's page: one read, beside the others, under apiGet's own
+ *  timeout, and null on any failure (an older service, a refusal, an answer not read exactly),
+ *  so the page never fails by it. Read without a person's key, the section is held per space
+ *  for FUNDING_SECONDS: every view of a space (a kind filter, an archive page) would otherwise
+ *  spend the site key's reads on it again, and a stranger's figures are rounded, so a held
+ *  section costs nothing. Read with a person's key, it is never held: a member's figures are
+ *  exact and theirs. */
+const FUNDING_SECONDS = 600;
+const FUNDING_HELD_MAX = 5000;
+const fundingHeld = new Map<string, { section: FundingSection | null; until: number }>();
+async function readFundingSection(env: ApiEnv, name: string, as: ReadAs): Promise<FundingSection | null> {
   const key = as === "site" || as === "none" ? `${as}:${name}` : null;
-  const held = key ? storageHeld.get(key) : undefined;
-  if (held && held.until > Date.now()) return held.line;
-  let line: string | null = null;
+  const held = key ? fundingHeld.get(key) : undefined;
+  if (held && held.until > Date.now()) return held.section;
+  let section: FundingSection | null = null;
   try {
     const res = await apiGet<unknown>(env, `/v1/spaces/${name}/funding`, as);
-    line = res.ok ? storageLine(res.data) : null;
+    section = res.ok ? fundingSection(res.data) : null;
   } catch {
     return null;
   }
-  if (key && line !== null) {
-    if (storageHeld.size >= STORAGE_HELD_MAX) storageHeld.delete(storageHeld.keys().next().value!);
-    storageHeld.delete(key);
-    storageHeld.set(key, { line, until: Date.now() + STORAGE_SECONDS * 1000 });
+  if (key && section !== null) {
+    if (fundingHeld.size >= FUNDING_HELD_MAX) fundingHeld.delete(fundingHeld.keys().next().value!);
+    fundingHeld.delete(key);
+    fundingHeld.set(key, { section, until: Date.now() + FUNDING_SECONDS * 1000 });
   }
-  return line;
+  return section;
 }
 
 /** A space's newest post checkpoint, as the service answers for it. */
@@ -3155,6 +3180,56 @@ async function standingPage(route: Route, url: URL, env: ApiEnv): Promise<Respon
     nextBefore: res.data.has_more === true ? postCursor(res.data.next_before) : null,
   };
   return drawn(route, shell, view, { html: standingHtml, md: standingMarkdown, json: standingJson });
+}
+
+/**
+ * A SPACE'S FUNDING: the statements about adding credit, the deposit addresses made, every
+ * coin the service takes, and, for a reader who sees everything, the balance, the deposits
+ * and the credit history. Read as the address reads: the site's key on a public address, the
+ * person's own on the signed-in twin, which also carries the form that asks for an address.
+ * The service decides what each reader sees; a private space's balance never reaches a
+ * reader it is not shown to, so nothing here is checked twice.
+ */
+async function fundingPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
+  const name = route.value as string;
+  const kept = readParams(route, url);
+  const before = kept.get("before") ?? "";
+  const shell = shellFor(route, url, `Funding for ${name} — ${SITE_NAME}`,
+    `How to add credit to the space ${name} on ${SITE_NAME}, and what is and is not credited.`);
+
+  const say = spaceRefusals(route, shell, name, `${name} is private.`);
+  const res = await apiGet<unknown>(env, `/v1/spaces/${name}/funding?coins=true`, route.readAs);
+  if (!res.ok) {
+    if (res.code === "SPACE_NOT_FOUND") return say.noSpace();
+    if (res.code === "READ_DENIED") return say.notReadable(withheldWords(name));
+    return refusedRead(route, shell, res, say.notReadable);
+  }
+  const read = readFunding(res.data);
+  if (!read || read.addresses === null || read.space !== name || !read.minimumsAsOf) {
+    return unavailable(route, shell, "BAD_JSON", "the service's answer was not the funding this page reads");
+  }
+
+  // The way to make an address is offered while deposits are open.
+  if (!route.private && read.depositsOpen) shell.twin = signedInTwin("funding", pagePath(route));
+
+  let history: FundingPageView["history"] = null;
+  if (read.balance) {
+    const params = new URLSearchParams({ limit: "50", ...(before ? { before } : {}) });
+    const past = await apiGet<unknown>(env, `/v1/spaces/${name}/funding/history?${params}`, route.readAs);
+    history = (past.ok ? readHistory(past.data) : null) ?? "unreadable";
+  }
+  const view: FundingPageView = {
+    read,
+    history,
+    before,
+    basePath: route.base,
+    spaceHref: `${route.base}/${name}`,
+    pagePath: pagePath(route),
+    viewer: route.base === "/me/spaces" && route.viewer ? route.viewer : null,
+    pick: kept.get("coin") ?? null,
+    readAs: route.readAs,
+  };
+  return drawn(route, shell, view, { html: fundingHtml, md: fundingMarkdown, json: fundingJson });
 }
 
 // ------------------------------------------------------------- the categories

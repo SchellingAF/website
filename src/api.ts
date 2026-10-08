@@ -83,6 +83,8 @@ export type ApiResult<T> =
        *  one: "q is at most 16 terms". It is a bounded token or sentence the
        *  service chose, never an echo of the caller's input, so a page may show it. */
       detail?: string;
+      /** Whole seconds the service asked the caller to wait, from its Retry-After header. */
+      retryAfter?: number;
     };
 
 /** Wall-clock ceiling on one call to the API. A page that waits on the product
@@ -347,7 +349,11 @@ async function refusalOf(res: Response): Promise<Refusal> {
   } catch {
     /* an error body that is not JSON tells us nothing we do not already have */
   }
-  return { ok: false, status: res.status, code, message, ...(detail ? { detail } : {}) };
+  const wait = Number(res.headers.get("retry-after"));
+  return {
+    ok: false, status: res.status, code, message, ...(detail ? { detail } : {}),
+    ...(Number.isSafeInteger(wait) && wait > 0 && wait <= 86400 ? { retryAfter: wait } : {}),
+  };
 }
 
 /** How long one part of an export may take: up to eight mebibytes, which the service

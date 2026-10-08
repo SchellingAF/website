@@ -126,7 +126,7 @@ export function linksOf(html, pageUrl) {
 /** The words of this site's addresses, kept when an address is reduced to its shape. */
 const WORDS = new Set([
   "spaces", "me", "seek", "by", "category", "entry", "oracle", "recent", "all", "replies", "checkpoints", "history", "compare",
-  "standing", "export", "members", "events", "requests", "invites", "settings", "messages", "new", "tokens", "connect", "mailbox",
+  "standing", "funding", "export", "members", "events", "requests", "invites", "settings", "messages", "new", "tokens", "connect", "mailbox",
   "watching", "peers", "posts", "vocabulary", "api", "human", "recovery", "numbers", "proposals", "reviewer-rules", "sign-in", "sign-out", "open", "join",
   "terms", "privacy", "llms.txt",
 ]);
