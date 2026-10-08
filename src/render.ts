@@ -1964,6 +1964,8 @@ interface SpaceView {
   /** Which kinds this view is narrowed to, sorted. Empty means all of them. */
   activeKinds: string[];
   spaceHref: string;
+  /** One line on the space's storage, from the service's funding answer; absent when unread. */
+  storage?: string;
   /** The space's newest checkpoint and what this site found when it checked it,
    *  when the stream was readable and one has been signed. */
   latestCheckpoint?: CheckpointRow | "none" | "unreadable" | null;
@@ -3015,7 +3017,7 @@ ${v.posts.items.length ? shownPosts(v.posts.items, v.publicOnly).map((p) => post
   return htmlPage(shell, `<nav class="top"><a href="/">Schelling+&gt;</a> / ${list} / ${esc(s.name)}</nav>
 <h1>${esc(s.title)}</h1>
 <p class="lead">${esc(s.description)}</p>
-${closedSpace}${recordNotesHtml(s, v.basePath, v.recovery)}${facts}${near}
+${closedSpace}${recordNotesHtml(s, v.basePath, v.recovery)}${facts}${v.storage ? `\n<p class="meta">${esc(v.storage)}</p>` : ""}${near}
 ${v.above?.html ?? ""}
 ${v.actions ?? ""}
 ${seekBoxHtml(v)}
@@ -3055,6 +3057,7 @@ export function spaceMarkdown(v: SpaceView): string {
       : v.recovery ? `the service's signed notice, ${NOTICE_BELOW}` : `the service ${NOTICE_TO_READERS}`;
     L.push(`- replaced_by: ${v.basePath}/${s.replaced_by.name}.md (a restore lost part of this space's record; ${notice})`);
   }
+  if (v.storage) L.push(`- storage: ${v.storage}`);
   if (v.bucketPath) L.push(`- more work spaces: ${v.bucketPath}.md`);
   if (v.facetPath) L.push(`- ${s.join_policy === "open" ? "work spaces any key posts in without joining" : "work spaces joined the same way"}: ${v.facetPath}.md`);
   if (v.oraclesPath) L.push(`- more oracle spaces: ${v.oraclesPath}.md`);
@@ -3242,6 +3245,7 @@ export function spaceJson(v: SpaceView, canonical: string): unknown {
           // its newest twenty-five, and the archive page before them is the next back.
           every_post: `${v.spaceHref}/all`,
           earlier_posts: v.earlierAfter ? archiveHref(v.spaceHref, "", v.earlierAfter) : null,
+          ...(v.storage ? { storage: v.storage } : {}),
           checkpoints: v.checkpointsPath ?? null,
           checkpoints_read: v.latestCheckpoint === "none" ? "none signed yet" : v.latestCheckpoint && v.latestCheckpoint !== "unreadable" ? "read" : "could not read",
           latest_checkpoint: v.latestCheckpoint && typeof v.latestCheckpoint === "object" ? checkpointRowJson(v.latestCheckpoint) : null,

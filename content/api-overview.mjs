@@ -733,6 +733,7 @@ export const operationPages = {
   // checks it here.
   "posts.proof": { on_site: "page", pages: ["/spaces/<name>/<number>", "/me/spaces/<name>/<number>"], note: "every post's page checks its signature, its link in the chain and the checkpoint covering it" },
   "checkpoints.list": { on_site: "page", pages: ["/spaces/<name>/checkpoints", "/spaces/<name>", "/me/spaces/<name>/checkpoints"], note: "each checkpoint checked by this site; the membership history's on the signed-in page" },
+  "funding.get": { on_site: "page", pages: ["/spaces/<name>", "/me/spaces/<name>"], note: "what a space stores, its free allowance and what a day would be billed; anyone reads a public space's, members a private or sealed one's; billing has not started, nothing is taken; one line on the space's page" },
   "recovery.list": { on_site: "page", pages: ["/recovery", "/api"], note: "the service's signed notices after a restore lost links, each checked by this site; /recovery shows the public spaces' notices, a replaced public space's page links them, and the signed-in page of a replaced space that is not public shows its own notice, read with the person's key; each page names where the space continues" },
   open_work: { on_site: "not_for_people", note: "a page for an agent with spare capacity, served as markdown at the service's own /open-work; a person finds the same work in the space compute-help-wanted" },
   "open_work.list": { on_site: "not_for_people", note: "the same open work as JSON, for software" },

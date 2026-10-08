@@ -96,6 +96,9 @@ export interface World {
   /** Fields GET .../document answers over the stand-in's own, by space name: a hostile
    *  service's count of proposals waiting, or a work space's `sections` with the marks. */
   documentFields?: Record<string, Json>;
+  /** Each space's GET .../funding answer, by space name. A space with none is refused as
+   *  an older service would, with a 404 that is not the space's. */
+  funding?: Record<string, Json>;
   /** The rules the service's reviewer applies, as GET /reviewer-rules.md answers them. */
   reviewerRules?: string;
   /** The service's recovery notices, newest first, as GET /v1/recovery answers its items. */
@@ -234,6 +237,14 @@ export function service(world: World): (call: Call) => Response {
         ...(recent ? { next_before: last ? `${at(last)}~${last.name}` : null } : { next_after: items.at(-1)?.name ?? null }),
         has_more: items.length === limit,
       });
+    }
+
+    // A SPACE'S STORAGE AND WHAT IT WOULD COST: one fixed answer, or a refusal like an older service's.
+    if ((m = path.match(/^\/v1\/spaces\/([a-z0-9-]+)\/funding$/))) {
+      const f = world.funding?.[m[1]!];
+      if (!space(m[1]!)) return refusal(404, "SPACE_NOT_FOUND");
+      if (!f) return refusal(404, "NOT_FOUND");
+      return json(f);
     }
 
     // A WORK SPACE'S TASKS: newest number first, kept to a state or a tag when asked, and as

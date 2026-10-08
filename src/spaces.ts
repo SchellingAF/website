@@ -99,6 +99,7 @@ import {
   type CurrentDocument, type Side, type Version,
 } from "./oracle-render.ts";
 import { lineDiff } from "./diff.ts";
+import { storageLine } from "./storage-line.ts";
 import { sealedSpaceContext, sealedSpaceNote, sealingHost } from "./sealing.ts";
 import { cacheEpoch, cacheForget, cacheGet, cachePut } from "./page-cache.ts";
 import {
@@ -1457,11 +1458,12 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
   //
   // And, signed in, the offers of a role here that wait for this key, from its mailbox:
   // never for the owner, whom no offer can change.
-  const [latest, linked, offers, sealing] = await Promise.all([
+  const [latest, linked, offers, sealing, storage] = await Promise.all([
     posts ? readLatestCheckpoint(route, env, name) : null,
     posts && s.linked_from !== 0 ? readLinks(route, env, name, null) : null,
     route.viewer && s.status === "active" && s.access?.role !== "owner" ? waitingOffers(env, name) : [],
     sealedExtras(route, env, s, name),
+    posts ? readStorage(env, name, route.readAs) : null,
   ]);
   let latestCheckpoint: CheckpointRow | "none" | "unreadable" | null = null;
   if (latest) {
@@ -1528,6 +1530,7 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
     kindGroups: groups,
     activeKinds: kinds,
     spaceHref,
+    ...(storage ? { storage } : {}),
     register: reg,
     above,
     below,
@@ -1585,6 +1588,34 @@ async function renderSpace(route: Route, name: string, url: URL, env: ApiEnv): P
   // The page of a space that keeps a document is held as long as its history, for the
   // reason an oracle space's is: a decision replaces the document within minutes.
   return oracle || document ? holdFor(res, ORACLE_SECONDS) : res;
+}
+
+/** The storage line for a space's page: one read, beside the others, under apiGet's own
+ *  timeout, and null on any failure (an older service, a refusal), so the page never fails by it.
+ *  Read without a person's key, the line is held per space for STORAGE_SECONDS: every view of a
+ *  space (a kind filter, an archive page) would otherwise spend the site key's reads on it again,
+ *  and a stranger's figures are rounded, so a held line costs nothing. Read with a person's key,
+ *  it is never held: a member's figures are exact and theirs. */
+const STORAGE_SECONDS = 600;
+const STORAGE_HELD_MAX = 5000;
+const storageHeld = new Map<string, { line: string | null; until: number }>();
+async function readStorage(env: ApiEnv, name: string, as: ReadAs): Promise<string | null> {
+  const key = as === "site" || as === "none" ? `${as}:${name}` : null;
+  const held = key ? storageHeld.get(key) : undefined;
+  if (held && held.until > Date.now()) return held.line;
+  let line: string | null = null;
+  try {
+    const res = await apiGet<unknown>(env, `/v1/spaces/${name}/funding`, as);
+    line = res.ok ? storageLine(res.data) : null;
+  } catch {
+    return null;
+  }
+  if (key && line !== null) {
+    if (storageHeld.size >= STORAGE_HELD_MAX) storageHeld.delete(storageHeld.keys().next().value!);
+    storageHeld.delete(key);
+    storageHeld.set(key, { line, until: Date.now() + STORAGE_SECONDS * 1000 });
+  }
+  return line;
 }
 
 /** A space's newest post checkpoint, as the service answers for it. */
