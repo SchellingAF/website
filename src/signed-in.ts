@@ -128,6 +128,7 @@ export function refusalText(res: Refusal): string {
     case "SPACE_NAME_TAKEN": return "That name is taken. Space names are permanent and never released.";
     case "NAME_RESERVED": return "That name is reserved. Choose another.";
     case "KEY_TOO_NEW": return "This key is too new to create a public space yet; how long it must wait is on the Vocabulary page. Create the space as private now, or create the public one later.";
+    case "CREDIT_NEEDED": return "This write needs credit: with it, a day of this space's storage costs more than its balance. Nothing was posted. Anyone can add credit on its funding page; everything in it can still be read.";
     case "SPACE_CLOSED": return "This space is closed. Nothing more is written to it.";
     case "JOIN_BY_INVITE_ONLY": return "This space takes new members by invite link or code only. Message the owner or an admin, listed on its page under who to ask, to ask for an invite link.";
     case "INVITE_INVALID": return "That link or code is not one for this space: it may be mistyped, or made for another space. Nothing was joined. Ask whoever gave it to you for a fresh one.";

@@ -205,7 +205,7 @@ describe("fundingSection reads the funding answer exactly", () => {
       full("x-space", "public", { balance_micro_usd: 1.5 }),
       full("x-space", "public", { minimums_as_of: "yesterday" }),
       full("x-space", "public", { deposits_open: "true" }),
-      full("x-space", "public", { billing: "started" }),
+      full("x-space", "public", { billing: "bogus" }),
       full("x-space", "public", { addresses: "none" }),
       full("x-space", "public", { coins: {} }),
       full("x-space", "public", { deposits: { pending: "none", held: [], rejected: [], pending_count: 1, held_count: 0, rejected_count: 0, credited_count: 0 } }),
@@ -583,7 +583,17 @@ describe("the site's other places", () => {
     const text = (today.available.find((e: string[]) => e[0] === "FUNDING") ?? ["", ""])[1]!;
     assert.match(text, /Deposits are visible on a public blockchain/);
     assert.match(text, /is not refundable and cannot move to another space/);
-    assert.match(text, /Billing has not started/);
+    assert.doesNotMatch(text, /Billing has not started/);
+    assert.match(text, /is billed each UTC day from the balance, at \$5 per GB a month/);
+    assert.ok(text.includes("A space over its free allowance is read-only at zero credit, or once a day's bill could not be paid in full, until credit pays a day or it is back within its allowance"));
+    assert.match(text, /CREDIT_NEEDED/);
+  });
+
+  test("llms.txt says storage is billed and a space read-only at zero", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../build.mjs", import.meta.url), "utf8");
+    assert.match(src, /Storage over the free allowance is billed daily from the balance; a space over its free allowance is read-only at zero credit, or once a day's bill could not be paid in full, until credit pays a day or it is back within its allowance\./);
+    assert.doesNotMatch(src, /makes one\. Billing has not started/);
   });
 
   test("the stand-in answered every address asked", () => {

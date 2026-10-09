@@ -6,7 +6,7 @@
 // byte figures.
 
 import { ISO_TIME } from "./grammar.ts";
-import { dollars, storageLine } from "./storage-line.ts";
+import { billingState, dollars, megabytes, storageLine, type BillingState } from "./storage-line.ts";
 
 // ------------------------------------------------------------------ shapes
 
@@ -49,6 +49,16 @@ export interface FundingBalance {
   counts: { pending: number; held: number; rejected: number; credited: number };
 }
 
+/** What the answer says of billing, for the statements: the state, the day billing starts,
+ *  the free allowance and the price a GB a month. Null for an older service, which says only
+ *  that billing has not started. */
+export interface BillingTerms {
+  state: BillingState;
+  from: string | null;
+  allowanceBytes: number | null;
+  microUsdPerGbMonth: number | null;
+}
+
 /** The answer, as far as this site reads it. `addresses` is null for a service that
  *  answers only what a space stores (an older one): the page then shows the storage line
  *  and nothing about deposits. */
@@ -67,6 +77,7 @@ export interface FundingRead {
   creditedTo: string | null;
   /** The balance and the deposits: present only for a reader who sees everything. */
   balance: FundingBalance | null;
+  billing: BillingTerms | null;
 }
 
 // ----------------------------------------------------------------- reading
@@ -150,6 +161,25 @@ function rejectedOf(v: unknown): RejectedDeposit | null {
   return { coin, txid_in: txid, reason, seen_at: seen };
 }
 
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The terms of billing in an answer, or null for an older service (not started, no start day). */
+function billingOf(f: Record<string, unknown>): BillingTerms | null {
+  const state = billingState(own(f, "billing"));
+  if (state === null) return null;
+  const from = own(f, "billing_from");
+  const allowance = own(f, "allowance_bytes");
+  const rate = own(f, "rate");
+  const price = isObject(rate) ? own(rate, "micro_usd_per_gb_month") : undefined;
+  const terms: BillingTerms = {
+    state,
+    from: typeof from === "string" && DAY.test(from) ? from : null,
+    allowanceBytes: whole(allowance) ? allowance : null,
+    microUsdPerGbMonth: whole(price) && price > 0 ? price : null,
+  };
+  return state === "not_started" && terms.from === null ? null : terms;
+}
+
 function balanceOf(f: Record<string, unknown>): FundingBalance | null {
   const micro = own(f, "balance_micro_usd");
   const days = own(f, "days_left");
@@ -172,14 +202,15 @@ export function readFunding(answer: unknown): FundingRead | null {
   if (!isObject(answer)) return null;
   const visibility = text(own(answer, "visibility"), VISIBILITY);
   const space = text(own(answer, "space"), SPACE_NAME);
-  if (!visibility || !space || own(answer, "billing") !== "not_started") return null;
+  if (!visibility || !space || billingState(own(answer, "billing")) === null) return null;
+  const billing = billingOf(answer);
   const hasBytes = own(answer, "bytes") !== undefined;
   const storage = hasBytes ? storageLine(answer) : null;
   if (hasBytes && storage === null) return null;
 
   if (own(answer, "addresses") === undefined) {
     return storage === null ? null
-      : { space, visibility, depositsOpen: false, storage, addresses: null, coins: [], minimumsAsOf: "", membersOnly: false, creditedTo: null, balance: null };
+      : { space, visibility, depositsOpen: false, storage, addresses: null, coins: [], minimumsAsOf: "", membersOnly: false, creditedTo: null, balance: null, billing };
   }
   const open = own(answer, "deposits_open");
   // The coins and the day of their minimums come only when asked for (?coins=true): an answer
@@ -200,11 +231,11 @@ export function readFunding(answer: unknown): FundingRead | null {
   if (members !== undefined) {
     // The addresses alone: no byte figure, no balance, no deposits.
     if (!Array.isArray(members) || hasBytes || own(answer, "balance_micro_usd") !== undefined || own(answer, "deposits") !== undefined) return null;
-    return { space, visibility, depositsOpen: open, storage: null, addresses, coins, minimumsAsOf: asOf, membersOnly: true, creditedTo, balance: null };
+    return { space, visibility, depositsOpen: open, storage: null, addresses, coins, minimumsAsOf: asOf, membersOnly: true, creditedTo, balance: null, billing };
   }
   const balance = balanceOf(answer);
   if (!hasBytes || !balance) return null;
-  return { space, visibility, depositsOpen: open, storage, addresses, coins, minimumsAsOf: asOf, membersOnly: false, creditedTo, balance };
+  return { space, visibility, depositsOpen: open, storage, addresses, coins, minimumsAsOf: asOf, membersOnly: false, creditedTo, balance, billing };
 }
 
 // -------------------------------------------------------------------- history
@@ -216,6 +247,8 @@ export interface HistoryEntry {
   balance_after_micro_usd: number;
   at: string;
   deposit: { coin: string; network: string | null; txid_in: string; value_forwarded_coin: string | null; address: string } | null;
+  /** The day a bill is for, and the space it measured; null for any other entry, and when the service does not say. */
+  bill: { day: string; space: string } | null;
 }
 
 export interface FundingHistory {
@@ -234,15 +267,22 @@ function entryOf(v: unknown): HistoryEntry | null {
   const kind = text(own(v, "kind"), /^[a-z][a-z_]{0,31}$/), at = time(own(v, "at"));
   const amount = own(v, "amount_micro_usd"), after = own(v, "balance_after_micro_usd");
   if (!id || !kind || !at || !integer(amount) || !integer(after)) return null;
+  const rawBill = own(v, "bill");
+  let bill: HistoryEntry["bill"] = null;
+  if (rawBill !== undefined && rawBill !== null) {
+    const day = isObject(rawBill) ? own(rawBill, "day") : undefined, of = isObject(rawBill) ? text(own(rawBill, "space"), SPACE_NAME) : null;
+    if (typeof day !== "string" || !DAY.test(day) || !of) return null;
+    bill = { day, space: of };
+  }
   const d = own(v, "deposit");
-  if (d === null) return { entry_id: id, kind, amount_micro_usd: amount, balance_after_micro_usd: after, at, deposit: null };
+  if (d === null) return { entry_id: id, kind, amount_micro_usd: amount, balance_after_micro_usd: after, at, deposit: null, bill };
   if (!isObject(d)) return null;
   const coin = text(own(d, "coin"), DEPOSIT_COIN), txid = text(own(d, "txid_in"), TXID), rawForwarded = own(d, "value_forwarded_coin"), forwarded = rawForwarded === null ? null : text(rawForwarded, DECIMAL);
   const address = text(own(d, "address"), ADDRESS);
   const rawNet = own(d, "network");
   const network = rawNet === null || rawNet === undefined ? null : text(rawNet, LABEL);
   if (!coin || !txid || !address || (rawForwarded !== null && forwarded === null) || (rawNet != null && network === null)) return null;
-  return { entry_id: id, kind, amount_micro_usd: amount, balance_after_micro_usd: after, at, deposit: { coin, network, txid_in: txid, value_forwarded_coin: forwarded, address } };
+  return { entry_id: id, kind, amount_micro_usd: amount, balance_after_micro_usd: after, at, deposit: { coin, network, txid_in: txid, value_forwarded_coin: forwarded, address }, bill };
 }
 
 /** The history answer, or null when it is not the one the contract describes. */
@@ -268,9 +308,29 @@ export const creditLine = (creditedTo: string | null): string => creditedTo === 
   ? "Credit belongs to this space. It is not refundable and cannot move to another space."
   : `This space was replaced. Deposits to these addresses credit the space ${creditedTo}. Credit is not refundable.`;
 
+/** How a history entry is named: its kind, and for a bill the day it is for, and the space when it is another. */
+export const entryLabel = (e: HistoryEntry, own: string): string =>
+  e.bill === null ? e.kind : `${e.kind} for ${e.bill.day}${e.bill.space === own ? "" : `, ${e.bill.space}`}`;
+
+/** The price a GB a month as a person says it: "$5", "$0.5", "$12.50". */
+const price = (micro: number): string => dollars(micro).replace(/\.00$/, "");
+
+/** What a page says of billing. Where the service says nothing of it, billing has not started. */
+function billingStatements(b: BillingTerms | null): string[] {
+  if (b === null) return ["Billing has not started: nothing is taken from the balance."];
+  if (b.state === "not_started") return [`Billing starts on ${b.from}. Nothing is taken from the balance before then.`];
+  if (b.state === "paused") return ["Billing is paused: nothing is taken from the balance."];
+  const free = b.allowanceBytes === null ? "free allowance" : `free ${megabytes(b.allowanceBytes)}`;
+  const rate = b.microUsdPerGbMonth === null ? "" : `, at ${price(b.microUsdPerGbMonth)} per GB a month: a thirtieth of that a day`;
+  return [
+    `Storage above this space's ${free} is billed each UTC day from the balance${rate}.`,
+    "A space over its free allowance is read-only at zero credit, or once a day's bill could not be paid in full, until credit pays a day or it is back within its allowance. Everything in it can still be read and nothing is deleted.",
+  ];
+}
+
 /** The statements every funding page makes, and only these. The last is for a private or
  *  sealed space alone. */
-export function statements(asOf: string, nonPublic: boolean, creditedTo: string | null = null): string[] {
+export function statements(asOf: string, nonPublic: boolean, creditedTo: string | null = null, billing: BillingTerms | null = null): string[] {
   const list = [
     "Anyone can add credit to this space by sending a coin to one of its deposit addresses. Making an address needs a key.",
     "Deposits are visible on a public blockchain: anyone can see the address, the amount and the transaction.",
@@ -280,18 +340,18 @@ export function statements(asOf: string, nonPublic: boolean, creditedTo: string 
     "Credit is kept in US dollars, rounded down to a millionth of a dollar. USDT, USDC, USDC.e, USDT0, DAI and PYUSD count one for one. Any other coin counts at CryptAPI's US dollar price when the deposit is confirmed. Both are counted after CryptAPI's fee and the network's fee.",
     "A deposit shows as incoming until it is confirmed, and is credited only then. Some deposits are held for review and are not credited.",
     creditLine(creditedTo),
-    "Billing has not started: nothing is taken from the balance.",
+    ...billingStatements(billing),
   ];
   if (nonPublic) list.push("The balance and deposits are shown to members only. The deposit addresses are public, and deposits to them are visible on a public blockchain.");
   return list;
 }
 
 /** What a page says while deposits are closed: the statements that stay true. */
-export function closedStatements(nonPublic: boolean, creditedTo: string | null = null): string[] {
+export function closedStatements(nonPublic: boolean, creditedTo: string | null = null, billing: BillingTerms | null = null): string[] {
   const list = [
     "Deposits are not open on this server.",
     creditLine(creditedTo),
-    "Billing has not started: nothing is taken from the balance.",
+    ...billingStatements(billing),
   ];
   if (nonPublic) list.push("The balance and deposits are shown to members only.");
   return list;
@@ -329,7 +389,7 @@ export function fundingSection(answer: unknown): FundingSection | null {
   return {
     space: f.space,
     storage: f.storage,
-    balance: b ? `Balance: ${money(b.micro)}.` : null,
+    balance: b ? `Balance: ${money(b.micro)}.${f.billing?.state === "started" && b.daysLeft !== null ? ` ${plural(b.daysLeft, "day", "days")} of storage left.` : ""}` : null,
     incoming: b && b.counts.pending > 0 ? `${plural(b.counts.pending, "deposit", "deposits")} incoming, not yet credited.` : null,
     held: b && b.counts.held > 0 ? `${plural(b.counts.held, "deposit", "deposits")} held, not credited.` : null,
     addresses: f.addresses === null ? null

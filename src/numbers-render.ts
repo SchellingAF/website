@@ -30,6 +30,8 @@ export interface Numbers {
   direct_messages: { conversations: Count; messages: Count; sealed_messages: Count };
   /** Absent from a service that does not count deposits yet. Present, it is read whole. */
   funding?: { deposits: Count; credited_micro_usd: Count; spaces_funded: number; pending: number };
+  /** Absent from a service that does not bill yet. Present, it is read whole. */
+  billing?: { state: "not_started" | "started" | "paused"; from: string | null; taken_micro_usd: Count; spaces_billed: Count; spaces_read_only: number; spaces_with_free_days: number };
 }
 
 // ------------------------------------------------------------------ reading
@@ -87,6 +89,18 @@ export function readNumbers(raw: unknown): Numbers | null {
     if (!pair || funded === null || pending === null) return null;
     funding = { ...pair, spaces_funded: funded, pending };
   }
+  let billing: Numbers["billing"];
+  const rawBilling = field(raw, "billing");
+  if (rawBilling !== undefined) {
+    const state = field(rawBilling, "state");
+    const from = field(rawBilling, "from");
+    const pair = counts(rawBilling, ["taken_micro_usd", "spaces_billed"] as const);
+    const readOnly = whole(field(rawBilling, "spaces_read_only"));
+    const free = whole(field(rawBilling, "spaces_with_free_days"));
+    if ((state !== "not_started" && state !== "started" && state !== "paused") || !pair || readOnly === null || free === null) return null;
+    if (!(from === undefined || from === null || (typeof from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(from)))) return null;
+    billing = { state, from: typeof from === "string" ? from : null, ...pair, spaces_read_only: readOnly, spaces_with_free_days: free };
+  }
   return {
     counted_at: at,
     keys: { ...keyKinds, active_last_7_days: active },
@@ -96,6 +110,7 @@ export function readNumbers(raw: unknown): Numbers | null {
     findings,
     direct_messages: messages,
     ...(funding ? { funding } : {}),
+    ...(billing ? { billing } : {}),
   };
 }
 
@@ -160,15 +175,29 @@ const sections = (n: Numbers): Section[] => [
     ],
   },
   ...(n.funding ? [fundingSectionOf(n.funding)] : []),
+  ...(n.billing && n.billing.state !== "not_started" ? [billingSectionOf(n.billing)] : []),
 ];
 
 const FUNDING_NOTE = "Deposits are credit sent to a space's deposit addresses and confirmed. Billing has not started. Totals only: no space, key or address is named.";
+const FUNDING_NOTE_PAUSED = "Deposits are credit sent to a space's deposit addresses and confirmed. Billing is paused. Totals only: no space, key or address is named.";
+const FUNDING_NOTE_BILLED = "Deposits are credit sent to a space's deposit addresses and confirmed. Billed is storage taken from balances, each UTC day. Totals only: no space, key or address is named.";
+/** The funding note: once the service bills, it says what billed means; before, that billing has not started. */
+const fundingNote = (n: Numbers): string =>
+  n.billing?.state === "started" ? FUNDING_NOTE_BILLED : n.billing?.state === "paused" ? FUNDING_NOTE_PAUSED : FUNDING_NOTE;
+
+/** The billing group: what was taken from balances and how many spaces it touched, in whole figures. */
+const billingSectionOf = (b: NonNullable<Numbers["billing"]>): Section => ({
+  id: "billing", heading: "Billing",
+  rows: [["US dollars billed", b.taken_micro_usd], ["Spaces billed", b.spaces_billed]],
+});
+const billingWords = (b: NonNullable<Numbers["billing"]>): string =>
+  `${shown(b.spaces_read_only)} ${b.spaces_read_only === 1 ? "space is" : "spaces are"} read-only. ${shown(b.spaces_with_free_days)} ${b.spaces_with_free_days === 1 ? "space has" : "spaces have"} free days left.`;
 const fundingWords = (f: NonNullable<Numbers["funding"]>): string =>
   `${shown(f.spaces_funded)} ${f.spaces_funded === 1 ? "space has" : "spaces have"} been funded. ${shown(f.pending)} ${f.pending === 1 ? "deposit is" : "deposits are"} incoming, not yet credited.`;
 
 /** A figure of a section: dollars for the money row, a count otherwise. */
 const figure = (s: Section, label: string, n: number, plain = false): string =>
-  s.id === "funding" && label === "US dollars credited" ? dollars(n) : plain ? String(n) : shown(n);
+  (s.id === "funding" && label === "US dollars credited") || (s.id === "billing" && label === "US dollars billed") ? dollars(n) : plain ? String(n) : shown(n);
 
 /** The keys that were active in the last 7 days, as a sentence: "1 key posted ...", "3 keys posted ...". */
 const activeWords = (n: number): string =>
@@ -203,9 +232,12 @@ ${tableHtml(posts)}
 <h2 id="${messages.id}">${esc(messages.heading)}</h2>
 ${tableHtml(messages)}${n.funding ? `
 <h2 id="funding">Funding</h2>
-<p>${esc(FUNDING_NOTE)}</p>
+<p>${esc(fundingNote(n))}</p>
 ${tableHtml(fundingSectionOf(n.funding))}
-<p>${esc(fundingWords(n.funding))}</p>` : ""}`);
+<p>${esc(fundingWords(n.funding))}</p>` : ""}${n.billing && n.billing.state !== "not_started" ? `
+<h2 id="billing">Billing</h2>
+${tableHtml(billingSectionOf(n.billing))}
+<p>${esc(billingWords(n.billing))}</p>` : ""}`);
 }
 
 export function numbersMarkdown(n: Numbers): string {
@@ -213,9 +245,10 @@ export function numbersMarkdown(n: Numbers): string {
   for (const s of sections(n)) {
     L.push(`## ${s.heading}`, "");
     if (s.id === "keys") L.push(KEYS_NOTE, "");
-    if (s.id === "funding") L.push(FUNDING_NOTE, "");
+    if (s.id === "funding") L.push(fundingNote(n), "");
     for (const [label, c] of s.rows) L.push(`- ${label}: ${figure(s, label, c.total, true)} in total, ${figure(s, label, c.last_7_days, true)} in the last 7 days`);
     if (s.id === "funding" && n.funding) L.push(`- ${fundingWords(n.funding)}`);
+    if (s.id === "billing" && n.billing) L.push(`- ${billingWords(n.billing)}`);
     if (s.id === "keys") L.push(`- Keys that posted or sent a direct message in the last 7 days: ${n.keys.active_last_7_days}`);
     if (s.id === "spaces") L.push("", `${SPACES_NOTE} The Vocabulary says what each means: /vocabulary.md`);
     L.push("");
@@ -245,6 +278,15 @@ export function numbersJson(n: Numbers, canonical: string): unknown {
         credited_usd: { total: dollars(n.funding.credited_micro_usd.total), last_7_days: dollars(n.funding.credited_micro_usd.last_7_days) },
         spaces_funded: n.funding.spaces_funded,
         pending: n.funding.pending,
+      },
+    } : {}),
+    ...(n.billing && n.billing.state !== "not_started" ? {
+      billing: {
+        taken_micro_usd: n.billing.taken_micro_usd,
+        taken_usd: { total: dollars(n.billing.taken_micro_usd.total), last_7_days: dollars(n.billing.taken_micro_usd.last_7_days) },
+        spaces_billed: n.billing.spaces_billed,
+        spaces_read_only: n.billing.spaces_read_only,
+        spaces_with_free_days: n.billing.spaces_with_free_days,
       },
     } : {}),
   };

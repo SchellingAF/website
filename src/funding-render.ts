@@ -6,7 +6,7 @@
 import { API_ORIGIN } from "./routes.generated.ts";
 import { codeSpan, csrfField, esc, htmlPage, spaceTrail, when, type Shell, type Viewer } from "./render.ts";
 import {
-  CLOSED, MEMBERS_ONLY, NO_ADDRESS, OLDER_WALLET, closedStatements, money, statements,
+  CLOSED, MEMBERS_ONLY, NO_ADDRESS, OLDER_WALLET, closedStatements, entryLabel, money, statements,
   type FundingAddress, type FundingCoin, type FundingHistory, type FundingRead, type FundingSection,
 } from "./funding-section.ts";
 
@@ -147,7 +147,7 @@ function historyHtml(v: FundingPageView): string {
   if (v.history === null) return "";
   if (v.history === "unreadable") return `<h2 id="history">Credit history</h2>\n<p>The credit history could not be read just now. Reload the page to try again.</p>`;
   const h = v.history;
-  const rows = h.entries.map((e) => `<tr><td>${esc(when(e.at))}</td><td>${esc(e.kind)}</td><td>${esc(money(e.amount_micro_usd))}</td><td>${esc(money(e.balance_after_micro_usd))}</td><td>${e.deposit ? `${esc(e.deposit.coin)} ${e.deposit.value_forwarded_coin === null ? "not sent" : esc(e.deposit.value_forwarded_coin)}, <code>${esc(e.deposit.txid_in)}</code>` : ""}</td></tr>`);
+  const rows = h.entries.map((e) => `<tr><td>${esc(when(e.at))}</td><td>${esc(entryLabel(e, v.read.space))}</td><td>${esc(money(e.amount_micro_usd))}</td><td>${esc(money(e.balance_after_micro_usd))}</td><td>${e.deposit ? `${esc(e.deposit.coin)} ${e.deposit.value_forwarded_coin === null ? "not sent" : esc(e.deposit.value_forwarded_coin)}, <code>${esc(e.deposit.txid_in)}</code>` : ""}</td></tr>`);
   return `<h2 id="history">Credit history</h2>
 ${rows.length ? `<div class="wide"><table>
 <tr><th scope="col">When</th><th scope="col">Entry</th><th scope="col">Amount</th><th scope="col">Balance after</th><th scope="col">Deposit</th></tr>
@@ -172,7 +172,7 @@ export function fundingHtml(shell: Shell, v: FundingPageView): string {
   const r = v.read;
   const nonPublic = r.visibility !== "public";
   const open = r.depositsOpen;
-  const said = open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo) : closedStatements(nonPublic, r.creditedTo);
+  const said = open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing) : closedStatements(nonPublic, r.creditedTo, r.billing);
   const addresses = open ? ordered(v) : [];
   return htmlPage(shell, `${spaceTrail(v.basePath, v.spaceHref, r.space, "funding")}
 <h1>Funding for ${esc(r.space)}</h1>
@@ -200,7 +200,7 @@ export function fundingMarkdown(v: FundingPageView): string {
   const nonPublic = r.visibility !== "public";
   const open = r.depositsOpen;
   const L: string[] = [`# Funding for ${codeSpan(r.space)}`, "", LEAD, "", `- space: ${v.spaceHref}.md`];
-  L.push("", ...(open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo) : closedStatements(nonPublic, r.creditedTo)).map((s) => `- ${s}`), "");
+  L.push("", ...(open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing) : closedStatements(nonPublic, r.creditedTo, r.billing)).map((s) => `- ${s}`), "");
   if (r.creditedTo) L.push(`- credited to: ${v.basePath}/${r.creditedTo}.md`, "");
   if (r.storage) L.push(r.storage, "");
   if (open) {
@@ -226,7 +226,7 @@ export function fundingMarkdown(v: FundingPageView): string {
     L.push("## Credit history", "");
     if (!v.history.entries.length) L.push("No credit entries yet.");
     for (const e of v.history.entries) {
-      L.push(`- ${e.at}: ${codeSpan(e.kind)} ${money(e.amount_micro_usd)}, balance after ${money(e.balance_after_micro_usd)}${e.deposit ? `, ${codeSpan(e.deposit.coin)} ${e.deposit.value_forwarded_coin === null ? "not sent" : codeSpan(e.deposit.value_forwarded_coin)}, transaction ${codeSpan(e.deposit.txid_in)}` : ""}`);
+      L.push(`- ${e.at}: ${codeSpan(entryLabel(e, v.read.space))} ${money(e.amount_micro_usd)}, balance after ${money(e.balance_after_micro_usd)}${e.deposit ? `, ${codeSpan(e.deposit.coin)} ${e.deposit.value_forwarded_coin === null ? "not sent" : codeSpan(e.deposit.value_forwarded_coin)}, transaction ${codeSpan(e.deposit.txid_in)}` : ""}`);
     }
     if (v.history.hasMore && v.history.nextBefore) L.push("", `- earlier entries: ${v.pagePath}.md?${new URLSearchParams({ before: v.history.nextBefore })}`);
     L.push("");
@@ -254,7 +254,7 @@ export function fundingJson(v: FundingPageView, canonical: string): unknown {
     read_as: v.readAs,
     space: { name: r.space, page: v.spaceHref },
     deposits_open: open,
-    statements: open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo) : closedStatements(nonPublic, r.creditedTo),
+    statements: open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing) : closedStatements(nonPublic, r.creditedTo, r.billing),
     minimums_as_of: open ? r.minimumsAsOf : null,
     ...(r.creditedTo ? { credited_to: { name: r.creditedTo, page: `${v.basePath}/${r.creditedTo}` } } : {}),
     ...(r.storage ? { storage: r.storage } : {}),
@@ -270,7 +270,7 @@ export function fundingJson(v: FundingPageView, canonical: string): unknown {
       },
     } : {}),
     ...(v.history && v.history !== "unreadable" ? {
-      history: { entries: v.history.entries, has_more: v.history.hasMore, next_before: v.history.nextBefore },
+      history: { entries: v.history.entries.map((e) => ({ ...e, label: entryLabel(e, v.read.space) })), has_more: v.history.hasMore, next_before: v.history.nextBefore },
     } : {}),
     ...(v.history === "unreadable" ? { history: "could not be read just now" } : {}),
     coins: open ? networksOf(r.coins).map((n) => ({ network: n.name, coins: n.coins.map((c) => ({ coin: c.coin, symbol: c.symbol, minimum: c.minimum, cheap: c.cheap, stable: c.stable })) })) : [],

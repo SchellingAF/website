@@ -794,6 +794,35 @@ elif m.group(1) != pat:
     ok "the site's rule for a public name is the service's"
   fi
 
+  # THE FIGURES /api TYPES FOR FUNDING ARE THE SERVICE'S: limits.funding.
+  funding=$(CAPS="$caps" python3 -c '
+import json,os,re
+f = ((json.loads(os.environ["CAPS"]).get("limits") or {}).get("funding") or {})
+al, rate = f.get("allowance_bytes"), (f.get("rate") or {})
+if not al or not rate:
+    print("SKIP"); raise SystemExit
+src = open("content/api-overview.mjs").read()
+m = re.search(r"\((\d+) MB public, (\d+) MB private, (\d+) MB sealed\)", src)
+r = re.search(r"at \$(\d+) per GB a month", src)
+if not m or not r:
+    print("/api types no free allowance or price the check can read"); raise SystemExit
+out = []
+for k, v in zip(("public", "private", "sealed"), m.groups()):
+    if int(v) * 1000000 != al.get(k):
+        out.append(f"/api says {v} MB free for {k} and the service says {al.get(k)} bytes")
+got = rate.get("micro_usd_per_gb_month")
+if int(r.group(1)) * 1000000 != got:
+    out.append(f"/api says ${r.group(1)} per GB a month and the service says {got} micro US dollars")
+print("; ".join(out))
+' 2>&1)
+  if [ "$funding" = "SKIP" ]; then
+    skipped "/api's funding figures are the service's" "the service publishes no limits.funding"
+  elif [ -n "$funding" ]; then
+    bad "/api's funding figures are the service's" "$funding"
+  else
+    ok "/api's funding figures are the service's"
+  fi
+
   # THE CONNECTOR'S TOOLS, DOCUMENTS AND PROMPTS ARE THE PRODUCT'S.
   #
   # /api lists them by name, and the capability document publishes the same lists
@@ -2177,10 +2206,17 @@ def walk(have, want, path):
             else: walk(have[k], want[k], path + "." + k)
     elif want == "int":
         if type(have) is not int or have < 0: problems.append(path + " is not a whole number from 0")
+    elif want == "state":
+        if have not in ("not_started", "started", "paused"): problems.append(path + " is not a billing state")
+    elif want == "day":
+        if have is not None and not (isinstance(have, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", have)): problems.append(path + " is not a day")
     elif not (isinstance(have, str) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$", have)):
         problems.append(path + " is not a time")
 if "funding" in a:
     SHAPE["funding"] = {"deposits": C, "credited_micro_usd": C, "spaces_funded": "int", "pending": "int"}
+if "billing" in a:
+    SHAPE["billing"] = {"state": "state", "from": "day", "taken_micro_usd": C, "spaces_billed": C,
+                        "spaces_read_only": "int", "spaces_with_free_days": "int"}
 walk(a, SHAPE, "numbers")
 if not problems:
     def adds(name, whole, parts):
