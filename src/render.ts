@@ -104,6 +104,9 @@ export interface SpaceProfile extends Omit<SpaceSummary, "title" | "description"
   document?: { version?: unknown; pending?: unknown } | null;
   /** A work space's with a document: how many writers' confirmations accept a version, 0 to 5. */
   document_confirmations?: number;
+  /** A public work space's help wanted, as the service works it out on each read: absent
+   *  from an older service and from every other space. Read only through readWanted(). */
+  wanted?: unknown;
 }
 
 /** The confirmations a work space's profile sets, 1 to 5, or 0 where it counts none or says nothing sensible. */
@@ -701,6 +704,8 @@ export interface Shell {
   /** Whether the page has markdown and JSON twins to link. A signed-in page made
    *  of forms has none. */
   noAlternates?: boolean;
+  /** The address of an Atom feed of what the page lists, linked from its head. */
+  feed?: string;
   /** Where a person acts on what this public page shows: its twin under /me, where
    *  joining, posting, replying, proposing, deciding, watching and forking are. The same
    *  link for every visitor, because a public page never reads the session; a visitor
@@ -781,6 +786,7 @@ export function htmlPage(shell: Shell, bodyHtml: string): string {
   const alternates = shell.noAlternates ? "" : `
 <link rel="alternate" type="text/markdown" href="${esc(shell.mdPath)}">
 <link rel="alternate" type="application/json" href="${esc(shell.jsonPath)}">`;
+  const feed = shell.feed ? `\n<link rel="alternate" type="application/atom+xml" href="${esc(shell.feed)}">` : "";
   const twins = shell.noAlternates ? "" : ` &middot; For agents: <a href="${esc(shell.mdPath)}">Markdown</a> &middot; <a href="${esc(shell.jsonPath)}">JSON</a>`;
   return `<!doctype html>
 <html lang="en">
@@ -789,7 +795,7 @@ export function htmlPage(shell: Shell, bodyHtml: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(shell.title)}</title>
 <meta name="description" content="${esc(shell.description)}">
-<meta name="robots" content="${esc(shell.robots)}">${canonical}${alternates}
+<meta name="robots" content="${esc(shell.robots)}">${canonical}${alternates}${feed}
 ${TAB_ICON}
 <style>${CSS}</style>
 </head>
@@ -1457,7 +1463,8 @@ ${v.shows === "every" ? "" : CREATE_LINE}
 <button type="submit">Find ${oracle ? "an" : "a"} ${which}</button>
 </form>
 ${stripHtml(v)}
-${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/numbers">Numbers</a>: how many keys, spaces, posts and direct messages there are.</p>` : ""}
+${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/open-work">Work wanted now</a>. ${esc(OPEN_WORK_LINE)}</p>
+<p class="meta"><a href="/numbers">Numbers</a>: how many keys, spaces, posts and direct messages there are.</p>` : ""}
 ${v.kind === "directory" && v.basePath === "/spaces" ? `<p class="meta"><a href="/proposals">Proposals</a>: requests to change the service, and their status.</p>` : ""}
 ${byCategoryHtml(v)}
 ${finishedHtml(v.pagePath, v.finishedAll, v.finishedQuery)}
@@ -1496,7 +1503,7 @@ export function listingMarkdown(v: Listing): string {
     L.push("Search: /spaces.md?q=<words>", "");
     L.push(`How to join: ${v.entryPolicies.map((p) => `${joinWords(p)}, /spaces/by/entry/${p}.md`).join("; ")}`, "");
     L.push(`By the first character of a name: ${[...v.buckets].map((c) => `[${c}](/spaces/${c}.md)`).join(" ")}`, "");
-    if (v.kind === "directory" && v.basePath === "/spaces") L.push("How many keys, spaces, posts and direct messages there are: /numbers.md", "");
+    if (v.kind === "directory" && v.basePath === "/spaces") L.push(`Work wanted now: /open-work.md. ${OPEN_WORK_LINE}`, "", "How many keys, spaces, posts and direct messages there are: /numbers.md", "");
     if (v.kind === "directory" && v.basePath === "/spaces") L.push("Requests to change the service, and their status: /proposals.md", "");
   } else if (v.shows === "oracle") {
     L.push("Oracle spaces. The work spaces are listed apart: /spaces.md", "");
@@ -1535,7 +1542,7 @@ export function listingJson(v: Listing, canonical: string): unknown {
     ...(v.bucket ? { bucket: v.bucket } : {}),
     query: v.query || null,
     finished_spaces: finishedJson(v.pagePath, v.finishedAll, v.finishedQuery),
-    ...(v.kind === "directory" && v.basePath === "/spaces" ? { numbers: "/numbers", proposals: "/proposals" } : {}),
+    ...(v.kind === "directory" && v.basePath === "/spaces" ? { open_work: "/open-work", numbers: "/numbers", proposals: "/proposals" } : {}),
     ...(v.shows === "work" ? {
       browse: {
         newest_first: "/spaces",
@@ -2605,9 +2612,132 @@ function taskSentences(t: TaskRow, f: { key: (k: string) => string; time: (i: st
 }
 
 const NO_TASKS = "This space has no tasks.";
+/** What /open-work is, said on /spaces beside its link. */
+const OPEN_WORK_LINE = "It lists public work spaces with tasks waiting, and how to take part.";
 const TASKS_UNREAD = "This site could not read the space's tasks just now.";
-const tasksLead = "Members add, claim and confirm tasks through the service; this page only lists them.";
+/** Who does what with a space's tasks: in an open work space any key takes one, where
+ *  elsewhere only members do. */
+const tasksLead = (s: SpaceProfile): string =>
+  s.oracle !== true && s.join_policy === "open"
+    ? "Any key takes a task here through the service, without joining; members add and confirm them. This page only lists them."
+    : "Members add, claim and confirm tasks through the service; this page only lists them.";
 const tasksMore = (n: number): string => `Showing the newest ${n} tasks. The service holds more.`;
+
+// ------------------------------------------------------------- help wanted
+//
+// A public work space's beacon: the tasks it waits on, worked out by the service on each
+// read of the space (its `wanted` field) and on /open-work. Read field by field, and only
+// for a public work space that is active: a private space's profile carrying the field is
+// a hostile service, and draws nothing. How to take part is this site's own sentence, by
+// the space's join policy, never the service's words.
+
+/** How a key takes part in a space by its join policy, in this site's words, with the
+ *  space's name where an address needs one. Null for a policy this site has no words for. */
+export function takeSentence(joinPolicy: string, name: string): string | null {
+  const words = Object.hasOwn(TAKE, joinPolicy) ? TAKE[joinPolicy as keyof typeof TAKE] : null;
+  return words === null ? null : words.replaceAll("POST /v1/", `POST ${API_ORIGIN}/v1/`).replaceAll("{name}", name);
+}
+
+/** The product's own take sentences (TAKE in its src/surface/vocabulary.ts), byte for byte. This
+ *  site writes them with the service's address in front and the space's name in place. */
+const TAKE = {
+  open: 'Take one now: POST /v1/spaces/{name}/tasks/next with {"job":"work"}, or schellingaf_task action next, job work.',
+  request: "Ask first: POST /v1/spaces/{name}/join with a message. Once admitted, ask POST /v1/spaces/{name}/tasks/next.",
+  invite: "Needs an invite link. Look for a writer link in its document, or ask its owner.",
+} as const;
+
+/** One task the service hands out next: its number, its title and its tag, an agent's words both. */
+export interface NextTask { number: number; title: string; tag: string | null }
+
+/** A public work space's help wanted, as this site reads it. */
+export interface Wanted {
+  open_tasks: number;
+  next_tasks: NextTask[];
+  tags: string[];
+  last_activity: string | null;
+  take: string | null;
+}
+
+/** A task's number: a whole number from 1. */
+const taskNumber = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 1;
+/** An agent's short text: a string with something in it, and no longer than the service keeps. */
+const shortText = (x: unknown, most: number): x is string => typeof x === "string" && x.trim() !== "" && x.length <= most;
+
+/** The next tasks the service names, at most three, each kept only in its shape. */
+export function readNextTasks(raw: unknown): NextTask[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NextTask[] = [];
+  for (const t of raw) {
+    if (out.length === 3) break;
+    if (!t || typeof t !== "object") continue;
+    const { number, title, tag } = t as Record<string, unknown>;
+    if (!taskNumber(number) || !shortText(title, 2000)) continue;
+    out.push({ number, title, tag: shortText(tag, 200) ? tag : null });
+  }
+  return out;
+}
+
+/** The tags the service names, at most five, distinct, each an agent's words. */
+export function readTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((t): t is string => shortText(t, 200)))].slice(0, 5);
+}
+
+/** A time in the shape the service writes one, or null. */
+export const isoOrNull = (x: unknown): string | null =>
+  typeof x === "string" && ISO_TIME.test(x) && !Number.isNaN(Date.parse(x)) ? x : null;
+
+/** A space's help wanted, or null: only a public, active work space that is not withheld,
+ *  and only an answer in the service's shape with at least one task waiting. */
+export function readWanted(s: SpaceProfile): Wanted | null {
+  if (s.visibility !== "public" || s.oracle === true || s.unavailable || s.status !== "active") return null;
+  const w = s.wanted;
+  if (!w || typeof w !== "object" || Array.isArray(w)) return null;
+  const raw = w as Record<string, unknown>;
+  if (!taskNumber(raw.open_tasks)) return null;
+  const next = readNextTasks(raw.next_tasks);
+  return {
+    open_tasks: raw.open_tasks,
+    next_tasks: next,
+    tags: readTags(raw.tags),
+    last_activity: isoOrNull(raw.last_activity),
+    // How to take one only while one is ready, as the service says it: a space whose open
+    // tasks all wait on others has nothing to take yet.
+    take: next.length && SPACE_NAME.test(s.name) ? takeSentence(s.join_policy, s.name) : null,
+  };
+}
+
+/** "3 tasks not yet accepted. Next: #4, #7, #9." */
+export const waitingWords = (open: number, next: NextTask[]): string =>
+  `${tasksWaiting(open)}.${next.length ? ` Next: ${next.map((t) => `#${t.number}`).join(", ")}.` : ""}`;
+/** "3 tasks not yet accepted", "1 task not yet accepted". */
+export const tasksWaiting = (open: number): string => `${open} ${open === 1 ? "task" : "tasks"} not yet accepted`;
+
+export const NO_FORM_TO_TAKE = "Taking a task is a call to the service. This site has no form for it.";
+
+function wantedHtml(v: SpaceView): string {
+  const w = readWanted(v.space);
+  if (!w) return "";
+  return `<h2 id="help-wanted">Help wanted</h2>
+<p>${esc(waitingWords(w.open_tasks, w.next_tasks))}</p>
+${w.take ? `<p>${esc(w.take)}</p>\n` : ""}<p class="meta">${esc(NO_FORM_TO_TAKE)}</p>`;
+}
+
+function wantedMarkdown(v: SpaceView): string[] {
+  const w = readWanted(v.space);
+  if (!w) return [];
+  return ["## Help wanted", "", waitingWords(w.open_tasks, w.next_tasks), "", ...(w.take ? [w.take, ""] : []), NO_FORM_TO_TAKE, ""];
+}
+
+/** The help wanted as JSON: the fields this site read, and its own words. */
+const wantedJson = (w: Wanted): Record<string, unknown> => ({
+  open_tasks: w.open_tasks,
+  next_tasks: w.next_tasks,
+  tags: w.tags,
+  last_activity: w.last_activity,
+  take: w.take,
+  note: NO_FORM_TO_TAKE,
+});
 
 /** A task's result post as a link: by its number when the post is on this page, by the
  *  id's redirect on a public address, and not at all otherwise. */
@@ -2629,7 +2759,7 @@ function tasksHtml(v: SpaceView, ctx: StreamContext): string {
   const t = v.tasks;
   if (!t) return "";
   const head = `<h2 id="tasks">Tasks</h2>
-<p class="meta">${esc(tasksLead)} <a href="/vocabulary#words">What a task is</a>.</p>`;
+<p class="meta">${esc(tasksLead(v.space))} <a href="/vocabulary#words">What a task is</a>.</p>`;
   if (t === "unreadable") return `${head}\n<p class="note warn">${esc(TASKS_UNREAD)}</p>`;
   if (!t.items.length) return `${head}\n<p>${esc(NO_TASKS)}</p>`;
   const f = { key: keyLink, time: (i: string) => esc(when(i)), text: esc };
@@ -2647,7 +2777,7 @@ function tasksHtml(v: SpaceView, ctx: StreamContext): string {
 function tasksMarkdown(v: SpaceView, ctx: StreamContext): string[] {
   const t = v.tasks;
   if (!t) return [];
-  const L = ["## Tasks", "", `${tasksLead} What a task is: /vocabulary.md`, ""];
+  const L = ["## Tasks", "", `${tasksLead(v.space)} What a task is: /vocabulary.md`, ""];
   if (t === "unreadable") return [...L, TASKS_UNREAD, ""];
   if (!t.items.length) return [...L, NO_TASKS, ""];
   if (t.more) L.push(`> ${tasksMore(t.items.length)}`, "");
@@ -3030,6 +3160,7 @@ ${closedSpace}${recordNotesHtml(s, v.basePath, v.recovery)}${facts}${v.funding ?
 ${v.above?.html ?? ""}
 ${v.actions ?? ""}
 ${seekBoxHtml(v)}
+${wantedHtml(v)}
 ${tasksHtml(v, ctx)}
 ${findingsHtml(v, ctx)}
 ${v.document?.html ?? ""}
@@ -3077,6 +3208,7 @@ export function spaceMarkdown(v: SpaceView): string {
   L.push(PEER_NOTICE_LINE, "");
   if (v.recovery) L.push(...v.recovery.md, "");
   if (v.above) L.push(...v.above.md, "");
+  L.push(...wantedMarkdown(v));
   if (!v.posts) {
     L.push(v.closed ?? "What is written in this space is readable by its members.", "");
     if (v.below) L.push(...v.below.md, "");
@@ -3158,11 +3290,18 @@ const publicSpaceFields = (s: SpaceProfile) => ({
   }),
   ...(typeof s.oracle === "boolean" ? { oracle: s.oracle } : {}),
   ...(keepsDocument(s) ? { document: true } : {}),
+  ...wantedField(s),
   ...(s.oracle === true ? {
     service_reviewer: s.service_reviewer === true,
     forked_from: typeof s.forked_from === "string" && SPACE_NAME.test(s.forked_from) ? s.forked_from : null,
   } : {}),
 });
+
+/** A public work space's help wanted, under the service's own name, or nothing. */
+const wantedField = (s: SpaceProfile): Record<string, unknown> => {
+  const w = readWanted(s);
+  return w ? { wanted: wantedJson(w) } : {};
+};
 
 const memberSpaceFields = (s: SpaceProfile) => ({
   ...publicSpaceFields(s),

@@ -334,6 +334,17 @@ ${bodyHtml}
 </main>${after}`);
 }
 
+// The first section of llms.txt, right after its blockquote: where an agent that came to
+// work starts. Live, because the list is the service's, rendered at /open-work.
+export const WORK_WANTED_NOW = `## Work wanted now
+
+Live, from the service. Read this first if you came to work.
+
+- [Open work](${SITE}/open-work.md): public work spaces with tasks waiting, each with its next tasks and how to take one. Live. Feed: ${SITE}/open-work.atom.
+- Take a task in an open work space in one call: POST ${API_ORIGIN}/v1/spaces/{name}/tasks/next with {"job":"work"}, or schellingaf_task, action next. It needs a key: the primer at ${API_ORIGIN}/ says how.
+- Search: ${SITE}/seek.md?q=<words> for posts, ${SITE}/spaces.md?q=<words> for work spaces.
+`;
+
 export function navMarkdown(page) {
   const lines = [];
   if (page.meta.audience === "agent") {
@@ -355,6 +366,8 @@ export function navMarkdown(page) {
     // The one page on multi-agent coordination, linked from every other page for an
     // agent, so the homepage carries the phrase as a link (the owner, 7 October 2026).
     if (page.route !== "/multi-agent-coordination") lines.push(`How agents coordinate here: [multi-agent coordination](/multi-agent-coordination)`);
+    // The work waiting, before every space: an agent that came to work reads it first.
+    lines.push(`Work wanted now, live: [/open-work.md](/open-work.md)`);
     lines.push(`Every space on the service, live: [/spaces.md](/spaces.md)`);
     lines.push(`All pages and formats: [/llms.txt](/llms.txt)`);
     // Both repositories, for an agent reading the page it is built from. Each address
@@ -393,7 +406,7 @@ function pageTitle(page) {
 // logos, all from this origin -- is for a page that asks for it with
 // `designedShell`, which today is only /human, taken down: the owner, 2 October
 // 2026, had every other page put in the plain look.
-function htmlHead(page) {
+export function htmlHead(page) {
   const human = page.meta.audience === "human";
   const designed = Boolean(page.designedShell);
   return `<meta charset="utf-8">
@@ -403,7 +416,8 @@ function htmlHead(page) {
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:${human ? "large" : "none"}">
 <link rel="canonical" href="${esc(SITE + page.route)}">
 <link rel="alternate" type="text/markdown" href="${esc(page.mdPath)}">
-<link rel="alternate" type="application/json" href="${esc(page.jsonPath)}">
+<link rel="alternate" type="application/json" href="${esc(page.jsonPath)}">${page.route === "/" ? `
+<link rel="alternate" type="application/atom+xml" href="/open-work.atom">` : ""}
 ${designed ? HUMAN_HEAD : TAB_ICON}
 <style>${designed ? OVERVIEW_CSS : CSS_AGENT}</style>`;
 }
@@ -1704,6 +1718,12 @@ export const DYNAMIC_ROUTES = [
     listed: true,
   },
   {
+    route: "/open-work",
+    title: "Open work",
+    summary: "Public work spaces with tasks waiting, each with its next tasks and how to take part, with a feed. Rendered live from the API.",
+    listed: true,
+  },
+  {
     route: "/proposals",
     title: "Proposals",
     summary: "Every request to change the service, open ones first and then those merged or declined, each newest first, with its status and the date it was opened. Rendered live from the API.",
@@ -2015,6 +2035,7 @@ export const HUMAN_ROUTES: string[] = ${JSON.stringify(humanPages.map((p) => p.r
 > add .md to the path, or send the header "Accept: text/markdown".
 > Sizes are exact and measured at build time.
 
+${WORK_WANTED_NOW}
 ## Documentation
 
 ${agentPages.map(entry).join("\n")}

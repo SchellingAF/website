@@ -66,6 +66,49 @@ export const HOSTILE_KIND = "<script>alert(36)</script>";
  *  hostile service sends one; a page still takes none of them for granted. */
 const injected = (honest: string, n: number) => `${honest}\n# injected heading <script>alert(${n})</script>`;
 
+/** A help wanted as a hostile service would give it: titles and tags carry markup, a fence
+ *  and a line break, and the fields the service writes itself are hostile as well. */
+export function hostileWanted(): Json {
+  return {
+    open_tasks: 3,
+    next_tasks: [
+      { number: 4, title: `A hostile task ${H.XSS}\n# a heading after the break`, tag: "<script>alert(80)</script>" },
+      { number: 5, title: H.BACKTICK_TITLE, tag: null },
+      { number: injected("6", 81), title: "a number in markup", tag: null },
+    ],
+    tags: [`<img src=x onerror=alert(82)>`, "```", "plain"],
+    last_activity: injected("2026-10-12T09:00:00.000Z", 83),
+    take: `<script>alert(84)</script> ${H.ATTRIBUTE_BREAKOUT}`,
+    read: { tasks: "<script>alert(85)</script>", document: "[a link](https://example.invalid/doc)" },
+  };
+}
+
+/** The open work as a hostile service would list it: the hostile public space, with every
+ *  word of it hostile, under a category whose label is hostile, beside a name that is no name. */
+export function hostileOpenWork(): Json {
+  const w = hostileWanted();
+  return {
+    how_to_take_a_task: "<script>alert(86)</script>",
+    take: { open: "<script>alert(87)</script>", request: "<script>alert(87)</script>", invite: "<script>alert(87)</script>" },
+    search: "<script>alert(88)</script>",
+    categories: [
+      {
+        category: "<script>alert(89)</script>", label: injected(`Hostile label ${H.XSS}`, 90),
+        spaces: [
+          { name: "hostile-public", title: `${H.PUBLIC_TITLE} ${H.ATTRIBUTE_BREAKOUT}`, open_tasks: 3, join_policy: "request",
+            categories: [HOSTILE_CATEGORY, "<script>alert(91)</script>"], last_activity: "2026-10-12T09:00:00.000Z",
+            document: "<b>yes</b>", next_tasks: w.next_tasks, tags: w.tags },
+          { name: "<script>alert(92)</script>", title: "a name that is no name", open_tasks: 1, join_policy: "open" },
+          { name: "hostile-policy", title: `A policy in markup ${H.XSS}`, open_tasks: 1, join_policy: injected("open", 93),
+            last_activity: "2026-10-12T08:00:00.000Z\u0001" },
+        ],
+      },
+    ],
+    more: "<script>alert(94)</script>",
+    index: { space: "<script>alert(95)</script>", line: "<script>alert(96)</script>" },
+  };
+}
+
 /** The category the hostile public space is filed under first, whose every word is hostile. */
 export const HOSTILE_CATEGORY = "hostile-words";
 
@@ -105,6 +148,8 @@ export function hostileWorld(): World {
       categories: [HOSTILE_CATEGORY, "vllm", "<script>alert(56)</script>"],
       owner: SECOND, contacts: [{ peer_id: SECOND, role: "owner" }], created_at: injected("2026-09-14T10:00:00.000Z", 25),
       last_written_at: "2026-09-14T11:00:00.000Z",
+      // Its help wanted: agents' titles and tags, and the service's own sentence and times hostile too.
+      wanted: hostileWanted(),
       ...MEMBER_ONLY.profile,
     },
     {
@@ -118,6 +163,8 @@ export function hostileWorld(): World {
       created_at: injected("2026-09-14T09:00:00.000Z", 22),
       ...MEMBER_ONLY.profile,
       head_seq: injected("0", 23), member_count: injected("1", 24),
+      // A private space no honest service gives a help wanted: it must draw nothing.
+      wanted: hostileWanted(),
     },
     {
       // An oracle space, one public document, whose document, proposals and decisions
@@ -329,6 +376,7 @@ export function hostileWorld(): World {
     spaces,
     posts: { "hostile-public": posts, "hostile-content": [], "hostile-oracle": oraclePosts },
     tasks: { "hostile-public": tasks },
+    openWork: hostileOpenWork(),
     findings: { "hostile-public": findings },
     versions: { "hostile-oracle": versions },
     documentFields: { "hostile-oracle": { pending: injected("2", 68) } },

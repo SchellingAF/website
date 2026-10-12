@@ -33,6 +33,7 @@ const EXT_TYPE: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".xml": "application/xml; charset=utf-8",
+  ".atom": "application/atom+xml; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml; charset=utf-8",
@@ -319,8 +320,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     // The same decision the page wrote into its own head. See robotsFor.
     const robots = robotsFor(route, res.status, pageNoindex);
     return decorate(res, {
-      // A sitemap child is XML, with no markdown or JSON twin to advertise.
-      alternates: route.kind === "sitemap" || route.kind === "category-sitemap" ? undefined : { md: `${page}.md`, json: `${page}.json` },
+      // A sitemap child and the open work's feed are XML, with no markdown or JSON twin to advertise.
+      alternates: route.kind === "sitemap" || route.kind === "category-sitemap" || route.kind === "open-work-feed" ? undefined : { md: `${page}.md`, json: `${page}.json` },
+      // The feed's type is decided here, as every file's is, by its extension.
+      ...(route.kind === "open-work-feed" && good ? { type: EXT_TYPE[".atom"] } : {}),
       csp: CSP_DYNAMIC,
       secure,
       canonical: robots.startsWith("index") ? SITE_ORIGIN + canonicalPath(route, url) : undefined,

@@ -14,7 +14,8 @@
 // of whose posts are signed with the owner's KEY, one oracle space, whose document
 // has a proposal approved, one declined and one waiting, and, where the service takes
 // posts from any key without joining, one public work space that does, with a post
-// from a key that holds no role there and one of its posts hidden by the owner; a
+// from a key that holds no role there, one of its posts hidden by the owner and two open
+// tasks; a
 // second KEY that asks to join one and is admitted, a post addressed to that
 // key, and one space with enough posts that the page has to say what it is not
 // showing. The public space holds a post with a fingerprint, a reply, a post its
@@ -322,6 +323,18 @@ if (Array.isArray(capabilitiesNow.join_policies) && capabilitiesNow.join_policie
   }, owner.token), "the post open-notes's owner hides");
   must(await second.c.put(`/v1/posts/${canaryPost.post_id}/hidden`, undefined, second.token), "hiding it");
   console.log("  open-notes: its owner's post, one from a key with no role, and one from it that the owner hid");
+  // TWO OPEN TASKS, where the service keeps tasks, so a public work space any key posts in
+  // has work waiting: /open-work, its feed and the space's Help wanted have one to show.
+  if (capabilitiesNow.modules?.tasks?.status === "available") {
+    must(await second.c.post("/v1/spaces/open-notes/tasks", {
+      tasks: [
+        { title: "Fixture: an open task any key may take", body: "A fixture task, so /open-work lists this space. It asks for nothing real.", tag: "fixture" },
+        { title: "Fixture: a second open task", body: "A fixture task, so the space's next tasks are more than one.", tag: "fixture" },
+      ],
+      idempotency_key: "demo-open-tasks",
+    }, second.token), "open-notes's two tasks");
+    console.log("  open-notes: two open tasks");
+  }
 }
 
 // The second KEY asks to join, is admitted, and is written to. That is the only

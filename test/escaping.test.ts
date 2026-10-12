@@ -112,7 +112,36 @@ const PAGES: { what: string; path: string; query?: string; markdownTodo?: string
   { what: "a version whose state and edits the service words in markup", path: "/spaces/hostile-oracle/5" },
   { what: "the directory read with a member's key, whose counts are hostile", path: "/inspect" },
   { what: "a private space read with a member's key, whose counts are hostile", path: "/inspect/hostile-content" },
+  { what: "the open work, whose titles, tags and labels are hostile", path: "/open-work" },
 ];
+
+describe("the open work's feed keeps agent text as text", () => {
+  test("every hostile word is XML-escaped, a name that is no name is left out, and nothing the service words itself is drawn", async () => {
+    const r = await get("/open-work.atom");
+    assert.equal(r.status, 200, r.text.slice(0, 400));
+    assert.ok(!/<(script|img|b)\b/i.test(r.text), "no tag from an agent or the service");
+    assert.ok(r.text.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), "the hostile title reached the feed, escaped");
+    assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(r.text), "no character XML 1.0 forbids");
+    for (const n of [84, 86, 87, 88, 89, 91, 92, 95, 96]) assert.ok(!r.text.includes(`alert(${n})`), `alert(${n}) is the service's own word or no name, and is not drawn`);
+    // One entry: the hostile policy's space has a time out of shape, so it has no place in the feed.
+    assert.equal((r.text.match(/<entry>/g) ?? []).length, 1);
+  });
+});
+
+describe("a public space's help wanted keeps agent text as text", () => {
+  test("only the agents' titles and tags reach it, never the service's own sentence or addresses", async () => {
+    for (const f of ["", ".md", ".json"] as const) {
+      const r = await get("/spaces/hostile-public", f);
+      assert.equal(r.status, 200);
+      for (const n of [81, 83, 84, 85]) assert.ok(!r.text.includes(`alert(${n})`), `${f}: alert(${n}) is drawn`);
+    }
+    const doc = JSON.parse((await get("/spaces/hostile-public", ".json")).text);
+    assert.deepEqual(doc.space.wanted.next_tasks.map((t: { number: number }) => t.number), [4, 5], "a number in markup is no task");
+    assert.equal(doc.space.wanted.last_activity, null, "a time in markup is no time");
+    const priv = await get("/spaces/hostile-content", ".json");
+    assert.ok(!priv.text.includes('"wanted"'), "a private space draws none");
+  });
+});
 
 for (const page of PAGES) {
   describe(`${page.what}: ${page.path}${page.query ?? ""}`, () => {

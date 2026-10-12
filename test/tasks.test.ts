@@ -98,6 +98,17 @@ const ATTEMPTS: Json[] = [
     attempts: [{ attempt: 1, by: WRITER, post_id: id(2), at: at(2), state: "pending", confirmations: [] }, { attempt: 2, by: OWNER, post_id: id(3), at: at(3), state: "pending", confirmations: [] }] }),
 ];
 
+/** A public work space's help wanted, as the product's spaces.get gives it. The take
+ *  sentence and the addresses are the service's, and this site draws neither. */
+const WANTED: Json = {
+  open_tasks: 3,
+  next_tasks: [{ number: 4, title: "Transcribe page 4", tag: "transcription" }, { number: 7, title: "Check page 7", tag: null }, { number: 9, title: "Read page 9", tag: null }],
+  tags: ["transcription", "verify"],
+  last_activity: "2026-10-12T09:00:00.000Z",
+  take: "SERVICE-TAKE-SENTENCE",
+  read: { tasks: "/v1/spaces/wanted-board/tasks?state=open", document: null },
+};
+
 const MANY: Json[] = Array.from({ length: 60 }, (_, i) => task(i + 1, { title: `Page ${i + 1}` }));
 
 const world: World = {
@@ -114,9 +125,17 @@ const world: World = {
     space("later-board"),
     space("attempt-board"),
     space("task-oracle", { oracle: true, service_reviewer: false, forked_from: null }),
+    space("wanted-board", { join_policy: "open", wanted: WANTED }),
+    space("wanted-request", { wanted: { ...WANTED, open_tasks: 1, next_tasks: [{ number: 2, title: "Only one", tag: null }] } }),
+    space("wanted-private", { visibility: "private", wanted: WANTED }),
+    space("wanted-oracle", { oracle: true, service_reviewer: false, forked_from: null, wanted: WANTED }),
+    space("wanted-closed", { status: "closed", wanted: WANTED }),
+    space("wanted-odd", { wanted: { open_tasks: "3", next_tasks: "none" } }),
+    space("wanted-none-ready", { join_policy: "open", wanted: { ...WANTED, next_tasks: [] } }),
   ],
   posts: {
     "task-board": [post(1), post(2), post(3)],
+    "wanted-board": [], "wanted-request": [], "wanted-private": [], "wanted-oracle": [], "wanted-closed": [], "wanted-odd": [], "wanted-none-ready": [],
     "empty-board": [], "quiet-board": [], "wide-board": [], "broken-board": [], "shaped-board": [], "odd-board": [], "later-board": [], "attempt-board": [post(1, "attempt-board"), post(2, "attempt-board"), post(3, "attempt-board")], "task-oracle": [],
   },
   tasks: {
@@ -125,7 +144,7 @@ const world: World = {
       task(1, { x_secret: "SENTINEL-TASK-FIELD", claimed_by: "not a key", done_at: "yesterday", confirmations: { required: 2, given: [OWNER, "not a key"] } }),
     ],
   },
-  versions: { "task-oracle": [] },
+  versions: { "task-oracle": [], "wanted-oracle": [] },
   proofs: {}, checkpoints: { "task-board": [] }, peers: {},
 };
 const base = service(world);
@@ -492,6 +511,75 @@ describe("several claims and attempts", () => {
     assert.match(m("task"), /no second key/);
     assert.match(m("task"), /sets one attempt aside/);
     assert.match(m("attempt"), /first attempt confirmed enough is accepted/);
+  });
+});
+
+describe("a public work space's help wanted", () => {
+  const helpSection = (html: string): string => /<h2 id="help-wanted">[\s\S]*?(?=<h2)/.exec(html)?.[0] ?? "";
+  const API = "https://api.schellingaf.com";
+
+  test("shows above the tasks, with what waits, the next numbers and how to take one", async () => {
+    const page = await get("/spaces/wanted-board");
+    assert.equal(page.status, 200);
+    assert.deepEqual(htmlProblems(page.text), []);
+    const help = helpSection(page.text);
+    assert.ok(help, "no Help wanted section");
+    assert.ok(page.text.indexOf('<h2 id="help-wanted">') < page.text.indexOf('<h2 id="tasks">'), "above the tasks");
+    assert.ok(help.includes("<p>3 tasks not yet accepted. Next: #4, #7, #9.</p>"));
+    assert.ok(help.includes(`<p>Take one now: POST ${API}/v1/spaces/wanted-board/tasks/next with {&quot;job&quot;:&quot;work&quot;}, or schellingaf_task action next, job work.</p>`));
+    assert.ok(help.includes("Taking a task is a call to the service. This site has no form for it."));
+    assert.ok(!page.text.includes("SERVICE-TAKE-SENTENCE"), "the service's sentence is not drawn");
+    const one = helpSection((await get("/spaces/wanted-request")).text);
+    assert.ok(one.includes("<p>1 task not yet accepted. Next: #2.</p>"));
+    assert.ok(one.includes(`<p>Ask first: POST ${API}/v1/spaces/wanted-request/join with a message. Once admitted, ask POST ${API}/v1/spaces/wanted-request/tasks/next.</p>`));
+  });
+
+  test("its markdown and JSON say the same", async () => {
+    const md = (await get("/spaces/wanted-board.md")).text;
+    assert.deepEqual(markdownProblems(md), []);
+    const at = md.indexOf("## Help wanted");
+    assert.ok(at > 0 && at < md.indexOf("## Tasks"), "above the tasks");
+    assert.ok(md.includes("## Help wanted\n\n3 tasks not yet accepted. Next: #4, #7, #9.\n\nTake one now: POST "));
+    assert.ok(md.includes('/v1/spaces/wanted-board/tasks/next with {"job":"work"}, or schellingaf_task action next, job work.\n\nTaking a task is a call to the service.'));
+    const doc = JSON.parse((await get("/spaces/wanted-board.json")).text);
+    assert.deepEqual(doc.space.wanted, {
+      open_tasks: 3, next_tasks: WANTED.next_tasks, tags: ["transcription", "verify"], last_activity: "2026-10-12T09:00:00.000Z",
+      take: `Take one now: POST ${API}/v1/spaces/wanted-board/tasks/next with {"job":"work"}, or schellingaf_task action next, job work.`,
+      note: "Taking a task is a call to the service. This site has no form for it.",
+    });
+  });
+
+  test("the tasks' lead says any key takes a task in an open work space, and members elsewhere", async () => {
+    const open = await get("/spaces/wanted-board");
+    assert.ok(section(open.text).includes("Any key takes a task here through the service, without joining; members add and confirm them. This page only lists them."));
+    assert.ok((await get("/spaces/wanted-board.md")).text.includes("Any key takes a task here through the service, without joining; members add and confirm them."));
+    const other = await get("/spaces/task-board");
+    assert.ok(section(other.text).includes("Members add, claim and confirm tasks through the service; this page only lists them."));
+    assert.ok(!section(other.text).includes("Any key takes a task"));
+  });
+
+  test("with open tasks but none ready, it says what waits and gives no way to take one", async () => {
+    const page = await get("/spaces/wanted-none-ready");
+    const help = helpSection(page.text);
+    assert.ok(help.includes("<p>3 tasks not yet accepted.</p>"));
+    assert.ok(!help.includes("Take one now"));
+    const md = (await get("/spaces/wanted-none-ready.md")).text;
+    assert.ok(md.includes("## Help wanted\n\n3 tasks not yet accepted.\n\nTaking a task is a call to the service."));
+    assert.ok(!md.includes("Take one now"));
+    assert.equal(JSON.parse((await get("/spaces/wanted-none-ready.json")).text).space.wanted.take, null);
+  });
+
+  test("is absent where the service sends none, as an older service does", async () => {
+    for (const f of ["", ".md", ".json"]) assert.ok(!/[Hh]elp wanted|"wanted"/.test((await get(`/spaces/task-board${f}`)).text), f);
+  });
+
+  test("is absent from a private, oracle or closed space a hostile service gave one, and from one out of shape", async () => {
+    for (const name of ["wanted-private", "wanted-oracle", "wanted-closed", "wanted-odd"]) {
+      for (const f of ["", ".md", ".json"]) {
+        const text = (await get(`/spaces/${name}${f}`)).text;
+        assert.ok(!/[Hh]elp wanted|"wanted"|tasks not yet accepted/.test(text), `${name}${f}`);
+      }
+    }
   });
 });
 

@@ -105,6 +105,9 @@ export interface World {
   recovery?: Json[];
   /** What GET /v1/numbers answers: counts and nothing else. Absent, the answer is NUMBERS. */
   numbers?: Json;
+  /** What GET /v1/open-work answers, as the product's readOpenWork() shapes it. Absent, the
+   *  service is an older one that has no such address, and answers 404. */
+  openWork?: Json;
   /** Counts a category's spaces without their kind: no oracle_spaces beside spaces. */
   wholeCounts?: boolean;
   /** A service that keeps stages: its list gives every item a `stage`, null where its space has
@@ -485,6 +488,9 @@ export function service(world: World): (call: Call) => Response {
 
     // The counts, with no key and no parameter, as the product's contract has them.
     if (path === "/v1/numbers") return json(world.numbers ?? NUMBERS);
+
+    // The work waiting, the same for every caller, or a 404 from a service without it.
+    if (path === "/v1/open-work") return world.openWork ? json(world.openWork) : refusal(404, "NOT_FOUND");
 
     if (path === "/v1/recovery") {
       const items = world.recovery ?? [];

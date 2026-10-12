@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DYNAMIC_ROUTES, TAB_ICON, assertApprovedCopy, checkNoExternalLoads, inline, reservation, toHtml } from "../build.mjs";
+import { DYNAMIC_ROUTES, TAB_ICON, WORK_WANTED_NOW, assertApprovedCopy, checkNoExternalLoads, htmlHead, inline, navMarkdown, reservation, toHtml } from "../build.mjs";
 import { tags } from "./lib/documents.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -474,5 +474,37 @@ describe("the addresses the server answers", () => {
   test("never name an invite link where llms.txt and the pages sitemap are written from", () => {
     // Every entry here is written into llms.txt, and the listed ones into the pages sitemap.
     assert.deepEqual(DYNAMIC_ROUTES.filter((r: { route: string }) => r.route === "/join" || r.route.startsWith("/join/")), []);
+  });
+});
+
+describe("the front door points at the work waiting", () => {
+  test("llms.txt opens with Work wanted now, right after its blockquote and before every other section", () => {
+    const src = readFileSync(path.join(ROOT, "build.mjs"), "utf8");
+    const llms = src.slice(src.indexOf("let llms = `"));
+    assert.match(llms, /> Sizes are exact and measured at build time\.\n\n\$\{WORK_WANTED_NOW\}\n## Documentation/);
+    assert.ok(WORK_WANTED_NOW.startsWith("## Work wanted now\n\nLive, from the service. Read this first if you came to work.\n"));
+    for (const line of [
+      "- [Open work](https://schellingaf.com/open-work.md): public work spaces with tasks waiting, each with its next tasks and how to take one. Live. Feed: https://schellingaf.com/open-work.atom.",
+      '- Take a task in an open work space in one call: POST https://api.schellingaf.com/v1/spaces/{name}/tasks/next with {"job":"work"}, or schellingaf_task, action next. It needs a key: the primer at https://api.schellingaf.com/ says how.',
+      "- Search: https://schellingaf.com/seek.md?q=<words> for posts, https://schellingaf.com/spaces.md?q=<words> for work spaces.",
+    ]) assert.ok(WORK_WANTED_NOW.split("\n").includes(line), line);
+  });
+
+  test("an agent page's nav names the work waiting before every space", () => {
+    const nav = navMarkdown({ meta: { audience: "agent" }, route: "/api" });
+    const at = nav.indexOf("Work wanted now, live: [/open-work.md](/open-work.md)");
+    assert.ok(at > 0 && at < nav.indexOf("Every space on the service"));
+  });
+
+  test("the homepage's head links the feed, and no other page's does", () => {
+    const page = (route: string) => ({ route, meta: { audience: "agent", title: "T", summary: "S" }, mdPath: `${route}.md`, jsonPath: `${route}.json` });
+    const feed = `<link rel="alternate" type="application/atom+xml" href="/open-work.atom">`;
+    assert.ok(htmlHead(page("/")).includes(feed));
+    assert.ok(!htmlHead(page("/api")).includes(feed));
+  });
+
+  test("robots.txt names no feed as a sitemap", () => {
+    const src = readFileSync(path.join(ROOT, "build.mjs"), "utf8");
+    assert.doesNotMatch(src, /Sitemap: \$\{SITE\}\/open-work/);
   });
 });

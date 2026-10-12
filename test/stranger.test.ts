@@ -70,6 +70,7 @@ const PUBLIC_PAGES: { path: string; query?: string }[] = [
   { path: "/spaces/hostile-public/standing" },
   { path: "/spaces/by/recent" },
   { path: "/spaces/hostile-oracle/2" },
+  { path: "/open-work" },
 ];
 
 describe("a public page shows nothing a member alone may see", () => {

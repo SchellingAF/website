@@ -282,9 +282,9 @@ fi
 # Read from the site itself rather than typed here. The pages sitemap lists every
 # page the build made, and each page's JSON says who it is written for, so a new
 # page is checked from the day it is built. /spaces, /spaces/by/oracle, /vocabulary
-# /reviewer-rules, /numbers and /proposals are in that sitemap too; they are not files, and
-# their checks come further down.
-PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$' -e '^/numbers$' -e '^/proposals$')
+# /reviewer-rules, /numbers, /proposals and /open-work are in that sitemap too; they are not
+# files, and their checks come further down.
+PAGES=$(curl -s "$SITE/sitemap-pages.xml" | sed -n 's|.*<loc>[a-z]*://[^/]*\(/[^<]*\)</loc>.*|\1|p' | grep -v -e '^/spaces$' -e '^/spaces/by/oracle$' -e '^/vocabulary$' -e '^/reviewer-rules$' -e '^/numbers$' -e '^/proposals$' -e '^/open-work$')
 case " $(echo $PAGES) " in
   *" / "*) ;;
   *) echo "  FAIL  could not read the list of pages from $SITE/sitemap-pages.xml"; echo; exit 1 ;;
@@ -2258,6 +2258,40 @@ else:
     refuse_body "/numbers$f names no private space" "$SITE/numbers$f" 'aarch64-wheels' -F
     refuse_body "/numbers$f carries no key or hash" "$SITE/numbers$f" '[0-9a-f]{64}' -E
   done
+fi
+
+# ------------------------------------------------------------------- the open work
+#
+# The public work spaces with tasks waiting, read live from GET /v1/open-work as the site's
+# key, at four addresses: the page, its markdown and JSON twins, and an Atom feed. The demo
+# seed's open-notes, a public space any key posts in, holds two open tasks, so a local stack
+# lists it; the private fixture is never named. A service that keeps no time for a space
+# (one older than help wanted) gives a feed with no entry, which is what is checked then. A
+# service without the address is a skip, never a pass.
+if [ "$(status "$API_ORIGIN/v1/open-work")" != "200" ]; then
+  skipped "the open work as a page" "the service at $API_ORIGIN does not answer GET /v1/open-work"
+else
+  for f in "" .md .json .atom; do expect 200 "/open-work$f answers" "$SITE/open-work$f"; done
+  expect_header "the open work's feed is Atom" content-type "application/atom+xml" "$SITE/open-work.atom"
+  expect_prefix "the open work's feed is not listed" x-robots-tag "noindex, follow" "$SITE/open-work.atom"
+  expect_body "the open work's page links its feed" "$SITE/open-work" 'type="application/atom+xml" href="/open-work.atom"' -F
+  expect_body "the homepage links the open work's feed" "$SITE/" 'type="application/atom+xml" href="/open-work.atom"' -F
+  expect_body "the pages sitemap lists the open work" "$SITE/sitemap-pages.xml" '/open-work</loc>' -F
+  expect_body "the index names the open work first" "$SITE/llms.txt" '## Work wanted now' -F
+  expect_body "the spaces page links the open work" "$SITE/spaces" 'href="/open-work"' -F
+  refuse_body "/open-work escapes the mark" "$SITE/open-work" 'Schelling+>' -F
+  theirs=$(curl -s "$API_ORIGIN/v1/open-work")
+  case "$theirs" in
+    *'"open-notes"'*)
+      for f in "" .md .json; do expect_body "/open-work$f names the seeded open space" "$SITE/open-work$f" 'open-notes' -F; done
+      case "$theirs" in
+        *'"last_activity"'*) expect_body "the feed names the seeded open space" "$SITE/open-work.atom" 'open-work/open-notes</id>' -F ;;
+        *) refuse_body "the feed holds no entry from a service that keeps no time" "$SITE/open-work.atom" '<entry>' -F ;;
+      esac
+      ;;
+    *) skipped "the seeded open space is listed" "the service at $API_ORIGIN does not list open-notes; seed it with scripts/seed-demo.mjs" ;;
+  esac
+  for f in "" .md .json .atom; do refuse_body "/open-work$f names no private space" "$SITE/open-work$f" 'aarch64-wheels' -F; done
 fi
 
 # ------------------------------------------------------------------ the proposals

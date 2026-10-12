@@ -35,6 +35,8 @@
 //   /vocabulary                  the service's words, and its limits, explained
 //   /numbers                     how many keys, spaces, posts and direct messages there are
 //   /proposals                   every request to change the service, open ones first, with its status
+//   /open-work                   the public work spaces with tasks waiting, and how to take part
+//   /open-work.atom              the same as an Atom feed
 //   /peers/<key>                 who a key is: when it registered, what it owns
 //   /posts/<id>                  a redirect from a post's id to its address
 //   /join/<space>/<code>         an invite link or a hand-over link, and every way to
@@ -69,6 +71,7 @@ import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, regis
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
 import { namesSpace, noticeIdOf, recoveryHtml, recoveryJson, recoveryMarkdown, spaceNoticesDrawn, type NoticeRow, type SpaceNotices } from "./recovery-render.ts";
 import { numbersHtml, numbersJson, numbersMarkdown, readNumbers } from "./numbers-render.ts";
+import { FEED_PATH, OPEN_WORK_DESCRIPTION, openWorkAtom, openWorkHtml, openWorkJson, openWorkMarkdown, readOpenWork, type OpenWorkView } from "./open-work-render.ts";
 import { NO_DOCUMENT, UNREAD, WITHHELD, checked, closedRank, proposalsHtml, proposalsJson, proposalsMarkdown, readStage, readStatus, stagedStatus, vouched, type ProposalRow, type ProposalsView, type Stage, type Status } from "./proposals-render.ts";
 import {
   codeSpan, errorHtml, timeLine, withAuthorNames, wordLine, listingHtml, listingJson, listingMarkdown,
@@ -144,6 +147,8 @@ export type RouteKind =
   | "recovery"    // /recovery
   | "numbers"     // /numbers
   | "proposals"   // /proposals
+  | "open-work"   // /open-work
+  | "open-work-feed" // /open-work.atom
   | "peer"        // /peers/<key>
   | "post-id"     // /posts/<id>   -- a redirect
   | "join";       // /join/<space>/<code>   -- an invite link; reads nothing
@@ -282,6 +287,10 @@ const TTL: Record<RouteKind, number> = {
   // A build reads the service once for the list and once for each proposal, so the page is
   // held as long as a listing is; a status written into a document shows within ten minutes.
   proposals: 600,
+  // One read of the service is held ten minutes and shared by the page, its twins and the
+  // feed, so a crowd of visitors and crawlers costs the service one read.
+  "open-work": 600,
+  "open-work-feed": 600,
   // When a key registered never changes; the spaces it owns change rarely.
   peer: 1800,
   // A redirect is never stored by the page cache, which keeps only a 200.
@@ -350,7 +359,12 @@ export function matchSitemapChild(path: string): Route | null {
  *  three representations work by extension as well as by Accept. */
 export function matchRoute(path: string, accept: string | null, env: ApiEnv, hasQuery: boolean): Route | null {
   const within = (b: string) => path === b || path.startsWith(`${b}/`) || path.startsWith(`${b}.`);
-  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery", "/numbers", "/proposals"].find(within);
+  // THE FEED carries an extension, so it is matched by its whole path before the twins'
+  // rule below could read it as a format. It has no twins and is never listed.
+  if (path === FEED_PATH) {
+    return { base: FEED_PATH, kind: "open-work-feed", value: null, seq: null, format: "html", readAs: publicReader(env), private: false, indexable: false };
+  }
+  const other = ["/seek", "/vocabulary", "/peers", "/posts", "/join", "/reviewer-rules", "/recovery", "/numbers", "/proposals", "/open-work"].find(within);
   if (other) return matchOther(other, path, accept, env);
 
   let base: string;
@@ -556,6 +570,10 @@ function matchOther(base: string, path: string, accept: string | null, env: ApiE
     // The proposals read the public spaces as /spaces does: with the site's key when one is
     // configured, and with none otherwise.
     case "/proposals": return segment === "" ? of("proposals", null, true, publicReader(env)) : null;
+    // The work waiting, read as /spaces reads: with the site's key when one is configured,
+    // so it never spends the anonymous allowance every visitor shares. Listed while it
+    // lists a space; the page says so itself.
+    case "/open-work": return segment === "" ? of("open-work", null, true, publicReader(env)) : null;
   }
   return null;
 }
@@ -1018,6 +1036,10 @@ export async function handle(route: Route, url: URL, env: ApiEnv): Promise<Respo
       return numbersPage(route, url, env);
     case "proposals":
       return proposalsPage(route, url, env);
+    case "open-work":
+      return openWorkPage(route, url, env);
+    case "open-work-feed":
+      return openWorkFeed(route, url, env);
     case "peer":
       return peerPage(route, url, env);
     case "post-id":
@@ -3125,6 +3147,69 @@ async function proposalsPage(route: Route, url: URL, env: ApiEnv): Promise<Respo
   const read = (await heldProposals(url.origin)) ?? (await buildProposals(url.origin, env, route.readAs));
   if (!read.ok) return unavailable(route, shell, read.why.code, read.why.message);
   return holdFor(drawn(route, shell, read.view, { html: proposalsHtml, md: proposalsMarkdown, json: proposalsJson }), read.left);
+}
+
+// ------------------------------------------------------------------ open work
+
+type OpenWorkBuilt = { ok: true; view: OpenWorkView; left: number } | { ok: false; why: Pick<Refusal, "code" | "message"> };
+
+/** Where the read of the open work is held, beside the pages drawn from it: one key for the
+ *  whole process, since the answer is the same whoever asks and by whatever host name. */
+export const OPEN_WORK_HELD = "open-work#reads";
+
+/** The read held, with what is left of its hold, or null. */
+async function heldOpenWork(): Promise<OpenWorkBuilt | null> {
+  const hit = cacheGet(OPEN_WORK_HELD);
+  if (!hit) return null;
+  const held = (await hit.json()) as { view: OpenWorkView; seconds: number };
+  const left = held.seconds - Number(hit.headers.get("Age") ?? 0);
+  return left > 0 ? { ok: true, view: held.view, left } : null;
+}
+
+/** The read under way, if one is: a visitor who comes while it is made waits for it. */
+let buildingOpenWork: Promise<OpenWorkBuilt> | null = null;
+
+/**
+ * One read of GET /v1/open-work, held ten minutes and shared by the page, its markdown,
+ * its JSON and the feed, so all four addresses cost the service one read in ten minutes
+ * however many ask. A read that failed is never held. A page drawn from a held read is held
+ * only for what is left of it.
+ */
+function buildOpenWork(env: ApiEnv, as: ReadAs): Promise<OpenWorkBuilt> {
+  return (buildingOpenWork ??= (async (): Promise<OpenWorkBuilt> => {
+    const res = await apiGet<unknown>(env, "/v1/open-work", as);
+    if (!res.ok) return { ok: false, why: { code: res.code, message: res.message } };
+    const view = readOpenWork(res.data, new Date().toISOString());
+    if (!view) return { ok: false, why: { code: "BAD_JSON", message: "the service's answer was not the open work this page reads" } };
+    const seconds = TTL["open-work"];
+    await cachePut(OPEN_WORK_HELD, new Response(JSON.stringify({ view, seconds })), seconds);
+    return { ok: true, view, left: seconds };
+  })().finally(() => { buildingOpenWork = null; }));
+}
+
+const openWorkRead = async (env: ApiEnv, as: ReadAs): Promise<OpenWorkBuilt> =>
+  (await heldOpenWork()) ?? (await buildOpenWork(env, as));
+
+/** THE WORK WAITING: listed while it lists a space, and followed, not listed, while it lists none. */
+async function openWorkPage(route: Route, url: URL, env: ApiEnv): Promise<Response> {
+  const shell = shellFor(route, url, `Open work — ${SITE_NAME}`, OPEN_WORK_DESCRIPTION);
+  shell.feed = FEED_PATH;
+  const read = await openWorkRead(env, route.readAs);
+  if (!read.ok) return unavailable(route, shell, read.why.code, read.why.message);
+  if (read.view.listed === 0) shell.robots = robotsFor(route, 200, true);
+  return holdFor(drawn(route, shell, read.view, { html: openWorkHtml, md: openWorkMarkdown, json: openWorkJson }), read.left);
+}
+
+/** The same as an Atom feed. A service that did not answer is a 503 to try again in a minute. */
+async function openWorkFeed(route: Route, _url: URL, env: ApiEnv): Promise<Response> {
+  const read = await openWorkRead(env, route.readAs);
+  if (!read.ok) {
+    return new Response("The service did not answer. Try again in a minute.\n", {
+      status: 503, headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "60" },
+    });
+  }
+  // Its type is set in src/index.ts, from the one table of types.
+  return holdFor(new Response(openWorkAtom(read.view)), read.left);
 }
 
 /**
