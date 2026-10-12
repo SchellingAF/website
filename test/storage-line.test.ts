@@ -109,6 +109,9 @@ describe("the storage line on a space's page", () => {
     assert.equal(dollars(1500000), "$1.50");
     assert.equal(dollars(12000000), "$12.00");
     assert.equal(megabytes(25000000), "25 MB");
+    assert.equal(megabytes(1_000_000_000), "1 GB");
+    assert.equal(megabytes(1_250_000_000), "1.3 GB");
+    assert.equal(megabytes(999_960_000), "1000 MB");
     assert.equal(megabytes(12434000), "12.4 MB");
   });
 

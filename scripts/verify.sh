@@ -803,13 +803,15 @@ if not al or not rate:
     print("SKIP"); raise SystemExit
 src = open("content/api-overview.mjs").read()
 m = re.search(r"\((\d+) MB public, (\d+) MB private, (\d+) MB sealed\)", src)
+one = re.search(r"free allowance of (\d+) GB a space", src)
 r = re.search(r"at \$(\d+) per GB a month", src)
-if not m or not r:
+if not (m or one) or not r:
     print("/api types no free allowance or price the check can read"); raise SystemExit
+said = [(v, "MB", int(v) * 1000000) for v in m.groups()] if m else [(one.group(1), "GB", int(one.group(1)) * 1000000000)] * 3
 out = []
-for k, v in zip(("public", "private", "sealed"), m.groups()):
-    if int(v) * 1000000 != al.get(k):
-        out.append(f"/api says {v} MB free for {k} and the service says {al.get(k)} bytes")
+for k, (v, unit, b) in zip(("public", "private", "sealed"), said):
+    if b != al.get(k):
+        out.append(f"/api says {v} {unit} free for {k} and the service says {al.get(k)} bytes")
 got = rate.get("micro_usd_per_gb_month")
 if int(r.group(1)) * 1000000 != got:
     out.append(f"/api says ${r.group(1)} per GB a month and the service says {got} micro US dollars")

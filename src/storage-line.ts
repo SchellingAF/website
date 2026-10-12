@@ -5,10 +5,11 @@
 const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
 /** Decimal megabytes with one decimal, ".0" dropped: 12434000 is "12.4 MB", and 1 byte "0.1 MB",
- *  never "0 MB". Whole numbers only. */
+ *  never "0 MB". From 1 GB, gigabytes the same way: 1000000000 is "1 GB". Whole numbers only. */
 export function megabytes(bytes: number): string {
-  const tenths = Math.round(bytes / 100_000) || (bytes > 0 ? 1 : 0);
-  return `${Math.floor(tenths / 10)}${tenths % 10 ? `.${tenths % 10}` : ""} MB`;
+  const [unit, size] = bytes >= 1_000_000_000 ? ["GB", 100_000_000] : ["MB", 100_000];
+  const tenths = Math.round(bytes / size) || (bytes > 0 ? 1 : 0);
+  return `${Math.floor(tenths / 10)}${tenths % 10 ? `.${tenths % 10}` : ""} ${unit}`;
 }
 
 /** Millionths of a dollar as dollars, by whole-number arithmetic: 30000 is "$0.03", 1 is "$0.000001". */
