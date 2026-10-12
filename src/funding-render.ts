@@ -6,13 +6,13 @@
 import { API_ORIGIN } from "./routes.generated.ts";
 import { codeSpan, csrfField, esc, htmlPage, spaceTrail, when, type Shell, type Viewer } from "./render.ts";
 import {
-  CLOSED, MEMBERS_ONLY, NO_ADDRESS, OLDER_WALLET, closedStatements, entryLabel, money, statements,
+  CLOSED, MEMBERS_ONLY, NOT_AVAILABLE, OLDER_WALLET, closedStatements, entryLabel, money, statementParts, statements,
   type FundingAddress, type FundingCoin, type FundingHistory, type FundingRead, type FundingSection,
 } from "./funding-section.ts";
 
 // ------------------------------------------------------------ on a space's page
 
-const MAKE_ADDRESS = "Make a deposit address or see every coin";
+const MAKE_ADDRESS = "Send credit to this space";
 const SEE_FUNDING = "See the funding page";
 
 /** The section as the page, the markdown and the JSON carry it: one content, three shapes. */
@@ -29,8 +29,7 @@ export function sectionParts(s: FundingSection, spaceHref: string): SectionParts
   if (addresses !== null && s.creditedTo) html.push(`<p>Deposits to these addresses credit <a href="${esc(`${base}/${s.creditedTo}`)}">${esc(s.creditedTo)}</a>.</p>`);
   if (addresses !== null) {
     if (!s.depositsOpen) html.push(`<p>${esc(CLOSED)}</p>`);
-    else if (addresses.length === 0) html.push(`<p>${esc(NO_ADDRESS)}</p>`);
-    else {
+    else if (addresses.length > 0) {
       html.push(`<h3>Deposit addresses</h3>`, `<ul>`);
       for (const a of addresses) {
         html.push(`<li>${esc(a.symbol ?? a.coin)}${a.network === null ? "" : ` on ${esc(a.network)}`}: <code>${esc(a.address)}</code>${a.minimum === null ? "" : `, minimum ${esc(a.minimum)}${a.symbol === null ? "" : ` ${esc(a.symbol)}`}`}${a.older ? ` <span class="meta">(${esc(OLDER_WALLET)})</span>` : ""}</li>`);
@@ -47,7 +46,6 @@ export function sectionParts(s: FundingSection, spaceHref: string): SectionParts
   if (addresses !== null && s.creditedTo) md.push(`- funding: deposits to these addresses credit ${codeSpan(s.creditedTo)}: ${base}/${s.creditedTo}.md`);
   if (addresses !== null) {
     if (!s.depositsOpen) md.push(`- funding: ${CLOSED}`);
-    else if (addresses.length === 0) md.push(`- funding: ${NO_ADDRESS}`);
     else for (const a of addresses) {
       md.push(`- deposit address: ${codeSpan(a.symbol ?? a.coin)}${a.network === null ? "" : ` on ${codeSpan(a.network)}`}: ${codeSpan(a.address)}${a.minimum === null ? "" : `, minimum ${codeSpan(a.minimum)}`}${a.older ? ` (${OLDER_WALLET})` : ""}`);
     }
@@ -72,23 +70,30 @@ export function sectionParts(s: FundingSection, spaceHref: string): SectionParts
 
 // ------------------------------------------------------------------- the page
 
+/** One of the ready coins on the page: the coin, and its current address, or why there is none. */
+export interface ReadySlot { coin: FundingCoin; address: FundingAddress | null; why: string | null }
+
 export interface FundingPageView {
   read: FundingRead;
+  /** The ready coins in the service's order, each with its address, made while the page was
+   *  drawn when it had none, or the reason it has none. */
+  ready: ReadySlot[];
   /** The credit history: null where the reader does not see it, "unreadable" when it was asked for and not read. */
   history: FundingHistory | "unreadable" | null;
   before: string;
   basePath: string;
   spaceHref: string;
   pagePath: string;
-  /** Present on the signed-in page, which carries the form. */
+  /** Present on the signed-in page, whose forms carry the session's token. */
   viewer: Viewer | null;
-  /** The ticker whose address to show first. */
-  pick: string | null;
   readAs: string;
 }
 
-const LEAD = "Credit for this space: how to add it, what is credited and what is not.";
-export const API_MAKE = (name: string): string => `POST ${API_ORIGIN}/v1/spaces/${name}/funding/addresses with {"coin": "<ticker>"}`;
+const LEAD = "Credit for this space: send a coin to an address below. No key or sign-in is needed.";
+/** The lead while deposits are not open: there is no address to send to. */
+const LEAD_CLOSED = "Credit for this space: what is credited, and how storage is billed.";
+const leadOf = (open: boolean): string => (open ? LEAD : LEAD_CLOSED);
+export const API_MAKE = (name: string): string => `POST ${API_ORIGIN}/v1/spaces/${name}/funding/addresses with {"coin": "<ticker>"} (no key needed)`;
 
 interface Network { name: string; coins: FundingCoin[]; cheap: boolean }
 
@@ -103,28 +108,44 @@ export function networksOf(coins: FundingCoin[]): Network[] {
 
 const notes = (c: FundingCoin): string => [c.cheap ? "cheap network" : "", c.stable ? "one for one" : ""].filter(Boolean).join(", ");
 
-/** The picker: one select, the networks as groups. */
-function pickerHtml(v: FundingPageView): string {
-  const groups = networksOf(v.read.coins).map((n) => {
-    const options = n.coins.map((c) =>
-      `<option value="${esc(c.coin)}">${esc(c.symbol)}, minimum ${esc(c.minimum)}${!n.cheap && c.cheap ? ", cheap network" : ""}</option>`).join("");
-    return `<optgroup label="${esc(n.cheap ? `${n.name}, cheap network` : n.name)}">${options}</optgroup>`;
-  }).join("");
-  return `<form method="post" action="${esc(`${v.spaceHref}/funding`)}" class="stack">${csrfField(v.viewer!)}
-<label>Coin and network
-<select name="coin" required>${groups}</select></label>
-<p><button type="submit">Get the address</button></p>
-</form>`;
+/** The anchor of a coin on the page, which a "Show address" press comes back to. */
+export const coinAnchor = (ticker: string): string => `coin-${ticker.replaceAll("/", "-")}`;
+
+/** The current address of each coin, and every other address made: an older wallet's, or a coin the table dropped. */
+function addressesOf(v: FundingPageView): { current: Map<string, FundingAddress>; others: FundingAddress[] } {
+  const current = new Map<string, FundingAddress>();
+  for (const slot of v.ready) if (slot.address) current.set(slot.coin.coin, slot.address);
+  for (const a of v.read.addresses ?? []) if (a.current && !current.has(a.coin)) current.set(a.coin, a);
+  const shown = new Set(current.values());
+  return { current, others: (v.read.addresses ?? []).filter((a) => !shown.has(a)) };
 }
 
-const addressBlock = (a: FundingAddress, mark: boolean): string =>
-  `<li${mark ? ' class="note"' : ""}>${mark ? "<strong>Your address</strong>: " : ""}${esc(a.symbol ?? a.coin)}${a.network === null ? "" : ` on ${esc(a.network)}`}: <code>${esc(a.address)}</code>${a.minimum === null ? "" : `, minimum ${esc(a.minimum)}${a.symbol === null ? "" : ` ${esc(a.symbol)}`}`}${a.cheap ? ", cheap network" : ""}${a.stable ? ", one for one" : ""}${a.current ? "" : ` <span class="meta">(${esc(OLDER_WALLET)})</span>`}</li>`;
+/** The coins below the ready ones: every coin the service takes, less those shown above. */
+const otherCoins = (v: FundingPageView): FundingCoin[] => {
+  const ready = new Set(v.ready.map((r) => r.coin.coin));
+  return v.read.coins.filter((c) => !ready.has(c.coin));
+};
 
-/** The addresses with the picked one first. */
-function ordered(v: FundingPageView): FundingAddress[] {
-  const all = v.read.addresses ?? [];
-  const first = v.pick ? all.filter((a) => a.coin === v.pick) : [];
-  return [...first, ...all.filter((a) => !first.includes(a))];
+/** The form that asks for a coin's address: one button, no session. A signed-in page's carries the form token. */
+function showForm(v: FundingPageView, ticker: string): string {
+  return `<form method="post" action="${esc(`${v.spaceHref}/funding`)}" class="inline">${v.viewer ? csrfField(v.viewer) : ""}<input type="hidden" name="coin" value="${esc(ticker)}"><button type="submit">Show address</button></form>`;
+}
+
+/** A coin's name as the page says it: its symbol and its network. */
+const coinName = (c: { symbol: string | null; coin: string; network: string | null }): string => `${c.symbol ?? c.coin}${c.network === null ? "" : ` on ${c.network}`}`;
+
+function readyHtml(v: FundingPageView): string {
+  if (!v.ready.length) return "";
+  const slots = v.ready.map(({ coin, address, why }) => `<div class="pay" id="${esc(coinAnchor(coin.coin))}">
+<h3>${esc(coinName(coin))}</h3>
+<p class="meta">${coin.name === coin.symbol ? "" : `${esc(coin.name)}. `}Minimum ${esc(coin.minimum)} ${esc(coin.symbol)}${coin.stable ? ". Counted one for one." : "."}</p>
+${address ? `<code class="address">${esc(address.address)}</code>` : `<p class="note warn">${esc(why ?? NOT_AVAILABLE)}</p>`}
+</div>`);
+  return `<h2 id="send">Send to this space</h2>\n${slots.join("\n")}`;
+}
+
+function rulesHtml(pay: string[]): string {
+  return `<ul>\n${pay.map((s) => `<li>${esc(s)}</li>`).join("\n")}\n</ul>`;
 }
 
 function depositsHtml(v: FundingPageView): string {
@@ -156,38 +177,50 @@ ${rows.join("\n")}
 ${h.hasMore && h.nextBefore ? `<p class="meta"><a href="${esc(`${v.pagePath}?${new URLSearchParams({ before: h.nextBefore })}`)}">Earlier entries</a></p>` : ""}`;
 }
 
+/** Every address made that the coin list above does not show: from an earlier wallet, still credited, or of a coin the table dropped. */
+function othersHtml(others: FundingAddress[]): string {
+  if (!others.length) return "";
+  return `<h3>Other addresses made for this space</h3>
+<ul>
+${others.map((a) => `<li>${esc(coinName(a))}: <code>${esc(a.address)}</code>${a.minimum === null ? "" : `, minimum ${esc(a.minimum)}${a.symbol === null ? "" : ` ${esc(a.symbol)}`}`}${a.current ? "" : ` <span class="meta">(${esc(OLDER_WALLET)})</span>`}</li>`).join("\n")}
+</ul>`;
+}
+
 function coinsHtml(v: FundingPageView): string {
-  const nets = networksOf(v.read.coins);
-  if (!nets.length) return "";
-  return `<h2 id="coins">Every coin</h2>
-<p class="meta">Minimums as of ${esc(v.read.minimumsAsOf)}.</p>
+  const nets = networksOf(otherCoins(v));
+  const { current, others } = addressesOf(v);
+  const makeable = v.read.creditedTo === null;
+  if (!nets.length && !others.length) return "";
+  return `<h2 id="coins">Other coins</h2>
+${nets.length ? `<p class="meta">Press Show address for a coin. No key is needed. Minimums as of ${esc(v.read.minimumsAsOf)}.</p>` : ""}
 ${nets.map((n) => `<h3>${esc(n.name)}</h3>
 <div class="wide"><table>
-<tr><th scope="col">Coin</th><th scope="col">Minimum</th><th scope="col"></th></tr>
-${n.coins.map((c) => `<tr><th scope="row">${esc(c.symbol)}</th><td>${esc(c.minimum)}</td><td>${esc(notes(c))}</td></tr>`).join("\n")}
-</table></div>`).join("\n")}`;
+<tr><th scope="col">Coin</th><th scope="col">Minimum</th><th scope="col"></th><th scope="col">Address</th></tr>
+${n.coins.map((c) => {
+    const a = current.get(c.coin);
+    return `<tr id="${esc(coinAnchor(c.coin))}"><th scope="row">${esc(c.symbol)}</th><td>${esc(c.minimum)}</td><td>${esc(notes(c))}</td><td>${a ? `<code class="address">${esc(a.address)}</code>` : makeable ? showForm(v, c.coin) : ""}</td></tr>`;
+  }).join("\n")}
+</table></div>`).join("\n")}
+${othersHtml(others)}`;
 }
 
 export function fundingHtml(shell: Shell, v: FundingPageView): string {
   const r = v.read;
   const nonPublic = r.visibility !== "public";
   const open = r.depositsOpen;
-  const said = open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing) : closedStatements(nonPublic, r.creditedTo, r.billing);
-  const addresses = open ? ordered(v) : [];
+  const closed = closedStatements(nonPublic, r.creditedTo, r.billing);
+  const { pay, more } = statementParts(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing);
   return htmlPage(shell, `${spaceTrail(v.basePath, v.spaceHref, r.space, "funding")}
 <h1>Funding for ${esc(r.space)}</h1>
-<p class="lead">${esc(LEAD)} The space: <a href="${esc(v.spaceHref)}">${esc(r.space)}</a>.</p>
-<ul>
-${said.map((s) => `<li>${esc(s)}</li>`).join("\n")}
-</ul>
+<p class="lead">${esc(leadOf(open))} The space: <a href="${esc(v.spaceHref)}">${esc(r.space)}</a>.</p>
+${open ? `${readyHtml(v)}
+${rulesHtml(pay)}` : rulesHtml(closed)}
 ${r.creditedTo ? `<p>The space that receives these deposits: <a href="${esc(`${v.basePath}/${r.creditedTo}`)}">${esc(r.creditedTo)}</a>.</p>` : ""}
 ${r.storage ? `<p class="meta">${esc(r.storage)}</p>` : ""}
-${open ? `<h2 id="addresses">Deposit addresses</h2>
-${addresses.length ? `<ul>\n${addresses.map((a) => addressBlock(a, a.coin === v.pick)).join("\n")}\n</ul>` : `<p>${esc(NO_ADDRESS)}</p>`}
-${v.viewer ? `<h2 id="picker">Get an address</h2>\n${pickerHtml(v)}` : ""}` : ""}
 ${r.membersOnly ? `<p class="meta">${esc(MEMBERS_ONLY)}</p>` : ""}
 ${depositsHtml(v)}
 ${historyHtml(v)}
+${open ? `<h2 id="more">More about credit</h2>\n${rulesHtml(more)}` : ""}
 ${open ? coinsHtml(v) : ""}`);
 }
 
@@ -199,21 +232,52 @@ export function fundingMarkdown(v: FundingPageView): string {
   const r = v.read;
   const nonPublic = r.visibility !== "public";
   const open = r.depositsOpen;
-  const L: string[] = [`# Funding for ${codeSpan(r.space)}`, "", LEAD, "", `- space: ${v.spaceHref}.md`];
-  L.push("", ...(open ? statements(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing) : closedStatements(nonPublic, r.creditedTo, r.billing)).map((s) => `- ${s}`), "");
-  if (r.creditedTo) L.push(`- credited to: ${v.basePath}/${r.creditedTo}.md`, "");
-  if (r.storage) L.push(r.storage, "");
+  const L: string[] = [`# Funding for ${codeSpan(r.space)}`, "", leadOf(open), "", `- space: ${v.spaceHref}.md`];
   if (open) {
-    L.push("## Deposit addresses", "");
-    const addresses = ordered(v);
-    if (!addresses.length) L.push(NO_ADDRESS);
-    for (const a of addresses) {
-      L.push(`- ${a.coin === v.pick ? "your address, " : ""}${codeSpan(a.symbol ?? a.coin)}${a.network === null ? "" : ` on ${codeSpan(a.network)}`}: ${codeSpan(a.address)}${a.minimum === null ? "" : `, minimum ${codeSpan(a.minimum)}`}${a.cheap ? ", cheap network" : ""}${a.stable ? ", one for one" : ""}${a.current ? "" : ` (${OLDER_WALLET})`}`);
+    L.push("", "## Send to this space", "");
+    for (const { coin, address, why } of v.ready) {
+      L.push(`- ${codeSpan(coinName(coin))}, minimum ${codeSpan(coin.minimum)}${coin.stable ? ", one for one" : ""}: ${address ? codeSpan(address.address) : (why ?? NOT_AVAILABLE)}`);
     }
-    L.push("", `Make an address with a key: ${API_MAKE(r.space)}`, "");
+    L.push("");
+    const { pay, more } = statementParts(r.minimumsAsOf, nonPublic, r.creditedTo, r.billing);
+    L.push(...pay.map((s) => `- ${s}`), "");
+    if (r.creditedTo) L.push(`- credited to: ${v.basePath}/${r.creditedTo}.md`, "");
+    if (r.storage) L.push(r.storage, "");
+    if (r.membersOnly) L.push(MEMBERS_ONLY, "");
+    pendingAndHistory(L, v);
+    L.push("## More about credit", "", ...more.map((s) => `- ${s}`), "");
+  } else {
+    L.push("", ...closedStatements(nonPublic, r.creditedTo, r.billing).map((s) => `- ${s}`), "");
+    if (r.creditedTo) L.push(`- credited to: ${v.basePath}/${r.creditedTo}.md`, "");
+    if (r.storage) L.push(r.storage, "");
+    if (r.membersOnly) L.push(MEMBERS_ONLY, "");
+    pendingAndHistory(L, v);
   }
-  if (r.membersOnly) L.push(MEMBERS_ONLY, "");
-  const b = r.balance;
+  if (open) {
+    const { current, others } = addressesOf(v);
+    const nets = networksOf(otherCoins(v));
+    if (nets.length || others.length) L.push("## Other coins", "");
+    if (nets.length) L.push(`Minimums as of ${r.minimumsAsOf}. Ask for an address: ${API_MAKE(r.space)}.`, "");
+    for (const n of nets) {
+      L.push(`### ${n.name}`, "");
+      for (const c of n.coins) {
+        const a = current.get(c.coin);
+        L.push(`- ${codeSpan(c.symbol)} (${codeSpan(c.coin)}): minimum ${codeSpan(c.minimum)}${notes(c) ? `, ${notes(c)}` : ""}${a ? `: ${codeSpan(a.address)}` : ""}`);
+      }
+      L.push("");
+    }
+    if (others.length) {
+      L.push("### Other addresses made for this space", "");
+      for (const a of others) L.push(`- ${codeSpan(coinName(a))}: ${codeSpan(a.address)}${a.current ? "" : ` (${OLDER_WALLET})`}`);
+      L.push("");
+    }
+  }
+  return L.join("\n");
+}
+
+/** The balance, the deposits not yet credited and the credit history, in the markdown. */
+function pendingAndHistory(L: string[], v: FundingPageView): void {
+  const b = v.read.balance;
   if (b) {
     L.push("## Balance and deposits", "", `- balance: ${money(b.micro)}`, `- deposits credited: ${b.counts.credited}`);
     for (const d of b.pending) L.push(`- incoming, not yet credited: ${codeSpan(d.coin)} ${d.value_coin === null ? "amount not yet known" : codeSpan(d.value_coin)}, transaction ${codeSpan(d.txid_in)}, seen ${d.seen_at}`);
@@ -231,15 +295,6 @@ export function fundingMarkdown(v: FundingPageView): string {
     if (v.history.hasMore && v.history.nextBefore) L.push("", `- earlier entries: ${v.pagePath}.md?${new URLSearchParams({ before: v.history.nextBefore })}`);
     L.push("");
   }
-  if (open && r.coins.length) {
-    L.push("## Every coin", "", `Minimums as of ${r.minimumsAsOf}.`, "");
-    for (const n of networksOf(r.coins)) {
-      L.push(`### ${n.name}`, "");
-      for (const c of n.coins) L.push(`- ${codeSpan(c.symbol)} (${codeSpan(c.coin)}): minimum ${codeSpan(c.minimum)}${notes(c) ? `, ${notes(c)}` : ""}`);
-      L.push("");
-    }
-  }
-  return L.join("\n");
 }
 
 export function fundingJson(v: FundingPageView, canonical: string): unknown {
@@ -247,10 +302,11 @@ export function fundingJson(v: FundingPageView, canonical: string): unknown {
   const nonPublic = r.visibility !== "public";
   const open = r.depositsOpen;
   const b = r.balance;
+  const { current } = addressesOf(v);
   return {
     title: `Funding for ${r.space}`,
     url: canonical,
-    about: LEAD,
+    about: leadOf(open),
     read_as: v.readAs,
     space: { name: r.space, page: v.spaceHref },
     deposits_open: open,
@@ -258,7 +314,12 @@ export function fundingJson(v: FundingPageView, canonical: string): unknown {
     minimums_as_of: open ? r.minimumsAsOf : null,
     ...(r.creditedTo ? { credited_to: { name: r.creditedTo, page: `${v.basePath}/${r.creditedTo}` } } : {}),
     ...(r.storage ? { storage: r.storage } : {}),
-    addresses: open ? ordered(v).map(addressJson) : [],
+    // The coins ready to pay: each with its address, or null and why there is none.
+    ready: open ? v.ready.map(({ coin, address, why }) => ({
+      coin: coin.coin, symbol: coin.symbol, network: coin.network, minimum: coin.minimum, stable: coin.stable,
+      address: address ? address.address : null, ...(address ? {} : { not_available: why ?? NOT_AVAILABLE }),
+    })) : [],
+    addresses: open ? [...current.values(), ...addressesOf(v).others].map(addressJson) : [],
     ...(open ? { make_address: API_MAKE(r.space) } : {}),
     ...(r.membersOnly ? { members_only: MEMBERS_ONLY } : {}),
     ...(b ? {
@@ -273,6 +334,6 @@ export function fundingJson(v: FundingPageView, canonical: string): unknown {
       history: { entries: v.history.entries.map((e) => ({ ...e, label: entryLabel(e, v.read.space) })), has_more: v.history.hasMore, next_before: v.history.nextBefore },
     } : {}),
     ...(v.history === "unreadable" ? { history: "could not be read just now" } : {}),
-    coins: open ? networksOf(r.coins).map((n) => ({ network: n.name, coins: n.coins.map((c) => ({ coin: c.coin, symbol: c.symbol, minimum: c.minimum, cheap: c.cheap, stable: c.stable })) })) : [],
+    coins: open ? networksOf(r.coins).map((n) => ({ network: n.name, coins: n.coins.map((c) => ({ coin: c.coin, symbol: c.symbol, minimum: c.minimum, cheap: c.cheap, stable: c.stable, address: current.get(c.coin)?.address ?? null })) })) : [],
   };
 }

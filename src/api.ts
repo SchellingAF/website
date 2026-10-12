@@ -173,6 +173,10 @@ let siteKeyWarnedAt = 0;
  * hands out for a request whose cookie it found -- and sends that session's own token
  * and no other. It cannot be called with SITE_TOKEN or READER_TOKEN, because it never
  * reads the environment.
+ *
+ * ONE WRITE SENDS NO KEY AT ALL: apiMakeAddress() below, a space's deposit address, which the
+ * product makes for anyone and which spends only the service's own allowance. It carries
+ * no Authorization header whoever is reading, so it cannot send a key either.
  */
 export interface SignedIn {
   readonly token: string;
@@ -195,6 +199,26 @@ export async function apiWrite<T>(
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
+}
+
+/** How long a deposit address may take to make, while a page waits for it: the product asks
+ *  the payment provider, which a page does not wait on for the full TIMEOUT_MS. */
+export const ADDRESS_TIMEOUT_MS = 3500;
+
+/**
+ * A SPACE's deposit address for a coin, asked for with NO key: the product makes it on the
+ * first request and answers the same after, for anyone, and a request with no key spends
+ * only the service's own daily allowance of new addresses. Sent with no Authorization header
+ * whoever is reading: this site's own key would spend that key's allowance instead, and a
+ * person's would be handed to a page that needs no sign-in. Used by the funding page, for
+ * the coins it shows ready, and by the one public form that makes the address of a coin.
+ */
+export async function apiMakeAddress<T>(space: string, coin: string): Promise<ApiResult<T>> {
+  return send<T>(`/v1/spaces/${space}/funding/addresses`, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ coin }),
+  }, ADDRESS_TIMEOUT_MS);
 }
 
 /**
@@ -313,10 +337,10 @@ export async function apiText(path: "/reviewer-rules.md"): Promise<ApiResult<str
   return { ok: true, data: new TextDecoder().decode(bytes) };
 }
 
-async function send<T>(path: string, init: RequestInit): Promise<ApiResult<T>> {
+async function send<T>(path: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<ApiResult<T>> {
   let res: Response;
   try {
-    res = await fetch(ORIGIN + path, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(ORIGIN + path, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
     return unanswered(e);
   }

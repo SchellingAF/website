@@ -44,6 +44,7 @@ import {
   readSession, readSessionOf, sameOrigin, sessionCookie, type Session,
 } from "./session.ts";
 import { forgetSpacePages, handle, matchSignedInRoute } from "./spaces.ts";
+import { coinAnchor } from "./funding-render.ts";
 import { actOnMessages, readMessages, revokeUnheld, waitingOf } from "./messages.ts";
 import {
   attachmentsOf, badForm, fileRefusalWords, filled, forbidden, html, idempotencyOf, joinCodeOf, json, lines, notAllowed, page, pick, postLimitWords,
@@ -1594,12 +1595,14 @@ async function spaceAction(
     }
     case "funding": {
       // A deposit address for this space, in the coin the person chose: the product makes
-      // it on the first request and answers the same after. The page shows it first.
+      // it on the first request and answers the same after. The page comes back at that coin.
+      // This is the form of a private or sealed space's page, which its members read here to
+      // see their balance; a public space's page needs no key and has its own form.
       const coin = (form.get("coin") ?? "").trim();
       if (!/^[a-z0-9][a-z0-9./_-]{0,63}$/.test(coin)) return badForm(viewer, "Choose a coin from the list. Nothing was made.");
       const res = await apiWrite(session, "POST", `/v1/spaces/${name}/funding/addresses`, { coin });
       if (!res.ok) return refused(h, viewer, res, name, [[`${spaceHref}/funding`, "Back to the funding page"], [spaceHref, "Back to the space"]], fundingRefusalWords(res));
-      return see(`${spaceHref}/funding?${new URLSearchParams({ coin })}`);
+      return see(`${spaceHref}/funding#${coinAnchor(coin)}`);
     }
     case "watch": {
       const on = form.get("on") === "1";

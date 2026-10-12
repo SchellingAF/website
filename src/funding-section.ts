@@ -68,6 +68,9 @@ export interface FundingRead {
   depositsOpen: boolean;
   storage: string | null;
   addresses: FundingAddress[] | null;
+  /** The coins the service says most funders use, in its order, always sent while deposits
+   *  are open; empty from a service that does not send them. The page shows these ready. */
+  readyCoins: FundingCoin[];
   coins: FundingCoin[];
   minimumsAsOf: string;
   /** True when the answer is the addresses alone: this reader is not a member of a
@@ -210,7 +213,7 @@ export function readFunding(answer: unknown): FundingRead | null {
 
   if (own(answer, "addresses") === undefined) {
     return storage === null ? null
-      : { space, visibility, depositsOpen: false, storage, addresses: null, coins: [], minimumsAsOf: "", membersOnly: false, creditedTo: null, balance: null, billing };
+      : { space, visibility, depositsOpen: false, storage, addresses: null, readyCoins: [], coins: [], minimumsAsOf: "", membersOnly: false, creditedTo: null, balance: null, billing };
   }
   const open = own(answer, "deposits_open");
   // The coins and the day of their minimums come only when asked for (?coins=true): an answer
@@ -219,7 +222,11 @@ export function readFunding(answer: unknown): FundingRead | null {
   const asOf = hasCoins ? text(own(answer, "minimums_as_of"), AS_OF) : "";
   const addresses = listOf(own(answer, "addresses"), addressOf, 400);
   const coins = hasCoins ? listOf(own(answer, "coins"), coinOf, 400) : [];
-  if (typeof open !== "boolean" || asOf === null || !addresses || !coins) return null;
+  // The ready coins come with every answer from a service that has them, and none from one
+  // that has not; a field that is there and is not a list is an answer this does not read.
+  const rawReady = own(answer, "ready_coins");
+  const readyCoins = rawReady === undefined ? [] : listOf(rawReady, coinOf, 40);
+  if (typeof open !== "boolean" || asOf === null || !addresses || !coins || !readyCoins) return null;
   const rawCredited = own(answer, "credited_to");
   let creditedTo: string | null = null;
   if (rawCredited !== undefined && rawCredited !== null) {
@@ -231,11 +238,11 @@ export function readFunding(answer: unknown): FundingRead | null {
   if (members !== undefined) {
     // The addresses alone: no byte figure, no balance, no deposits.
     if (!Array.isArray(members) || hasBytes || own(answer, "balance_micro_usd") !== undefined || own(answer, "deposits") !== undefined) return null;
-    return { space, visibility, depositsOpen: open, storage: null, addresses, coins, minimumsAsOf: asOf, membersOnly: true, creditedTo, balance: null, billing };
+    return { space, visibility, depositsOpen: open, storage: null, addresses, readyCoins, coins, minimumsAsOf: asOf, membersOnly: true, creditedTo, balance: null, billing };
   }
   const balance = balanceOf(answer);
   if (!hasBytes || !balance) return null;
-  return { space, visibility, depositsOpen: open, storage, addresses, coins, minimumsAsOf: asOf, membersOnly: false, creditedTo, balance, billing };
+  return { space, visibility, depositsOpen: open, storage, addresses, readyCoins, coins, minimumsAsOf: asOf, membersOnly: false, creditedTo, balance, billing };
 }
 
 // -------------------------------------------------------------------- history
@@ -328,22 +335,36 @@ function billingStatements(b: BillingTerms | null): string[] {
   ];
 }
 
-/** The statements every funding page makes, and only these. The last is for a private or
- *  sealed space alone. */
-export function statements(asOf: string, nonPublic: boolean, creditedTo: string | null = null, billing: BillingTerms | null = null): string[] {
-  const list = [
-    "Anyone can add credit to this space by sending a coin to one of its deposit addresses. Making an address needs a key.",
+/**
+ * The statements every funding page makes, and only these, in the two places the page puts
+ * them. `pay` is what a person reads under the addresses before sending: the coin and the
+ * network, the minimum, what is counted and what the credit is. `more` is the rest, lower on
+ * the page. The last of `more` is for a private or sealed space alone.
+ */
+export function statementParts(asOf: string, nonPublic: boolean, creditedTo: string | null = null, billing: BillingTerms | null = null): { pay: string[]; more: string[] } {
+  const pay = [
+    "Send only the coin shown, on the network shown. Another network, or a token not listed, is not credited.",
+    "A deposit below the minimum shown is not credited.",
+    "Credit is counted in US dollars once the deposit is confirmed, after CryptAPI's fee and the network's fee. USDT, USDC, USDC.e, USDT0, DAI and PYUSD count one for one. Any other coin counts at CryptAPI's US dollar price then.",
+    creditLine(creditedTo),
+  ];
+  const more = [
+    "Anyone can add credit to this space by sending a coin to one of its deposit addresses. No key is needed.",
     "Deposits are visible on a public blockchain: anyone can see the address, the amount and the transaction.",
     "Each address belongs to one coin on one network. A coin sent to it on any other network is not credited, even when this space has an address on that network. A network not listed here is not offered.",
-    `A deposit below the minimum shown is not credited. The minimums and the cheap marks are CryptAPI's on ${asOf} and can change.`,
-    "A token not in this list is not credited, even on the right network.",
-    "Credit is kept in US dollars, rounded down to a millionth of a dollar. USDT, USDC, USDC.e, USDT0, DAI and PYUSD count one for one. Any other coin counts at CryptAPI's US dollar price when the deposit is confirmed. Both are counted after CryptAPI's fee and the network's fee.",
+    `The minimums and the cheap marks are CryptAPI's on ${asOf} and can change.`,
+    "Credit is rounded down to a millionth of a dollar.",
     "A deposit shows as incoming until it is confirmed, and is credited only then. Some deposits are held for review and are not credited.",
-    creditLine(creditedTo),
     ...billingStatements(billing),
   ];
-  if (nonPublic) list.push("The balance and deposits are shown to members only. The deposit addresses are public, and deposits to them are visible on a public blockchain.");
-  return list;
+  if (nonPublic) more.push("The balance and deposits are shown to members only. The deposit addresses are public, and deposits to them are visible on a public blockchain.");
+  return { pay, more };
+}
+
+/** Every statement, as the markdown and the JSON carry them: what is read before sending, then the rest. */
+export function statements(asOf: string, nonPublic: boolean, creditedTo: string | null = null, billing: BillingTerms | null = null): string[] {
+  const { pay, more } = statementParts(asOf, nonPublic, creditedTo, billing);
+  return [...pay, ...more];
 }
 
 /** What a page says while deposits are closed: the statements that stay true. */
@@ -360,6 +381,10 @@ export function closedStatements(nonPublic: boolean, creditedTo: string | null =
 export const CLOSED = "Deposits are not open on this server.";
 export const MEMBERS_ONLY = "This space's balance and deposits are shown to its members only.";
 export const NO_ADDRESS = "No deposit address has been made yet.";
+/** What a ready coin says when its address could not be made while the page was drawn. */
+export const NOT_AVAILABLE = "Not available right now. Reload this page later.";
+/** What it says when the space can no longer take new addresses. */
+export const SPACE_CLOSED_WORDS = "This space no longer takes new deposit addresses.";
 export const OLDER_WALLET = "older wallet, still credited";
 
 // -------------------------------------------------------------- the section

@@ -663,7 +663,13 @@ table{border-collapse:collapse;width:100%;font-size:.85rem;margin:0 0 1rem}
 th,td{text-align:left;padding:.4rem .5rem;border-top:1px solid var(--rule);vertical-align:top}
 th{color:var(--dim);font-weight:normal}
 .wide{overflow-x:auto}
-.proof code{word-break:break-all}`;
+.proof code{word-break:break-all}
+.pay{border:1px solid var(--rule);border-radius:2px;padding:.7rem .9rem;margin:0 0 .9rem}
+.pay h3{margin:0}
+.pay .meta{margin:0 0 .5rem}
+.pay p.note{margin:0}
+code.address{display:block;font-size:.95rem;padding:.55rem .7rem;word-break:break-all;user-select:all;-webkit-user-select:all}
+td code.address{display:block;font-size:.8rem;padding:.3rem .4rem}`;
 
 /** Who is signed in, as a page needs to know it: the key, and the token every form
  *  must send back. Never the session's API token. */
@@ -703,7 +709,7 @@ export interface Shell {
 }
 
 /** What a public page offers to open with the visitor's own key. */
-export type TwinPage = "funding" | "space" | "space-invite" | "space-open" | "space-other" | "oracle" | "post" | "version-waiting" | "version" | "history" | "archive";
+export type TwinPage = "space" | "space-invite" | "space-open" | "space-other" | "oracle" | "post" | "version-waiting" | "version" | "history" | "archive";
 
 const TWIN_WORDS: Record<TwinPage, [string, string]> = {
   space: ["Open this space with your key", "to ask to join it, or, as a member, to post and reply."],
@@ -717,7 +723,6 @@ const TWIN_WORDS: Record<TwinPage, [string, string]> = {
   version: ["Open this version with your key", "to reply to it."],
   history: ["Open this history with your key", "to undo the last change, to confirm what waits if you are a writer and this space counts confirmations, or, if your key decides here, to approve or decline it."],
   archive: ["Open every post with your key", "to reply to one."],
-  funding: ["Make a deposit address with your key", "for this space, or see the addresses already made."],
 };
 
 /** The link from a public page to its signed-in twin: /me followed by the page's own

@@ -63,7 +63,7 @@
 // follow`: an empty page for each of five hundred subjects is not something to offer
 // a search engine.
 
-import { apiFindings, apiGet, apiPostFinding, apiTasks, classifyRefusal, haveToken, type ApiEnv, type ApiResult, type ReadAs, type Refusal } from "./api.ts";
+import { apiFindings, apiGet, apiMakeAddress, apiPostFinding, apiTasks, classifyRefusal, haveToken, type ApiEnv, type ApiResult, type ReadAs, type Refusal } from "./api.ts";
 import { GROUP_MEANING, KIND_MEANING, attachmentLimits, capabilities, checkpointDue, heldKinds, isLive, itemLimits, keepsFindings, kindGroups, knownKinds, linkRules, passkeySite, perSpace, reviewerRules, serviceReviewer, type Capabilities } from "./capabilities.ts";
 import { busiest, categoryCounts, countOf, kindCountOf, named, normalName, register, resolveCategory, unknownId, type Category, type Counts, type Register, type SpaceKind } from "./categories.ts";
 import { checkCheckpoint, checkPost, checkRecord, checkRecoveryNotice, uncoveredProblem } from "./verify.ts";
@@ -100,8 +100,8 @@ import {
   type CurrentDocument, type Side, type Version,
 } from "./oracle-render.ts";
 import { lineDiff } from "./diff.ts";
-import { fundingSection, readFunding, readHistory, type FundingSection } from "./funding-section.ts";
-import { fundingHtml, fundingJson, fundingMarkdown, sectionParts, type FundingPageView } from "./funding-render.ts";
+import { NOT_AVAILABLE, SPACE_CLOSED_WORDS, addressOf, fundingSection, readFunding, readHistory, type FundingRead, type FundingSection } from "./funding-section.ts";
+import { fundingHtml, fundingJson, fundingMarkdown, sectionParts, type FundingPageView, type ReadySlot } from "./funding-render.ts";
 import { sealedSpaceContext, sealedSpaceNote, sealingHost } from "./sealing.ts";
 import { cacheEpoch, cacheForget, cacheGet, cachePut } from "./page-cache.ts";
 import {
@@ -730,12 +730,9 @@ function readParams(route: Route, url: URL): URLSearchParams {
       break;
     }
     case "funding": {
-      // The credit history is walked backwards by entry id; a signed-in page may name the
-      // coin whose address it puts first, held to a ticker's shape.
+      // The credit history is walked backwards by entry id.
       const before = url.searchParams.get("before") ?? "";
       if (/^[1-9][0-9]{0,18}$/.test(before)) keep.set("before", before);
-      const coin = url.searchParams.get("coin") ?? "";
-      if (route.private && /^[a-z0-9][a-z0-9./_-]{0,63}$/.test(coin)) keep.set("coin", coin);
       break;
     }
     case "standing": {
@@ -3209,8 +3206,14 @@ async function fundingPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
     return unavailable(route, shell, "BAD_JSON", "the service's answer was not the funding this page reads");
   }
 
-  // The way to make an address is offered while deposits are open.
-  if (!route.private && read.depositsOpen) shell.twin = signedInTwin("funding", pagePath(route));
+  // The page of a public space needs no key and no sign-in, so a signed-in person is sent to it:
+  // its addresses, the balance and the history are the same there. A private or sealed space's
+  // own members read its balance only with their key, so theirs stays.
+  if (route.private && read.visibility === "public") {
+    return new Response(null, { status: 303, headers: { Location: `/spaces/${name}/funding${before ? `?${new URLSearchParams({ before })}` : ""}` } });
+  }
+
+  const ready = await readyCoins(env, name, read);
 
   let history: FundingPageView["history"] = null;
   if (read.balance) {
@@ -3226,10 +3229,43 @@ async function fundingPage(route: Route, url: URL, env: ApiEnv): Promise<Respons
     spaceHref: `${route.base}/${name}`,
     pagePath: pagePath(route),
     viewer: route.base === "/me/spaces" && route.viewer ? route.viewer : null,
-    pick: kept.get("coin") ?? null,
+    ready,
     readAs: route.readAs,
   };
-  return drawn(route, shell, view, { html: fundingHtml, md: fundingMarkdown, json: fundingJson });
+  const page = drawn(route, shell, view, { html: fundingHtml, md: fundingMarkdown, json: fundingJson });
+  // A page drawn with a ready coin whose address could not be made is held a few seconds: the
+  // reload it asks for should find it made.
+  return ready.some((r) => r.why === NOT_AVAILABLE) ? holdFor(page, FAILED_READY_SECONDS) : page;
+}
+
+/** How long a funding page that could not make a ready coin's address is held. */
+const FAILED_READY_SECONDS = 10;
+
+/**
+ * The ready coins of a funding page, each with its address. A coin with no current address
+ * is asked for with no key, all at once, each under a short timeout, and only while the space
+ * takes new addresses (deposits open, not replaced). One that cannot be made says so and the
+ * page still draws: the product's refusal is a reason to reload later, never a failed page.
+ */
+async function readyCoins(env: ApiEnv, name: string, read: FundingRead): Promise<ReadySlot[]> {
+  if (!read.depositsOpen) return [];
+  const current = (ticker: string) => (read.addresses ?? []).find((a) => a.coin === ticker && a.current) ?? null;
+  return Promise.all(read.readyCoins.map(async (coin): Promise<ReadySlot> => {
+    const have = current(coin.coin);
+    if (have) return { coin, address: have, why: null };
+    if (read.creditedTo !== null) return { coin, address: null, why: SPACE_CLOSED_WORDS };
+    try {
+      const made = await apiMakeAddress<{ address?: unknown }>(name, coin.coin);
+      if (made.ok) {
+        const address = addressOf(made.data?.address);
+        if (address && address.coin === coin.coin) return { coin, address, why: null };
+        return { coin, address: null, why: NOT_AVAILABLE };
+      }
+      return { coin, address: null, why: made.code === "SPACE_CLOSED" ? SPACE_CLOSED_WORDS : NOT_AVAILABLE };
+    } catch {
+      return { coin, address: null, why: NOT_AVAILABLE };
+    }
+  }));
 }
 
 // ------------------------------------------------------------- the categories
@@ -3534,6 +3570,18 @@ function cacheKey(route: Route, url: URL): string {
 export function forgetSpacePages(origin: string, name: string): number {
   if (!SPACE_NAME.test(name)) return 0;
   return cacheForget(`${origin}/spaces/${name}?`) + cacheForget(`${origin}/spaces/${name}/`);
+}
+
+/**
+ * Forgets what this site holds of a space's funding, after an address was made for it: the
+ * funding page in every format and what it read for the space's own page, so that the next
+ * view shows the address rather than a copy up to a minute or ten old. Only the funding.
+ */
+export function forgetFundingSection(origin: string, name: string): number {
+  if (!SPACE_NAME.test(name)) return 0;
+  fundingHeld.delete(`site:${name}`);
+  fundingHeld.delete(`none:${name}`);
+  return cacheForget(`${origin}/spaces/${name}/funding?`);
 }
 
 /** How long a response may be held: its route's lifetime, or less when the page says

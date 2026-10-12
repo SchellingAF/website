@@ -16,6 +16,7 @@ import {
   negotiate, pagePath, privateView, robotsFor,
 } from "./spaces.ts";
 import { SIGN_IN_PAGE, handleSignedIn, isSignedInAddress } from "./me.ts";
+import { handleFundingForm, isFundingForm } from "./funding-form.ts";
 import type { ApiEnv } from "./api.ts";
 import { LINK_CODE, NAME, SEQ } from "./grammar.ts";
 
@@ -265,6 +266,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       // sends no referrer to anybody else.
       referrer: "same-origin",
     });
+  }
+  // THE ONE PUBLIC FORM: "Show address" on a space's funding page, which needs no session
+  // and sends no key. See src/funding-form.ts.
+  if (request.method === "POST" && isFundingForm(path)) {
+    const res = await handleFundingForm(request, url);
+    return decorate(res, { csp: CSP_DYNAMIC, secure, robots: "noindex, nofollow", cacheControl: "no-store" });
   }
   // Every other address on this site is read, never written to. serve.mjs lets a
   // POST through for the family above, and this refuses it everywhere else before

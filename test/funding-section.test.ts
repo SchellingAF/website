@@ -27,7 +27,11 @@ const COINS: Json[] = [
   coin("trc20/usdt", "USDT", "Tron", "5", false, true, "tron"),
   coin("btc/btc", "BTC", "Bitcoin", "0.0005", false, false, "btc"),
 ];
+// The coins the product says are ready to pay: one with an address made, two without.
+const READY = ["base/usdc", "btc/btc", "trc20/usdt"].map((t) => COINS.find((c) => c.coin === t)!);
 const ADDRESS_A = `0x${"ab".repeat(20)}`;
+/** The address the stand-in makes for a coin. */
+const addrFor = (c: string): string => `Made${c.replace(/[^a-z0-9]/gi, "")}`.padEnd(30, "x");
 const ADDRESS_T = `T${"Q".repeat(33)}`;
 const address = (c: string, a: string, over: Json = {}): Json => {
   const found = COINS.find((x) => x.coin === c)!;
@@ -36,7 +40,7 @@ const address = (c: string, a: string, over: Json = {}): Json => {
 };
 const full = (name: string, visibility: string, over: Json = {}): Json => ({
   space: name, visibility, billing: "not_started", deposits_open: true,
-  addresses: [address("base/usdc", ADDRESS_A)], coins: COINS, minimums_as_of: "2026-10-08",
+  addresses: [address("base/usdc", ADDRESS_A)], ready_coins: READY, coins: COINS, minimums_as_of: "2026-10-08",
   make_address: "POST /v1/spaces/{name}/funding/addresses with {\"coin\": …}",
   bytes: { posts: 2034000, files: 10400000, total: 12434000 }, allowance_bytes: 25000000, over_bytes: 0,
   rate: { micro_usd_per_gb_month: 5000000, days_per_month: 30, bytes_per_gb: 1000000000 },
@@ -55,7 +59,7 @@ const full = (name: string, visibility: string, over: Json = {}): Json => ({
 });
 const addressesOnly = (name: string, visibility: string, over: Json = {}): Json => ({
   space: name, visibility, billing: "not_started", deposits_open: true,
-  addresses: [address("base/usdc", ADDRESS_A)], coins: COINS, minimums_as_of: "2026-10-08",
+  addresses: [address("base/usdc", ADDRESS_A)], ready_coins: READY, coins: COINS, minimums_as_of: "2026-10-08",
   make_address: "POST /v1/spaces/{name}/funding/addresses with {\"coin\": …}",
   members_only: ["bytes", "balance", "deposits", "history"], notice: "Billing has not started.", ...over,
 });
@@ -68,7 +72,7 @@ const entries = (from: number, to: number): Json[] => Array.from({ length: from 
   };
 });
 
-const names = ["fund-pub", "fund-none", "fund-closed", "fund-old", "fund-bad", "fund-priv", "fund-sealed", "fund-mine", "fund-held", "fund-count", "fund-denied", "fund-repl", "fund-nullfwd"];
+const names = ["fund-pub", "fund-none", "fund-closed", "fund-old", "fund-bad", "fund-priv", "fund-sealed", "fund-mine", "fund-held", "fund-count", "fund-denied", "fund-repl", "fund-nullfwd", "fund-fail", "fund-slow", "fund-shut"];
 const shape: Record<string, Json> = {
   "fund-priv": { visibility: "private" },
   "fund-sealed": { visibility: "sealed" },
@@ -93,6 +97,9 @@ const world: World = {
     "fund-denied": addressesOnly("fund-denied", "private"),
     "fund-repl": full("fund-repl", "public", { credited_to: { space_id: "0199a0a0-0000-7000-8000-000000000002", name: "fund-next" } }),
     "fund-nullfwd": full("fund-nullfwd", "public"),
+    "fund-fail": full("fund-fail", "public", { addresses: [] }),
+    "fund-slow": full("fund-slow", "public", { addresses: [] }),
+    "fund-shut": full("fund-shut", "public", { addresses: [] }),
   },
   proofs: {}, checkpoints: {}, peers: {},
 };
@@ -116,29 +123,33 @@ const { fake, handleRequest } = await site((call: Call) => {
     (e[0]!.deposit as Json).value_forwarded_coin = null;
     return json({ space: "fund-nullfwd", entries: e, has_more: false, next_before: null });
   }
-  if (/^\/v1\/spaces\/(fund-pub|fund-mine|fund-closed|fund-repl|fund-none)\/funding\/history$/.test(p)) {
+  if (/^\/v1\/spaces\/(fund-pub|fund-mine|fund-closed|fund-repl|fund-none|fund-fail|fund-slow|fund-shut)\/funding\/history$/.test(p)) {
     const before = Number(call.url.searchParams.get("before") ?? "1000");
     const page = entries(Math.min(before - 1, 120), Math.max(Math.min(before - 1, 120) - 49, 1));
     const last = Number(page.at(-1)!.entry_id);
     return json({ space: p.split("/")[3], entries: page, has_more: last > 1, next_before: last > 1 ? String(last) : null });
   }
   if (p === "/v1/spaces/fund-count/funding/history") return refusal(500, "INTERNAL", "unwell");
-  if (call.method === "POST" && p === "/v1/spaces/fund-mine/funding/addresses") {
+  const made = p.match(/^\/v1\/spaces\/(fund-[a-z]+)\/funding\/addresses$/);
+  if (call.method === "POST" && made) {
     const body = JSON.parse(call.body ?? "{}") as { coin: string };
     posted.push({ path: p, body, auth: call.headers.get("authorization") });
     if (body.coin === "nope/coin") return refusal(400, "COIN_NOT_OFFERED", "not offered");
-    if (body.coin === "closed/x") return refusal(503, "FUNDING_UNAVAILABLE", "closed");
+    if (body.coin === "closed/x" || made[1] === "fund-fail") return refusal(503, "FUNDING_UNAVAILABLE", "closed");
+    if (made[1] === "fund-shut") return refusal(409, "SPACE_CLOSED", "closed");
     if (body.coin === "fast/x") {
       const r = refusal(429, "RATE_LIMITED", "slow down");
       r.headers.set("Retry-After", "42");
       return r;
     }
-    return json({ space: "fund-mine", created: true, address: address(body.coin, ADDRESS_A), minimums_as_of: "2026-10-08", notice: "Send only this coin on this network." }, 201);
+    // The product does not answer at all.
+    if (made[1] === "fund-slow") throw new Error("the service is not reached");
+    return json({ space: made[1]!, created: true, address: address(body.coin, addrFor(body.coin)), minimums_as_of: "2026-10-08", notice: "Send only this coin on this network." }, 201);
   }
   return base(call);
 });
 const { cookie, csrf } = await signedIn(ME, "funding-token", "192.0.2.77");
-const { fundingSection, readFunding, readHistory, statements, money } = await import("../src/funding-section.ts");
+const { fundingSection, readFunding, readHistory, statements, statementParts, money } = await import("../src/funding-section.ts");
 const { networksOf } = await import("../src/funding-render.ts");
 
 async function get(path: string, headers: Record<string, string> = {}) {
@@ -271,7 +282,7 @@ describe("the funding section on a space's page", () => {
     assert.match(html, /<p>Balance: \$12\.50\. 1 deposit incoming, not yet credited\. 1 deposit held, not credited\.<\/p>/);
     assert.ok(html.includes(`<li>USDC on Base: <code>${ADDRESS_A}</code>, minimum 3 USDC</li>`));
     assert.ok(html.includes(`<li>USDT on Tron: <code>${ADDRESS_T}</code>, minimum 5 USDT <span class="meta">(older wallet, still credited)</span></li>`));
-    assert.match(html, /<a href="\/spaces\/fund-pub\/funding">Make a deposit address or see every coin<\/a>/);
+    assert.match(html, /<a href="\/spaces\/fund-pub\/funding">Send credit to this space<\/a>/);
     assert.deepEqual(htmlProblems(html), []);
 
     const md = (await get("/spaces/fund-pub.md")).text;
@@ -289,12 +300,14 @@ describe("the funding section on a space's page", () => {
     assert.equal(j.funding.page, "/spaces/fund-pub/funding");
   });
 
-  test("a space with no address made says so, and deposits closed say that", async () => {
-    assert.match((await get("/spaces/fund-none")).text, /<p>No deposit address has been made yet\.<\/p>/);
+  test("a space with no address made points to the funding page, and deposits closed say that", async () => {
+    const none = (await get("/spaces/fund-none")).text;
+    assert.doesNotMatch(none, /No deposit address has been made yet/);
+    assert.match(none, /<a href="\/spaces\/fund-none\/funding">Send credit to this space<\/a>/);
     const closed = (await get("/spaces/fund-closed")).text;
     assert.match(closed, /<p>Deposits are not open on this server\.<\/p>/);
     assert.match(closed, /See the funding page/);
-    assert.doesNotMatch(closed, /Make a deposit address/);
+    assert.doesNotMatch(closed, /Send credit to this space/);
   });
 
   test("a malformed answer leaves the section out and the page renders", async () => {
@@ -331,21 +344,27 @@ describe("the funding section on a space's page", () => {
 describe("the statements every funding page makes", () => {
   const PUBLIC = statements("2026-10-08", false);
   const PRIVATE = statements("2026-10-08", true);
+  const { pay: PAY, more: MORE } = statementParts("2026-10-08", false);
 
   test("the list is held: each statement of the build, in its words", () => {
-    assert.equal(PUBLIC.length, 9);
-    assert.equal(PRIVATE.length, 10);
-    assert.deepEqual(PRIVATE.slice(0, 9), PUBLIC);
-    assert.match(PUBLIC[0]!, /^Anyone can add credit to this space by sending a coin to one of its deposit addresses\. Making an address needs a key\.$/);
-    assert.match(PUBLIC[1]!, /^Deposits are visible on a public blockchain: anyone can see the address, the amount and the transaction\.$/);
-    assert.match(PUBLIC[2]!, /^Each address belongs to one coin on one network\. A coin sent to it on any other network is not credited, even when this space has an address on that network\./);
-    assert.match(PUBLIC[3]!, /^A deposit below the minimum shown is not credited\. The minimums and the cheap marks are CryptAPI's on 2026-10-08 and can change\.$/);
-    assert.match(PUBLIC[4]!, /^A token not in this list is not credited, even on the right network\.$/);
-    assert.match(PUBLIC[5]!, /USDT, USDC, USDC\.e, USDT0, DAI and PYUSD count one for one/);
-    assert.match(PUBLIC[6]!, /^A deposit shows as incoming until it is confirmed, and is credited only then\./);
-    assert.ok(PUBLIC.includes("Credit belongs to this space. It is not refundable and cannot move to another space."));
+    assert.equal(PUBLIC.length, 11);
+    assert.equal(PRIVATE.length, 12);
+    assert.deepEqual(PRIVATE.slice(0, 11), PUBLIC);
+    assert.deepEqual(PUBLIC, [...PAY, ...MORE]);
+    // What is read under the addresses is four lines, and none says a key is needed.
+    assert.equal(PAY.length, 4);
+    assert.match(PAY[0]!, /^Send only the coin shown, on the network shown\. Another network, or a token not listed, is not credited\.$/);
+    assert.match(PAY[1]!, /^A deposit below the minimum shown is not credited\.$/);
+    assert.match(PAY[2]!, /^Credit is counted in US dollars once the deposit is confirmed, after CryptAPI's fee and the network's fee\. USDT, USDC, USDC\.e, USDT0, DAI and PYUSD count one for one\./);
+    assert.equal(PAY[3], "Credit belongs to this space. It is not refundable and cannot move to another space.");
+    assert.match(MORE[0]!, /^Anyone can add credit to this space by sending a coin to one of its deposit addresses\. No key is needed\.$/);
+    assert.match(MORE[1]!, /^Deposits are visible on a public blockchain: anyone can see the address, the amount and the transaction\.$/);
+    assert.match(MORE[2]!, /^Each address belongs to one coin on one network\. A coin sent to it on any other network is not credited, even when this space has an address on that network\./);
+    assert.match(MORE[3]!, /^The minimums and the cheap marks are CryptAPI's on 2026-10-08 and can change\.$/);
+    assert.match(MORE[5]!, /^A deposit shows as incoming until it is confirmed, and is credited only then\./);
     assert.ok(PUBLIC.includes("Billing has not started: nothing is taken from the balance."));
-    assert.match(PRIVATE[9]!, /^The balance and deposits are shown to members only\. The deposit addresses are public, and deposits to them are visible on a public blockchain\.$/);
+    assert.match(PRIVATE[11]!, /^The balance and deposits are shown to members only\. The deposit addresses are public, and deposits to them are visible on a public blockchain\.$/);
+    assert.ok(!PUBLIC.some((x) => /needs a key/.test(x)));
   });
 
   const every = async (path: string, list: string[], fetcher = get) => {
@@ -362,6 +381,17 @@ describe("the statements every funding page makes", () => {
     assert.deepEqual(JSON.parse((await get("/spaces/fund-pub/funding.json")).text).statements, PUBLIC);
   });
 
+  test("the rules under the addresses are the four lines, and the rest comes lower on the page", async () => {
+    const html = (await get("/spaces/fund-pub/funding")).text;
+    const send = html.indexOf('<h2 id="send">'), more = html.indexOf('<h2 id="more">'), coins = html.indexOf('<h2 id="coins">'), balance = html.indexOf('<h2 id="balance">');
+    assert.ok(send > 0 && send < balance && balance < more && more < coins, "send, balance, more, other coins");
+    const from = html.lastIndexOf("</div>", balance);
+    const under = html.slice(from, html.indexOf("</ul>", from));
+    assert.equal((under.match(/<li>/g) ?? []).length, 4, "four lines directly under the addresses");
+    for (const s of PAY) assert.ok(under.replaceAll("&#39;", "'").includes(s), s);
+    assert.doesNotMatch(under, /public blockchain|held for review|Billing/);
+  });
+
   test("a private space's page adds the members-only line, and a sealed space's too", async () => {
     await every("/spaces/fund-priv/funding", PRIVATE);
     await every("/spaces/fund-sealed/funding", PRIVATE);
@@ -373,40 +403,95 @@ describe("the statements every funding page makes", () => {
     assert.match(t, /Deposits are not open on this server\./);
     assert.match(t, /Billing has not started: nothing is taken from the balance\./);
     assert.match(t, /It is not refundable and cannot move to another space\./);
-    assert.doesNotMatch(t, /Anyone can add credit/);
-    assert.doesNotMatch(t, /Get the address|Make a deposit address with your key/);
+    assert.doesNotMatch(t, /Anyone can add credit|Send to this space|Show address/);
   });
 });
 
 describe("the funding page", () => {
-  test("the public page lists the addresses, every coin by network, the balance, the deposits and the history", async () => {
+  test("the public page leads with the ready coins, then the balance, the deposits and the history, and ends with the other coins", async () => {
     const r = await get("/spaces/fund-pub/funding");
     assert.equal(r.status, 200);
     assert.equal(r.headers.get("x-robots-tag"), "noindex, follow");
     const t = r.text;
-    assert.ok(t.includes(`<code>${ADDRESS_A}</code>`));
+    assert.match(t, /<h2 id="send">Send to this space<\/h2>/);
+    // The three ready coins, each with coin, network, minimum and a copyable address.
+    assert.match(t, /<div class="pay" id="coin-base-usdc">\s*<h3>USDC on Base<\/h3>\s*<p class="meta">Minimum 3 USDC\. Counted one for one\.<\/p>\s*<code class="address">0xabab/);
+    assert.match(t, new RegExp(`<div class="pay" id="coin-btc-btc">\\s*<h3>BTC on Bitcoin</h3>\\s*<p class="meta">Minimum 0\\.0005 BTC\\.</p>\\s*<code class="address">${addrFor("btc/btc")}</code>`));
+    assert.ok(t.includes(`<code class="address">${addrFor("trc20/usdt")}</code>`));
     assert.match(t, /Balance: \$12\.50\. 2 deposits credited\./);
     assert.match(t, /Incoming, not yet credited \(1\)/);
     assert.match(t, /Held, not credited \(1\)/);
     assert.match(t, /<h2 id="history">Credit history<\/h2>/);
-    assert.match(t, /<th scope="row">USDC<\/th><td>3<\/td><td>cheap network, one for one<\/td>/);
-    assert.match(t, /<th scope="row">BTC<\/th><td>0\.0005<\/td><td><\/td>/);
-    assert.match(t, /Minimums as of 2026-10-08/);
+    // The ready coins are not listed again below; the rest are, with a button and no address yet.
+    const other = t.slice(t.indexOf('<h2 id="coins">'));
+    assert.doesNotMatch(other, /id="coin-base-usdc"|id="coin-btc-btc"|id="coin-trc20-usdt"/);
+    assert.match(other, /<tr id="coin-base-eth"><th scope="row">ETH<\/th><td>0\.0003<\/td><td>cheap network<\/td><td><form method="post" action="\/spaces\/fund-pub\/funding" class="inline"><input type="hidden" name="coin" value="base\/eth"><button type="submit">Show address<\/button><\/form><\/td><\/tr>/);
+    assert.match(other, /<tr id="coin-erc20-usdc"><th scope="row">USDC<\/th><td>10<\/td><td>one for one<\/td>/);
+    assert.match(other, /Minimums as of 2026-10-08/);
+    // The address made earlier under a wallet no longer current is kept in view, marked.
+    assert.ok(other.includes(`USDT on Tron: <code>${ADDRESS_T}</code>, minimum 5 USDT <span class="meta">(older wallet, still credited)</span>`));
     assert.deepEqual(htmlProblems(t), []);
+    assert.ok(t.indexOf('id="send"') < t.indexOf('id="balance"') && t.indexOf('id="history"') < t.indexOf('id="coins"'));
   });
 
-  test("the public page carries the twin link, never a form, and never reads the session", async () => {
+  test("a ready coin with no address is asked for with no key, all at once, and an address already made is not asked for", async () => {
+    const before = posted.length;
+    await get("/spaces/fund-pub/funding?before=3");
+    const made = posted.slice(before);
+    assert.deepEqual(made.map((p) => (p.body as { coin: string }).coin).sort(), ["btc/btc", "trc20/usdt"]);
+    assert.ok(made.every((p) => p.auth === null), "no Authorization header, not the site's key");
+    assert.ok(made.every((p) => p.path === "/v1/spaces/fund-pub/funding/addresses"));
+  });
+
+  test("the page needs no key and no sign-in: no twin link, no connect prompt, and it never reads the session", async () => {
     const t = (await get("/spaces/fund-pub/funding", { Cookie: cookie })).text;
-    assert.match(t, /<a href="\/me\/spaces\/fund-pub\/funding" rel="nofollow">Make a deposit address with your key<\/a>/);
-    assert.doesNotMatch(t, /<form method="post"/);
+    assert.doesNotMatch(t, /with your key|rel="nofollow"/);
+    assert.doesNotMatch(t, /Making an address needs a key|Make a deposit address with your key/);
+    assert.doesNotMatch(t, /name="csrf"/);
     assert.doesNotMatch(t, /Connected as key/);
+    assert.match(t, /No key or sign-in is needed\./);
   });
 
-  test("a reader who sees only the addresses gets no balance, deposits or history", async () => {
+  test("a coin whose address cannot be made says so and the page still draws; the page is held only a few seconds", async () => {
+    for (const name of ["fund-fail", "fund-slow"]) {
+      const r = await get(`/spaces/${name}/funding`);
+      assert.equal(r.status, 200, name);
+      assert.equal((r.text.match(/Not available right now\. Reload this page later\./g) ?? []).length, 3, name);
+      assert.match(r.text, /<h2 id="coins">Other coins<\/h2>/, name);
+      assert.match(r.text, /Balance: \$12\.50/, name);
+      assert.deepEqual(htmlProblems(r.text), [], name);
+    }
+    const md = (await get("/spaces/fund-fail/funding.md")).text;
+    assert.match(md, /- `USDC on Base`, minimum `3`, one for one: Not available right now\. Reload this page later\./);
+    const j = JSON.parse((await get("/spaces/fund-fail/funding.json")).text);
+    assert.equal(j.ready.length, 3);
+    assert.equal(j.ready[0].address, null);
+    assert.equal(j.ready[0].not_available, "Not available right now. Reload this page later.");
+  });
+
+  test("a closed space says it takes no new addresses, not that the service is unwell", async () => {
+    const t = (await get("/spaces/fund-shut/funding")).text;
+    assert.equal((t.match(/This space no longer takes new deposit addresses\./g) ?? []).length, 3);
+    assert.doesNotMatch(t, /Not available right now/);
+  });
+
+  test("an address made while the page was drawn is the same in the markdown and the JSON", async () => {
+    const md = (await get("/spaces/fund-pub/funding.md")).text;
+    assert.ok(md.includes(`- \`BTC on Bitcoin\`, minimum \`0.0005\`: \`${addrFor("btc/btc")}\``));
+    assert.match(md, /Ask for an address: POST https:\/\/api\.schellingaf\.com\/v1\/spaces\/fund-pub\/funding\/addresses with \{"coin": "<ticker>"\} \(no key needed\)/);
+    const j = JSON.parse((await get("/spaces/fund-pub/funding.json")).text);
+    assert.deepEqual(j.ready.map((c: { coin: string }) => c.coin), ["base/usdc", "btc/btc", "trc20/usdt"]);
+    assert.equal(j.ready[1].address, addrFor("btc/btc"));
+    assert.match(j.make_address, /no key needed/);
+  });
+
+  test("a reader who sees only the addresses gets no balance, deposits or history, and still gets the ready coins", async () => {
     const t = (await get("/spaces/fund-priv/funding")).text;
     assert.match(t, /This space(&#39;|')s balance and deposits are shown to its members only\./);
     assert.doesNotMatch(t, /Balance and deposits|Credit history|Storage:/);
-    assert.ok(t.includes(`<code>${ADDRESS_A}</code>`));
+    assert.ok(t.includes(`<code class="address">${ADDRESS_A}</code>`));
+    assert.ok(t.includes(`<code class="address">${addrFor("btc/btc")}</code>`));
+    assert.doesNotMatch(t, /name="csrf"/);
   });
 
   test("the history pages by ?before= and says when it could not be read", async () => {
@@ -424,7 +509,7 @@ describe("the funding page", () => {
     assert.equal((await get("/spaces/fund-bad/funding")).status, 503);
     const t = (await get("/spaces/fund-pub/funding?before=abc&coin=x")).text;
     assert.match(t, /0xtx120/, "a junk cursor reads the newest page");
-    assert.doesNotMatch(t, /Your address/, "a coin is only taken on the signed-in page");
+    assert.doesNotMatch(t, /Your address/);
   });
 
   test("the markdown and JSON carry the coins by network", async () => {
@@ -452,9 +537,10 @@ describe("fixes of round 2", () => {
     await signed("/me/spaces/fund-mine/funding");
     const reads = fake.calls.slice(before).filter((c) => c.url.pathname.endsWith("/funding") && c.method === "GET" && c.url.pathname.startsWith("/v1/spaces/fund-"));
     assert.equal(reads.length, 3);
+    assert.deepEqual(reads.map((c) => c.url.searchParams.get("coin")), [null, null, null]);
     assert.deepEqual(reads.map((c) => c.url.searchParams.get("coins")), [null, "true", "true"]);
-    assert.match((await get("/spaces/fund-none/funding?x=1")).text, /<h2 id="coins">Every coin<\/h2>/);
-    assert.match((await signed("/me/spaces/fund-mine/funding")).text, /<optgroup label="Base, cheap network">/);
+    assert.match((await get("/spaces/fund-none/funding?x=1")).text, /<h2 id="coins">Other coins<\/h2>/);
+    assert.match((await signed("/me/spaces/fund-mine/funding")).text, /<h2 id="coins">Other coins<\/h2>/);
   });
 
   test("the parser accepts an answer with or without coins, and not one with half", () => {
@@ -490,38 +576,114 @@ describe("fixes of round 2", () => {
   });
 });
 
-describe("the signed-in funding page and its picker", () => {
-  test("groups by network, cheap networks first and marked, with each coin's minimum", async () => {
+describe("Show address: the one public form", () => {
+  const FORM = { "Content-Type": "application/x-www-form-urlencoded" };
+  async function show(path: string, body: string, headers: Record<string, string> = { Origin: SITE }) {
+    const res = await handleRequest(new Request(`${SITE}${path}`, { method: "POST", headers: { ...FORM, ...headers }, body }), env);
+    return { res, text: await res.text() };
+  }
+
+  test("it makes the address with no key and no session, and goes back to the page at that coin", async () => {
+    const before = posted.length;
+    const reads = () => fake.calls.filter((c) => c.method === "GET" && c.url.pathname === "/v1/spaces/fund-pub/funding").length;
+    await get("/spaces/fund-pub/funding");
+    const read = reads();
+    const { res } = await show("/spaces/fund-pub/funding", "coin=base%2Feth");
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/spaces/fund-pub/funding#coin-base-eth");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.equal(posted.length, before + 1);
+    assert.deepEqual(posted.at(-1)!.body, { coin: "base/eth" });
+    assert.equal(posted.at(-1)!.auth, null);
+    // The page held for a minute is forgotten, so the next view reads the product again.
+    await get("/spaces/fund-pub/funding");
+    assert.equal(reads(), read + 1);
+  });
+
+  test("a cookie does not change it: the site's key and the person's are never sent", async () => {
+    const before = posted.length;
+    const { res } = await show("/spaces/fund-pub/funding", "coin=eth%2Feth", { Origin: SITE, Cookie: cookie });
+    assert.equal(res.status, 303);
+    assert.equal(posted.at(-1)!.auth, null);
+    assert.equal(posted.length, before + 1);
+  });
+
+  test("an Origin that is not this site, or none, changes nothing; a null Origin from this site's own page is accepted", async () => {
+    const before = posted.length;
+    assert.equal((await show("/spaces/fund-pub/funding", "coin=base%2Feth", { Origin: "https://evil.example" })).res.status, 403);
+    assert.equal((await show("/spaces/fund-pub/funding", "coin=base%2Feth", {})).res.status, 403);
+    assert.equal(posted.length, before);
+    assert.equal((await show("/spaces/fund-pub/funding", "coin=base%2Feth", { Origin: "null", "Sec-Fetch-Site": "same-origin" })).res.status, 303);
+  });
+
+  test("a junk coin changes nothing, and each refusal is shown in the form's own words", async () => {
+    const before = posted.length;
+    for (const body of ["coin=%3Cscript%3E", "coin=", "", "coin=" + "a".repeat(80)]) {
+      const r = await show("/spaces/fund-pub/funding", body);
+      assert.equal(r.res.status, 400, body);
+      assert.match(r.text, /Choose a coin from the list\. Nothing was made\./);
+    }
+    assert.equal(posted.length, before);
+    const notOffered = await show("/spaces/fund-pub/funding", "coin=nope%2Fcoin");
+    assert.equal(notOffered.res.status, 400);
+    assert.match(notOffered.text, /That coin is not one this space takes on this server\./);
+    const closed = await show("/spaces/fund-pub/funding", "coin=closed%2Fx");
+    assert.equal(closed.res.status, 503);
+    assert.match(closed.text, /Deposit addresses cannot be made just now/);
+    const slow = await show("/spaces/fund-pub/funding", "coin=fast%2Fx");
+    assert.equal(slow.res.status, 429);
+    assert.match(slow.text, /Wait 42 seconds and try again\. Nothing was made\./);
+    const shut = await show("/spaces/fund-shut/funding", "coin=base%2Feth");
+    assert.equal(shut.res.status, 409);
+    assert.match(shut.text, /This space no longer takes new deposit addresses\./);
+    for (const t of [notOffered.text, closed.text, slow.text, shut.text]) assert.deepEqual(htmlProblems(t), []);
+  });
+
+  test("no other public address takes a POST", async () => {
+    const before = posted.length;
+    for (const path of ["/spaces/fund-pub", "/spaces/fund-pub/funding.md", "/spaces/fund-pub/funding/x", "/spaces", "/spaces/fund-pub/1"]) {
+      const r = await show(path, "coin=base%2Feth");
+      assert.equal(r.res.status, 405, path);
+    }
+    assert.equal(posted.length, before);
+  });
+});
+
+describe("the signed-in funding page", () => {
+  test("a public space's page is the public one: a signed-in person is sent there", async () => {
+    const res = await handleRequest(new Request(`${SITE}/me/spaces/fund-pub/funding?before=71`, { headers: { Cookie: cookie } }), env);
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/spaces/fund-pub/funding?before=71");
+    const plain = await handleRequest(new Request(`${SITE}/me/spaces/fund-pub/funding`, { headers: { Cookie: cookie } }), env);
+    assert.equal(plain.headers.get("location"), "/spaces/fund-pub/funding");
+  });
+
+  test("a member of a private space sees the balance there, the ready coins, and a form with the form token for each other coin", async () => {
     assert.deepEqual(networksOf(COINS as never).map((n) => [n.name, n.cheap]), [["Base", true], ["Bitcoin", false], ["Ethereum", false], ["Tron", false]]);
+    const before = posted.length;
     const r = await signed("/me/spaces/fund-mine/funding");
     assert.equal(r.status, 200);
     const t = r.text;
-    assert.match(t, /<form method="post" action="\/me\/spaces\/fund-mine\/funding"/);
-    assert.ok(t.includes(`name="csrf" value="${csrf}"`));
-    assert.match(t, /<select name="coin" required>/);
-    assert.match(t, /<optgroup label="Base, cheap network"><option value="base\/eth">ETH, minimum 0\.0003<\/option><option value="base\/usdc">USDC, minimum 3<\/option><\/optgroup>/);
-    assert.match(t, /<optgroup label="Ethereum"><option value="eth\/eth">ETH, minimum 0\.005<\/option><option value="erc20\/usdc">USDC, minimum 10<\/option><\/optgroup>/);
-    assert.ok(t.indexOf('label="Base, cheap network"') < t.indexOf('label="Bitcoin"'));
-    assert.match(t, /<button type="submit">Get the address<\/button>/);
+    assert.match(t, /<h2 id="send">Send to this space<\/h2>/);
+    assert.match(t, /Balance: \$12\.50\./);
+    assert.match(t, new RegExp(`<form method="post" action="/me/spaces/fund-mine/funding" class="inline"><input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="coin" value="base/eth">`));
+    assert.doesNotMatch(t, /<select|Get the address|Your address/);
     assert.match(t, /Connected as key/);
     assert.equal(r.headers.get("x-robots-tag"), "noindex, nofollow");
     assert.deepEqual(htmlProblems(t), []);
+    // Its ready coins are made with no key, even for a signed-in reader.
+    const made = posted.slice(before);
+    assert.ok(made.length >= 2 && made.every((p) => p.auth === null));
   });
 
-  test("the POST asks the product with the person's key and goes to ?coin=", async () => {
+  test("its form asks the product with the person's key and goes back to the coin", async () => {
     const before = posted.length;
     const { res } = await post("/me/spaces/fund-mine/funding", { coin: "base/usdc" });
     assert.equal(res.status, 303);
-    assert.equal(res.headers.get("location"), "/me/spaces/fund-mine/funding?coin=base%2Fusdc");
+    assert.equal(res.headers.get("location"), "/me/spaces/fund-mine/funding#coin-base-usdc");
     assert.equal(posted.length, before + 1);
     assert.deepEqual(posted.at(-1)!.body, { coin: "base/usdc" });
     assert.equal(posted.at(-1)!.auth, "Bearer funding-token");
-  });
-
-  test("the address asked for is shown first, highlighted, with the statements above it", async () => {
-    const t = (await signed("/me/spaces/fund-mine/funding?coin=base%2Fusdc")).text;
-    assert.match(t, /<li class="note"><strong>Your address<\/strong>: USDC on Base: <code>/);
-    assert.ok(t.indexOf("Anyone can add credit") < t.indexOf("Your address"));
   });
 
   test("each refusal is shown in the form's own words, with its wait", async () => {

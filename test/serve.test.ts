@@ -328,6 +328,20 @@ describe("the server", () => {
     }
   });
 
+  test("a funding page takes one short form, with no session, and no other public address does", { timeout: 5000 }, async () => {
+    // Declared larger than the one coin it carries: refused before a byte is read.
+    const big = await send({ method: "POST", path: "/spaces/some-space/funding", headers: { "Content-Length": String(KIB + 1) }, withhold: true });
+    assert.equal(big.status, 413);
+    assert.equal(big.headers.connection, "close");
+    // Within the limit it reaches the handler, which wants an Origin from this site.
+    const noOrigin = await send({ method: "POST", path: "/spaces/some-space/funding", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "coin=btc" });
+    assert.equal(noOrigin.status, 403);
+    const own = await send({ method: "POST", path: "/spaces/some-space/funding", headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: origin }, body: "coin=%3C" });
+    assert.equal(own.status, 400);
+    const other = await send({ method: "POST", path: "/spaces/some-space/funding.md", headers: { "Content-Length": "100" }, withhold: true });
+    assert.equal(other.status, 405);
+  });
+
   test("hands a form within its limit to the handler", async () => {
     const r = await send({ method: "POST", path: "/me/new", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "csrf=x" });
     assert.equal(r.status, 303);

@@ -154,6 +154,8 @@ const { handleRequest } = await import("./src/index.ts");
 // The one test of which addresses take a POST, asked here as well as in the
 // handler, so a POST anywhere else is refused before a byte of it is read.
 const { isSignedInAddress, takesFiles } = await import("./src/me.ts");
+// The one public address that takes a POST besides: "Show address" on a funding page.
+const { isFundingForm, FUNDING_FORM_BYTES } = await import("./src/funding-form.ts");
 
 // An empty value is no value: `SITE_TOKEN=` in a file means "not configured".
 const setting = (name) => process.env[name] || undefined;
@@ -274,8 +276,8 @@ function refuse(res, status, text, extra = {}) {
 
 export const server = createServer(async (req, res) => {
   try {
-    // GET and HEAD everywhere, and POST for the signed-in pages, which the handler
-    // refuses on every other address before it reads anything. Nothing else.
+    // GET and HEAD everywhere, and POST for the signed-in pages and one funding form, which
+    // the handler refuses on every other address before it reads anything. Nothing else.
     if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") {
       return refuse(res, 405, "405 Method Not Allowed: addresses on this site are read with GET, and the signed-in pages take POST.\n",
         { Allow: "GET, HEAD, POST" });
@@ -297,11 +299,11 @@ export const server = createServer(async (req, res) => {
     // same connection would start inside it.
     let sent = null;
     if (req.method === "POST") {
-      if (!isSignedInAddress(url.pathname)) {
+      if (!isSignedInAddress(url.pathname) && !isFundingForm(url.pathname)) {
         return refuse(res, 405, "405 Method Not Allowed: this address is read with GET.\n", { Allow: "GET, HEAD", Connection: "close" });
       }
       const withFiles = takesFiles(url.pathname) && /^multipart\/form-data/i.test(String(req.headers["content-type"] ?? ""));
-      const limit = url.pathname.startsWith("/sign-in") ? SIGN_IN_BYTES : withFiles ? FILES_BODY_BYTES : BODY_BYTES;
+      const limit = isFundingForm(url.pathname) ? FUNDING_FORM_BYTES : url.pathname.startsWith("/sign-in") ? SIGN_IN_BYTES : withFiles ? FILES_BODY_BYTES : BODY_BYTES;
       const read = await readBody(req, limit);
       res.once("close", read.done);
       if (read.refused === "large") return refuse(res, 413, "413 Content Too Large\n", { Connection: "close" });
